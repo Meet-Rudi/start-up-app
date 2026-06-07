@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>MEET_RUDI — Demo</title>
+  <style>
+    :root { --bg: #0f1115; --card: #171a21; --fg: #e8eaed; --muted: #9aa0a6; --accent: #25d366; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    .card {
+      background: var(--card); padding: 2.5rem 3rem; border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.4); max-width: 560px; text-align: center;
+    }
+    h1 { margin: 0 0 .25rem; font-size: 2rem; }
+    .badge { color: var(--accent); font-weight: 600; letter-spacing: .04em; }
+    p { color: var(--muted); line-height: 1.6; }
+    .pill {
+      display: inline-block; margin-top: 1rem; padding: .4rem .9rem; border-radius: 999px;
+      background: rgba(37,211,102,.12); color: var(--accent); font-size: .85rem;
+    }
+    code { background: #0b0d11; padding: .15rem .4rem; border-radius: 6px; color: #cdd3da; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge">MEET_RUDI</div>
+    <h1>Front-end demo</h1>
+    <p>
+      This is the static demo surface served via GitHub Pages.
+      It contains <strong>no real user data</strong> and <strong>no credentials</strong> —
+      it is a public mock for previewing the front-end.
+    </p>
+    <p>Edit <code>site/index.html</code> and push to <code>main</code> to update this page.</p>
+    <div class="pill">● Pages pipeline is live</div>
+  </main>
+</body>
+</html>
