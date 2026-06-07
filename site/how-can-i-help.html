@@ -153,7 +153,7 @@
     .cta:active { transform: translateY(0); }
     .cta:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
 
-    /* Reply placeholder (until the bot is wired up) */
+    /* Rudi's answer panel */
     .reply {
       margin-top: 1.25rem;
       text-align: left;
@@ -167,6 +167,21 @@
       display: none;
     }
     .reply.show { display: block; }
+    .reply :first-child { margin-top: 0; }
+    .reply :last-child { margin-bottom: 0; }
+    .reply h1, .reply h2, .reply h3 { color: var(--navy); line-height: 1.25; margin: .8rem 0 .4rem; }
+    .reply h1 { font-size: 1.25rem; }
+    .reply h2 { font-size: 1.12rem; }
+    .reply h3 { font-size: 1.02rem; }
+    .reply p { margin: .5rem 0; }
+    .reply ul, .reply ol { margin: .5rem 0; padding-left: 1.3rem; }
+    .reply li { margin: .2rem 0; }
+    .reply a { color: var(--magenta); font-weight: 600; }
+    .reply code { background: #eef0f3; padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
+    .reply strong { color: var(--navy); }
+    .typing { color: var(--blue); font-style: italic; }
+
+    .cta:disabled { opacity: .6; cursor: default; box-shadow: none; transform: none; }
 
     .disclaimer {
       margin-top: 1.75rem;
@@ -206,23 +221,82 @@
     </p>
   </main>
 
+  <!-- Markdown render (marked) + HTML sanitize (DOMPurify) for safe display of Rudi's reply -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>
-    // Lightweight placeholder behaviour. The conversational "WhoAmI" brain is wired up
-    // in a later build step; for now this confirms the UI works end-to-end.
     (function () {
+      // --- meetrudi-ask-ai endpoint + S3 prompt/context (public, non-secret) ---
+      var ASK_AI_URL = "https://5de7o2qbtpipcuotjr2pmkzse40jbmpb.lambda-url.eu-central-1.on.aws/";
+      var PROMPT_FILE = "s3://meetrudi-ai-data-949753869755/prompts/howcanihelp_prompt.md";
+      var CONTEXT_FILE = "s3://meetrudi-ai-data-949753869755/contexts/rudi-context.md";
+
       var form = document.getElementById("ask-form");
       var input = document.getElementById("prompt-input");
       var reply = document.getElementById("reply");
+      var button = form.querySelector(".cta");
+
+      // Stable anonymous visitor id (nice-to-have, lets us tell visitors apart in logs).
+      var user;
+      try {
+        user = localStorage.getItem("rudi_visitor");
+        if (!user) {
+          user = "web_" + (window.crypto && crypto.randomUUID
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2));
+          localStorage.setItem("rudi_visitor", user);
+        }
+      } catch (e) { user = "web_anon"; }
+
+      function escapeHtml(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function renderMarkdown(md) {
+        var html = window.marked ? window.marked.parse(md) : escapeHtml(md).replace(/\n/g, "<br>");
+        return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+      }
+
+      function showReply(html) {
+        reply.classList.add("show");
+        reply.innerHTML = html;
+      }
+
+      function setBusy(busy) {
+        button.disabled = busy;
+        input.disabled = busy;
+        button.textContent = busy ? "Rudi is typing…" : "Ask Rudi";
+      }
 
       function send() {
         var text = input.value.trim();
         if (!text) { input.focus(); return; }
-        reply.classList.add("show");
-        reply.innerHTML =
-          "💬 Thanks for asking! My conversational brain is being connected right now — " +
-          "very soon I'll answer your questions about Meet Rudi right here.";
-        input.value = "";
-        input.focus();
+        setBusy(true);
+        showReply('<span class="typing">Rudi is thinking…</span>');
+
+        fetch(ASK_AI_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            user: user,
+            user_input: text,
+            prompt_file: PROMPT_FILE,
+            context_file: CONTEXT_FILE
+          })
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            showReply(renderMarkdown(data && data.reply ? data.reply : "…"));
+          })
+          .catch(function () {
+            showReply("Sorry — I couldn't reach Rudi just now. Please try again in a moment. 💬");
+          })
+          .then(function () {
+            setBusy(false);
+            input.focus();
+          });
       }
 
       form.addEventListener("submit", function (e) { e.preventDefault(); send(); });
