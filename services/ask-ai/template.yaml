@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI meetrudi-ask-ai — general skill that calls a cascade of external AI endpoints
+  (config in S3) and falls back to Groq. Exposed via a public Lambda Function URL.
+  Requires the meetrudi-base stack (shared role + data bucket).
+
+Resources:
+
+  AskAiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-ask-ai
+      RetentionInDays: 30
+
+  AskAiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: AskAiLogGroup
+    Properties:
+      FunctionName: meetrudi-ask-ai
+      Description: Cascade caller for external AI endpoints with Groq fallback.
+      Handler: app.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 30
+      MemorySize: 256
+      # Pre-created manually in the console (see infra/iam/). The deployer only references it.
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          QUESTIONS_LOG_KEY: external_questions/howcanihelp_questions.jsonl
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_SECRET: meetrudi-groq-firstkey
+          ALLOW_ORIGIN: https://meet-rudi.github.io
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - https://meet-rudi.github.io
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - content-type
+
+Outputs:
+  FunctionUrl:
+    Description: Public Function URL for meetrudi-ask-ai
+    Value: !GetAtt AskAiFunctionUrl.FunctionUrl
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref AskAiFunction

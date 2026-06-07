@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MEET_RUDI base stack — shared S3 data bucket used by all meetrudi Lambdas.
+  NOTE: IAM roles are NOT created here. The deployer user is not permitted to create IAM
+  objects; the meetrudi-lambda-runner role is created manually in the console
+  (see infra/iam/). Deploy once before any service stack.
+
+Resources:
+
+  # Shared data bucket: AI endpoint config, prompt/context files, and the questions log.
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "meetrudi-ai-data-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+  DataBucketName:
+    Description: Shared S3 data bucket name
+    Value: !Ref DataBucket
+    Export:
+      Name: meetrudi-DataBucketName

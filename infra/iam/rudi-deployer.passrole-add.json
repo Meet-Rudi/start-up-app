@@ -1,0 +1,12 @@
+{
+  "Comment": "ADD this statement to the existing RudiDeployPolicy (attached to user rudi-deployer), OR attach it as a new inline policy on that user. It lets SAM/CloudFormation attach the pre-created meetrudi-lambda-runner role to the Lambda. Without iam:PassRole, deploying meetrudi-ask-ai fails with AccessDenied.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PassMeetrudiLambdaRunner",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::949753869755:role/meetrudi-lambda-runner"
+    }
+  ]
+}

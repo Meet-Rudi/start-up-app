@@ -20,6 +20,12 @@
 
 ---
 
+## 0a. Naming convention (mandatory)
+
+All AWS resources we create — **Lambdas, queues, IAM roles, and related infra** — use the
+**`meetrudi-`** prefix (e.g. `meetrudi-ask-ai`, `meetrudi-lambda-runner`). SSM/Secrets keys use
+the `meetrudi/` path prefix. S3 data bucket: `meetrudi-ai-data-<account-id>`.
+
 ## 1. Languages, Repo & Layout
 
 - **Python** = AI / messaging / orchestration core. **TypeScript/JS** = front-end & ops UI.
@@ -125,6 +131,28 @@ Before any outbound generated message is sent:
   tolerate 10–15s.
 - Every resource: **EU region, tagged** (env, service, cost-center), least-privilege IAM.
 
+### IAM is console-only (mandatory)
+- The `rudi-deployer` user **cannot create IAM roles/policies.** **Never** put `AWS::IAM::*`
+  resources in SAM/CFN templates. Instead, hand the user **role/policy JSON files** (store them
+  in `infra/iam/`) to create in the AWS Console, and have templates **reference** the role by
+  ARN (`!Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-..."`).
+- Lambdas that use a pre-created role require the deployer to have `iam:PassRole` on it — supply
+  that as a console policy addition too.
+
+### Deployment workflow (mandatory)
+- **One-command deploys.** A Python wrapper (`deploy.py`) prepares and ships a component: the
+  user runs **`python deploy.py <component-name>`** and nothing else. The script runs
+  `sam build` + `sam deploy` with **all** flags pre-filled (stack name, `--region eu-central-1`,
+  `--profile rudi-deployer`, `--capabilities CAPABILITY_IAM`, `--resolve-s3`,
+  `--no-confirm-changeset`). Never hand the user a manual multi-step deploy sequence to run.
+- **Always give complete commands.** Every command provided must include **all** parameters,
+  file/object names, and config values. Never leave the user to assemble, guess, or fill in
+  arguments themselves.
+- **CMD line continuation = `^`.** The user runs commands in Windows `cmd.exe`. Multi-line
+  commands must use `^` (not `\`); avoid PowerShell-only syntax unless explicitly asked.
+- **On any change needing redeploy** (Lambda/Fargate code or infra altered), output the
+  **full, copy-paste-ready deployment command sequence** at the end of the work.
+
 ---
 
 ## 8. Testing & Evals
@@ -156,3 +184,6 @@ Before any outbound generated message is sent:
   dependency or service is needed, flag EU-residency + DPA implications first.
 - When product intent is unclear, ask — don't assume. Keep the Decisions Log in project.md
   current as choices are made.
+- **Hands-off deploys & complete commands:** honor the Deployment workflow rules in §7 —
+  one-command `python deploy.py <name>` deploys, fully-parameterized commands, `^` for CMD
+  line breaks, and a full deployment command sequence printed whenever a redeploy is needed.

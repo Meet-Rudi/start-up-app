@@ -1,0 +1,21 @@
+{
+  "_comment": "Ordered cascade of external AI endpoints for meetrudi-ask-ai. The Lambda tries each enabled endpoint in order; the first that answers wins. Groq is ALWAYS appended as the final fallback in code, so it need not be listed here. 'secret' is the AWS Secrets Manager id (meetrudi/...). 'kind' selects the call method in providers.py.",
+  "endpoints": [
+    {
+      "name": "mistral-small",
+      "kind": "openai_compatible",
+      "endpoint": "https://api.mistral.ai/v1/chat/completions",
+      "model": "mistral-small-latest",
+      "secret": "meetrudi/ai/mistral",
+      "enabled": false
+    },
+    {
+      "name": "groq-llama-3.3-70b",
+      "kind": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "llama-3.3-70b-versatile",
+      "secret": "meetrudi-groq-firstkey",
+      "enabled": true
+    }
+  ]
+}

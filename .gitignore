@@ -1,0 +1,33 @@
+# --- AWS SAM build/deploy artifacts ---
+.aws-sam/
+samconfig.toml
+
+# --- Secrets / credentials (NEVER commit) ---
+*.env
+.env*
+*.pem
+*.key
+credentials.csv
+*accessKeys*.csv
+.aws/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / front-end ---
+node_modules/
+dist/
+build/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
