@@ -1,0 +1,31 @@
+/* =====================================================================
+   MEET_RUDI — Brand tokens (canonical)
+   Source of truth, extracted from https://www.meetrudi.eu/en (2026-06).
+   Import this in any page to inherit the brand. Font: Nunito (Google).
+   ===================================================================== */
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap");
+
+:root {
+  /* ---- Core brand palette (hex + source HSL) ---- */
+  --rudi-navy:        #263d7d; /* hsl(224 53% 32%) — brand-primary, headings, text, logo fill */
+  --rudi-navy-deep:   #121621; /* hsl(224 30% 10%) — dark background */
+  --rudi-blue:        #3b75a5; /* hsl(207 47% 44%) — secondary / links */
+  --rudi-magenta:     #e925c9; /* hsl(310 82% 53%) — CTA / accent (primary action) */
+  --rudi-cyan:        #00e5e5; /* hsl(180 100% ~45%) — interactive accent / highlights */
+
+  /* ---- Surfaces & text ---- */
+  --rudi-bg:          #f0f0f0; /* hsl(0 0% 94%)  — page background (light) */
+  --rudi-surface:     #ffffff; /* card / panel */
+  --rudi-fg:          #263d7d; /* body text = navy */
+  --rudi-muted:       #9da2af; /* hsl(224 10% 65%) — muted/secondary text */
+  --rudi-border:      #d9d9d9; /* hsl(0 0% 85%) — borders/inputs */
+
+  /* ---- Shape & type ---- */
+  --rudi-font: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --rudi-radius: 0.75rem;       /* base radius from the source theme */
+  --rudi-radius-lg: 1.5rem;     /* cards / large surfaces */
+  --rudi-radius-pill: 999px;    /* buttons / pills */
+
+  /* ---- Brand gradient (magenta -> cyan, as in the twin-bubble logo) ---- */
+  --rudi-gradient: linear-gradient(135deg, var(--rudi-magenta), var(--rudi-cyan));
+}

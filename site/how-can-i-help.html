@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Meet Rudi — How can I help?</title>
+  <link rel="icon" href="favicon.ico" />
+  <meta name="description" content="Ask Rudi anything about its mission and goals." />
+
+  <!-- Brand font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ---- MEET_RUDI brand tokens (see /visuals/brand.css) ---- */
+    :root {
+      --navy: #263d7d;
+      --navy-deep: #121621;
+      --blue: #3b75a5;
+      --magenta: #e925c9;
+      --cyan: #00e5e5;
+      --bg: #f0f0f0;
+      --surface: #ffffff;
+      --muted: #6b7280;
+      --border: #e2e3e8;
+      --font: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --radius: 0.75rem;
+      --radius-lg: 1.75rem;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--navy);
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      padding: 2rem 1.25rem;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Decorative blurred brand glows (magenta + cyan), echoing the twin-bubble logo */
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      width: 42vmax; height: 42vmax;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: .22;
+      z-index: 0;
+      pointer-events: none;
+    }
+    body::before { background: var(--magenta); top: -14vmax; left: -12vmax; }
+    body::after  { background: var(--cyan);    bottom: -16vmax; right: -12vmax; }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      width: min(720px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 24px 60px rgba(38, 61, 125, .12);
+      padding: clamp(1.75rem, 4vw, 3.25rem);
+      text-align: center;
+    }
+
+    .logo { width: clamp(76px, 12vw, 104px); height: auto; margin-bottom: 1.25rem; }
+
+    h1 {
+      margin: 0 0 1rem;
+      text-transform: uppercase;
+      font-weight: 800;
+      letter-spacing: .01em;
+      line-height: 1.08;
+      font-size: clamp(1.7rem, 4.6vw, 3rem);
+      color: var(--navy);
+    }
+    /* Make "Rudi" pop in the brand gradient */
+    h1 .accent {
+      background: linear-gradient(135deg, var(--magenta), var(--cyan));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .subtext {
+      margin: 0 auto 1.75rem;
+      max-width: 46ch;
+      color: var(--muted);
+      font-size: clamp(1rem, 2.2vw, 1.15rem);
+      line-height: 1.6;
+    }
+    .subtext strong { color: var(--blue); font-weight: 700; }
+
+    /* ---- Prompt window ---- */
+    .prompt {
+      text-align: left;
+      background: #fafbfc;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: .85rem .95rem;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .prompt:focus-within {
+      border-color: var(--magenta);
+      box-shadow: 0 0 0 4px rgba(233, 37, 201, .12);
+    }
+    .prompt textarea {
+      width: 100%;
+      border: 0;
+      outline: none;
+      resize: vertical;
+      min-height: 96px;
+      background: transparent;
+      font-family: var(--font);
+      font-size: 1.05rem;
+      color: var(--navy);
+      line-height: 1.55;
+    }
+    .prompt textarea::placeholder { color: #aab0bc; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .hint { color: var(--muted); font-size: .85rem; }
+
+    .cta {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      font-family: var(--font);
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: #fff;
+      background: var(--magenta);
+      padding: .8rem 1.9rem;
+      border-radius: 999px;
+      box-shadow: 0 8px 20px rgba(233, 37, 201, .35);
+      transition: transform .12s ease, box-shadow .12s ease, background .15s ease;
+    }
+    .cta:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(233, 37, 201, .45); }
+    .cta:active { transform: translateY(0); }
+    .cta:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
+
+    /* Reply placeholder (until the bot is wired up) */
+    .reply {
+      margin-top: 1.25rem;
+      text-align: left;
+      background: rgba(0, 229, 229, .08);
+      border: 1px solid rgba(0, 229, 229, .35);
+      border-radius: var(--radius);
+      padding: .9rem 1.1rem;
+      color: var(--navy);
+      font-size: .98rem;
+      line-height: 1.55;
+      display: none;
+    }
+    .reply.show { display: block; }
+
+    .disclaimer {
+      margin-top: 1.75rem;
+      color: var(--muted);
+      font-size: .8rem;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="card">
+    <img class="logo" src="assets/rudi-logo.png" alt="Meet Rudi logo — two chat bubbles" />
+
+    <h1>Hey, I am <span class="accent">Rudi</span>.<br />Nice to meet you.<br />How can I help?</h1>
+
+    <p class="subtext">
+      Drop any <strong>question or request</strong> into the prompt window below — ask me
+      about my mission, my goals, or what I can do for you.
+    </p>
+
+    <form id="ask-form" autocomplete="off">
+      <div class="prompt">
+        <label for="prompt-input" class="sr-only" style="position:absolute;left:-9999px;">Your question for Rudi</label>
+        <textarea id="prompt-input" placeholder="Type your question or request to Rudi…"></textarea>
+      </div>
+      <div class="actions">
+        <span class="hint">Press <strong>Enter</strong> to send · <strong>Shift+Enter</strong> for a new line</span>
+        <button type="submit" class="cta">Ask Rudi</button>
+      </div>
+    </form>
+
+    <div id="reply" class="reply" role="status" aria-live="polite"></div>
+
+    <p class="disclaimer">
+      Rudi supports your prescribed lifestyle plan and does not provide medical advice.
+    </p>
+  </main>
+
+  <script>
+    // Lightweight placeholder behaviour. The conversational "WhoAmI" brain is wired up
+    // in a later build step; for now this confirms the UI works end-to-end.
+    (function () {
+      var form = document.getElementById("ask-form");
+      var input = document.getElementById("prompt-input");
+      var reply = document.getElementById("reply");
+
+      function send() {
+        var text = input.value.trim();
+        if (!text) { input.focus(); return; }
+        reply.classList.add("show");
+        reply.innerHTML =
+          "💬 Thanks for asking! My conversational brain is being connected right now — " +
+          "very soon I'll answer your questions about Meet Rudi right here.";
+        input.value = "";
+        input.focus();
+      }
+
+      form.addEventListener("submit", function (e) { e.preventDefault(); send(); });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+      });
+    })();
+  </script>
+</body>
+</html>
