@@ -16,6 +16,14 @@
       "model": "llama-3.3-70b-versatile",
       "secret": "meetrudi-groq-firstkey",
       "enabled": true
+    },
+    {
+      "name": "groq-llama-3.1-8b",
+      "kind": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "llama-3.1-8b-instant",
+      "secret": "meetrudi-groq-firstkey",
+      "enabled": true
     }
   ]
 }

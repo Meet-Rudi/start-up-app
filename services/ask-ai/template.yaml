@@ -32,7 +32,7 @@ Resources:
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           QUESTIONS_LOG_KEY: external_questions/howcanihelp_questions.jsonl
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
-          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_MODEL: llama-3.1-8b-instant
           GROQ_SECRET: meetrudi-groq-firstkey
           ALLOW_ORIGIN: https://meet-rudi.github.io
       FunctionUrlConfig:
