@@ -220,3 +220,12 @@ Layered, automated-first:
 - Neo-cloud vendor selection (EU region + DPA + GPU availability).
 - Heavy-user cost containment policy (caps? fair-use? tiering?).
 - Specification of the Phase-0 auxiliary side deliverables.
+- **Google for Startups Cloud credits** — explore via **Start it @KBC / imec.istart** (likely
+  Google partners → Scale/AI tier, ~$100k–$350k in credits). Eligibility: for-profit, young
+  (<10 yrs), ≤ ~Series A, new to the program; partner affiliation unlocks the larger tiers.
+  **Data residency is NOT set by the credits** — to stay GDPR-clean we must use **Google Cloud
+  EU regions** (e.g. `europe-west1`, St. Ghislain BE) + **Assured Workloads (EU Regions &
+  Support)** + org-policy location constraints, and **Vertex AI in an EU region** (the free
+  AI Studio Gemini endpoint is US-processed). Verify each model's EU-region availability.
+  Use credits as a **non-PII prototyping subsidy** (model eval, food-vision, batch); keep the
+  patient-data plane on the AWS EU + neo-cloud stack.
