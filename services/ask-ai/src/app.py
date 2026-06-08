@@ -29,7 +29,7 @@ import datetime
 
 import boto3
 
-from providers import ProviderRegistry, AIError
+from providers import ProviderRegistry, AIError, RateLimitError
 
 s3 = boto3.client("s3")
 registry = ProviderRegistry()
@@ -53,6 +53,10 @@ MAX_INPUT_CHARS = 4000
 FRIENDLY_ERROR = (
     "Sorry — I'm having a little trouble reaching my brain right now. "
     "Please try again in a moment. 💬"
+)
+TIRED_MESSAGE = (
+    "😴 I'm a little tired right now after all these questions — I need to rest for a bit. "
+    "Please come back in a few hours and I'll be happy to chat again!"
 )
 
 
@@ -182,14 +186,33 @@ def handler(event, context):
         reply = None
         used = None
         errors = []
+        attempts = 0
+        rate_limited = 0
         for ep in cascade:
+            attempts += 1
             try:
                 reply = registry.call(ep, messages)
                 used = ep.get("name")
                 break
+            except RateLimitError as e:
+                rate_limited += 1
+                errors.append("%s: %s" % (ep.get("name"), e))
+                continue
             except Exception as e:  # noqa: BLE001 - try next provider
                 errors.append("%s: %s" % (ep.get("name"), e))
                 continue
+
+        # Whole cascade depleted by quota/rate limits -> heal with a warm "resting" message.
+        if reply is None and attempts > 0 and rate_limited == attempts:
+            _append_log({
+                "asked_at": _now_iso(),
+                "user": user,
+                "question": question,
+                "reply": "Error: all models rate-limited -> " + " | ".join(errors),
+                "model": None,
+                "meta": meta,
+            })
+            return _response({"ok": False, "reply": TIRED_MESSAGE, "error": "rate_limited", "user": user})
 
         if reply is None:
             raise AIError("All endpoints failed -> " + " | ".join(errors))

@@ -23,6 +23,10 @@ class AIError(Exception):
     """Raised when a provider call cannot produce a reply."""
 
 
+class RateLimitError(AIError):
+    """Raised specifically when a provider returns HTTP 429 (quota / rate limit exhausted)."""
+
+
 def get_secret(secret_id):
     """
     Fetch an API key from Secrets Manager. The secret may be stored either as a raw key
@@ -80,7 +84,10 @@ class ProviderRegistry:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:500]
-            raise AIError("HTTP %s from %s: %s" % (e.code, url, detail))
+            msg = "HTTP %s from %s: %s" % (e.code, url, detail)
+            if e.code == 429:
+                raise RateLimitError(msg)
+            raise AIError(msg)
         except urllib.error.URLError as e:
             raise AIError("Network error calling %s: %s" % (url, e.reason))
 
