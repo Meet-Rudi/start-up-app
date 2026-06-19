@@ -44,6 +44,11 @@ COMPONENTS = {
         "seed_dir": "services/rudi-chat/seed",
         "seed_bucket_from": "meetrudi-base",
     },
+    "whatsapp": {
+        "stack": "meetrudi-whatsapp",
+        "template": "services/whatsapp/template.yaml",
+        "build": True,
+    },
 }
 
 
@@ -141,6 +146,9 @@ def main():
         print("Function URL:", _stack_output("meetrudi-rudi-chat", "FunctionUrl"))
         print("Data bucket :", bucket or _stack_output("meetrudi-base", "DataBucketName"))
         print(">> Put this Function URL into site/try-rudi.html (RUDI_CHAT_URL), then push.")
+    elif name == "whatsapp":
+        print("Webhook URL :", _stack_output("meetrudi-whatsapp", "WebhookUrl"))
+        print(">> Set this URL as the Twilio Sandbox 'When a message comes in' webhook (HTTP POST).")
 
 
 if __name__ == "__main__":

@@ -31,6 +31,17 @@
         "secretsmanager:GetSecretValue"
       ],
       "Resource": "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi*"
+    },
+    {
+      "Sid": "WhatsAppQueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:eu-central-1:949753869755:meetrudi-wa-*"
     }
   ]
 }

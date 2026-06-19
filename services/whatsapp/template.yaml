@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI WhatsApp connectivity (Twilio): inbound webhook -> SQS FIFO -> processor -> reply.
+  Requires meetrudi-base (data bucket), the console-created meetrudi-lambda-runner role
+  (with SQS permissions added), and the console-created meetrudi/whatsapp/twilio secret.
+
+Parameters:
+  WhatsAppFrom:
+    Type: String
+    Default: "whatsapp:+14155238886"
+    Description: WhatsApp 'From' sender — Twilio Sandbox number by default; change to the approved sender for production.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    CodeUri: src/
+    Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+
+Resources:
+
+  WaDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-wa-dlq.fifo
+      FifoQueue: true
+
+  WaInboundQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-wa-inbound.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WaDlq.Arn
+        maxReceiveCount: 5
+
+  WaWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-webhook
+      RetentionInDays: 30
+
+  WaProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-processor
+      RetentionInDays: 30
+
+  WaWebhookFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaWebhookLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-webhook
+      Handler: webhook.handler
+      Environment:
+        Variables:
+          INBOUND_QUEUE_URL: !Ref WaInboundQueue
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          VALIDATE_SIGNATURE: "true"
+          WEBHOOK_URL: ""
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  WaProcessorFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaProcessorLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-processor
+      Handler: processor.handler
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_SECRET: meetrudi-groq-firstkey
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          WA_LOG_KEY: external_questions/whatsapp_messages.jsonl
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+      Events:
+        Inbound:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WaInboundQueue.Arn
+            BatchSize: 1
+
+Outputs:
+  WebhookUrl:
+    Description: Set this as the Twilio inbound webhook (WHEN A MESSAGE COMES IN, HTTP POST)
+    Value: !GetAtt WaWebhookFunctionUrl.FunctionUrl
+  InboundQueueName:
+    Value: !GetAtt WaInboundQueue.QueueName
