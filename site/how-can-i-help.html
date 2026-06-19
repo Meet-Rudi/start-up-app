@@ -273,6 +273,7 @@
       function send() {
         var text = input.value.trim();
         if (!text) { input.focus(); return; }
+        input.value = "";          // clear the box so a new question can be typed
         setBusy(true);
         showReply('<span class="typing">Rudi is thinking…</span>');
 
