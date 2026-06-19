@@ -9,7 +9,7 @@ browser holds the state machine; this Lambda turns *(phase + history + runtime s
 |---|---|---|
 | `learn` | `rudi_learn_prompt.md` + `contexts/rudi-context.md` | `{want_to_try}` |
 | `goal` | `rudi_guardrails.md` + `rudi_goal_prompt.md` | `{goal_status, goal_domain, goal}` |
-| `commit` | `rudi_guardrails.md` + `rudi_commit_prompt.md` (+ `diabetes-t2d-guidance.md` if `goal_domain==diabetes`) | `{commitment_made}` |
+| `commit` | `rudi_guardrails.md` + `rudi_commit_prompt.md` (+ `health-coaching-guidance.md` if `goal_domain` is health-related: diabetes/fitness/diet/sleep/stress/habit) | `{commitment_made}` |
 
 Counters (2 clarifiers, 7 commit attempts, 3 rejected-goal tries, 20s restart) are enforced in
 the **front-end**; the Lambda receives them via `state` and injects a runtime note into the prompt.
@@ -40,4 +40,5 @@ and the diabetes guidance.
 python deploy.py rudi-chat
 ```
 
-> The T2D guidance file is a **placeholder** until the distilled official document is dropped in.
+> `health-coaching-guidance.md` is distilled (≤15 sentences) from the NBHWC Health & Wellness
+> Coaching Content Outline (2024) and is injected for any health-related commitment.

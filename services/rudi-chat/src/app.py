@@ -40,7 +40,9 @@ LEARN_KEY = "prompts/rudi_learn_prompt.md"
 GOAL_KEY = "prompts/rudi_goal_prompt.md"
 COMMIT_KEY = "prompts/rudi_commit_prompt.md"
 RUDI_CONTEXT_KEY = "contexts/rudi-context.md"
-DIABETES_KEY = "contexts/diabetes-t2d-guidance.md"
+HEALTH_GUIDANCE_KEY = "contexts/health-coaching-guidance.md"
+# Goal domains considered health-related → inject the coaching guidance during commit.
+HEALTH_DOMAINS = {"diabetes", "fitness", "diet", "sleep", "stress", "habit"}
 
 DEFAULT_USER = "platform_00000001"
 MAX_INPUT_CHARS = 4000
@@ -89,9 +91,9 @@ def _build_system(phase, state):
         body = _get_s3_text(GOAL_KEY)
     elif phase == "commit":
         body = _get_s3_text(COMMIT_KEY)
-        if (state.get("goal_domain") or "").lower() == "diabetes":
-            body += "\n\n# Type-2-diabetes guidance (stay within lifestyle support, never medical advice)\n\n" \
-                    + _get_s3_text(DIABETES_KEY)
+        if (state.get("goal_domain") or "").lower() in HEALTH_DOMAINS:
+            body += "\n\n# Health & wellness coaching guidance (lifestyle support only — never medical advice)\n\n" \
+                    + _get_s3_text(HEALTH_GUIDANCE_KEY)
     else:
         raise ValueError("Unknown phase: %r" % phase)
 
