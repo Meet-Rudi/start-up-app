@@ -37,6 +37,13 @@ COMPONENTS = {
         "seed_dir": "services/ask-ai/seed",
         "seed_bucket_from": "meetrudi-base",  # stack whose DataBucketName output is the target
     },
+    "rudi-chat": {
+        "stack": "meetrudi-rudi-chat",
+        "template": "services/rudi-chat/template.yaml",
+        "build": True,
+        "seed_dir": "services/rudi-chat/seed",
+        "seed_bucket_from": "meetrudi-base",
+    },
 }
 
 
@@ -130,6 +137,10 @@ def main():
         print("Data bucket :", b)
         print("Prompt file :", "s3://%s/prompts/howcanihelp_prompt.md" % b)
         print("Context file:", "s3://%s/contexts/rudi-context.md" % b)
+    elif name == "rudi-chat":
+        print("Function URL:", _stack_output("meetrudi-rudi-chat", "FunctionUrl"))
+        print("Data bucket :", bucket or _stack_output("meetrudi-base", "DataBucketName"))
+        print(">> Put this Function URL into site/try-rudi.html (RUDI_CHAT_URL), then push.")
 
 
 if __name__ == "__main__":

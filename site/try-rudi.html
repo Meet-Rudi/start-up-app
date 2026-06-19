@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Meet Rudi — Try Rudi</title>
+  <link rel="icon" href="favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --navy: #263d7d; --blue: #3b75a5; --magenta: #e925c9; --cyan: #00e5e5;
+      --bg: #f0f0f0; --surface: #ffffff; --muted: #6b7280; --border: #e2e3e8;
+      --font: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --radius: 0.75rem;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--font); color: var(--navy); background: var(--bg);
+      display: grid; place-items: center; padding: 1.25rem;
+    }
+    /* glow blobs */
+    body::before, body::after {
+      content: ""; position: fixed; width: 40vmax; height: 40vmax; border-radius: 50%;
+      filter: blur(90px); opacity: .18; z-index: 0; pointer-events: none;
+    }
+    body::before { background: var(--magenta); top: -14vmax; left: -12vmax; }
+    body::after  { background: var(--cyan);    bottom: -16vmax; right: -12vmax; }
+
+    .chat {
+      position: relative; z-index: 1; width: min(560px, 100%); height: min(80vh, 720px);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem;
+      box-shadow: 0 24px 60px rgba(38,61,125,.12); display: flex; flex-direction: column; overflow: hidden;
+    }
+    .head {
+      display: flex; align-items: center; gap: .7rem; padding: .85rem 1.1rem;
+      border-bottom: 1px solid var(--border); position: relative;
+    }
+    .head img { width: 34px; height: 34px; }
+    .head .title { font-weight: 800; font-size: 1.05rem; }
+    .head .sub { font-size: .78rem; color: var(--muted); }
+    /* Ear badge — top-right quartile, shows when in Real Rudi mode */
+    #ear-badge {
+      position: absolute; top: .7rem; right: .9rem; display: none;
+      align-items: center; gap: .35rem; padding: .25rem .6rem; border-radius: 999px;
+      background: rgba(233,37,201,.12); color: var(--magenta); font-weight: 700; font-size: .8rem;
+    }
+    #ear-badge.on { display: inline-flex; }
+
+    .messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: .6rem; }
+    .msg { max-width: 85%; padding: .6rem .85rem; border-radius: 1rem; line-height: 1.5; font-size: .97rem; }
+    .msg.user { align-self: flex-end; background: var(--navy); color: #fff; border-bottom-right-radius: .3rem; }
+    .msg.rudi { align-self: flex-start; background: #f3f5f8; color: var(--navy); border-bottom-left-radius: .3rem; }
+    .msg.rudi :first-child { margin-top: 0; } .msg.rudi :last-child { margin-bottom: 0; }
+    .msg.rudi p { margin: .4rem 0; }
+    .msg.rudi ul, .msg.rudi ol { margin: .4rem 0; padding-left: 1.2rem; }
+    .msg.rudi a { color: var(--magenta); font-weight: 600; }
+    .msg.rudi strong { color: var(--navy); }
+    .msg.typing { color: var(--blue); font-style: italic; background: #f3f5f8; align-self: flex-start; }
+    .divider { align-self: center; color: var(--muted); font-size: .75rem; padding: .3rem 0; }
+
+    .composer { display: flex; gap: .5rem; padding: .75rem; border-top: 1px solid var(--border); }
+    .composer textarea {
+      flex: 1; resize: none; border: 1.5px solid var(--border); border-radius: var(--radius);
+      padding: .6rem .75rem; font-family: var(--font); font-size: 1rem; color: var(--navy);
+      max-height: 120px; min-height: 44px; outline: none;
+    }
+    .composer textarea:focus { border-color: var(--magenta); box-shadow: 0 0 0 3px rgba(233,37,201,.1); }
+    .composer button {
+      border: 0; cursor: pointer; font-family: var(--font); font-weight: 700; color: #fff;
+      background: var(--magenta); padding: 0 1.25rem; border-radius: var(--radius); font-size: 1rem;
+    }
+    .composer button:disabled { opacity: .5; cursor: default; }
+    .composer textarea:disabled { opacity: .6; }
+  </style>
+</head>
+
+<body>
+  <main class="chat">
+    <div class="head">
+      <img src="assets/rudi-logo.png" alt="Rudi" />
+      <div>
+        <div class="title">Rudi</div>
+        <div class="sub">your health accountability buddy</div>
+      </div>
+      <span id="ear-badge">👂 Real Rudi</span>
+    </div>
+
+    <div id="messages" class="messages" aria-live="polite"></div>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <textarea id="input" placeholder="Type your message…" rows="1"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script>
+  (function () {
+    // ---- endpoint (fill in after `python deploy.py rudi-chat` prints the Function URL) ----
+    var RUDI_CHAT_URL = "REPLACE_WITH_meetrudi-rudi-chat_FUNCTION_URL";
+
+    // ---- limits (enforced here; the model is told via `state`) ----
+    var MAX_CLARIFIERS = 2, MAX_COMMIT = 7, MAX_REJECTS = 3, RESTART_MS = 20000;
+    var GREETING = "Hi, I'm **Rudi** 👋 Would you like to **learn more about the Rudi project**, " +
+                   "or **try the real Rudi experience** for yourself?";
+
+    var messagesEl = document.getElementById("messages");
+    var form = document.getElementById("composer");
+    var input = document.getElementById("input");
+    var sendBtn = document.getElementById("send");
+    var earBadge = document.getElementById("ear-badge");
+
+    // ---- session state ----
+    var phase, llmHistory, clarifiersUsed, commitAttempts, rejectCount, goal, goalDomain,
+        sessionId = 0, lastClarifiersLeft = MAX_CLARIFIERS, lastUserText = "", busy = false;
+
+    var user;
+    try {
+      user = localStorage.getItem("rudi_visitor");
+      if (!user) {
+        user = "web_" + (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+        localStorage.setItem("rudi_visitor", user);
+      }
+    } catch (e) { user = "web_anon"; }
+
+    function escapeHtml(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+    function md(s) {
+      var html = window.marked ? window.marked.parse(s) : escapeHtml(s).replace(/\n/g, "<br>");
+      return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+    }
+    function scroll() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+    function addBubble(role, contentHtml) {
+      var el = document.createElement("div");
+      el.className = "msg " + (role === "user" ? "user" : "rudi");
+      el.innerHTML = contentHtml;
+      messagesEl.appendChild(el); scroll(); return el;
+    }
+    function addDivider(text) {
+      var el = document.createElement("div"); el.className = "divider"; el.textContent = text;
+      messagesEl.appendChild(el); scroll();
+    }
+    function setEar(on) { earBadge.classList.toggle("on", !!on); }
+    function setBusy(b) { busy = b; input.disabled = b; sendBtn.disabled = b; if (!b) input.focus(); }
+
+    function startSession(firstLoad) {
+      sessionId += 1;
+      llmHistory = []; clarifiersUsed = 0; commitAttempts = 0; rejectCount = 0;
+      goal = null; goalDomain = null; phase = "learn"; setEar(false);
+      if (!firstLoad) addDivider("— new conversation —");
+      addBubble("rudi", md(GREETING));
+      llmHistory.push({ role: "assistant", content: GREETING });
+      setBusy(false);
+    }
+
+    function buildState() {
+      if (phase === "goal") {
+        lastClarifiersLeft = Math.max(0, MAX_CLARIFIERS - clarifiersUsed);
+        return { clarifiers_left: lastClarifiersLeft, reject_attempts_left: Math.max(0, MAX_REJECTS - rejectCount) };
+      }
+      if (phase === "commit") {
+        return { attempts_left: Math.max(1, MAX_COMMIT - commitAttempts), goal: goal, goal_domain: goalDomain };
+      }
+      return {};
+    }
+
+    function switchToReal() {
+      phase = "goal"; setEar(true);
+      llmHistory = []; clarifiersUsed = 0; rejectCount = 0;   // fresh Real-Rudi LLM session
+    }
+
+    function concludeAndRestart() {
+      phase = "waiting"; setBusy(true);
+      setTimeout(function () { startSession(false); }, RESTART_MS);
+    }
+
+    function processSignals(sig) {
+      sig = sig || {};
+      if (phase === "learn") {
+        if (sig.want_to_try === true) switchToReal();
+        return;
+      }
+      if (phase === "goal") {
+        var gs = sig.goal_status;
+        if (gs === "rejected") {
+          rejectCount += 1;
+          if (rejectCount >= MAX_REJECTS) concludeAndRestart();
+        } else if (gs === "accepted") {
+          goal = sig.goal || lastUserText || "your goal";
+          goalDomain = sig.goal_domain || "other";
+          phase = "commit"; commitAttempts = 0;            // goal+commit share the session
+        } else { // unclear / missing
+          if (lastClarifiersLeft <= 0) {                   // safeguard: force-accept after 2 clarifiers
+            goal = lastUserText || "your goal"; goalDomain = "other"; phase = "commit"; commitAttempts = 0;
+          } else {
+            clarifiersUsed += 1;
+          }
+        }
+        return;
+      }
+      if (phase === "commit") {
+        if (sig.commitment_made === true) { concludeAndRestart(); return; }
+        commitAttempts += 1;
+        if (commitAttempts >= MAX_COMMIT) concludeAndRestart();
+      }
+    }
+
+    function send(text) {
+      addBubble("user", escapeHtml(text));
+      lastUserText = text;
+      llmHistory.push({ role: "user", content: text });
+      setBusy(true);
+      var typing = addBubble("rudi", '<span class="typing">Rudi is typing…</span>');
+      typing.classList.add("typing");
+
+      fetch(RUDI_CHAT_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ user: user, session_id: sessionId, phase: phase,
+                               messages: llmHistory, state: buildState() })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          typing.remove();
+          var reply = (data && data.reply) ? data.reply : "…";
+          addBubble("rudi", md(reply));
+          llmHistory.push({ role: "assistant", content: reply });
+          processSignals(data && data.signals);
+        })
+        .catch(function () {
+          typing.remove();
+          addBubble("rudi", md("Sorry — I couldn't reach Rudi just now. Please try again in a moment. 💬"));
+        })
+        .then(function () { if (phase !== "waiting") setBusy(false); });
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (busy) return;
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      send(text);
+    });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    });
+
+    startSession(true);
+  })();
+  </script>
+</body>
+</html>

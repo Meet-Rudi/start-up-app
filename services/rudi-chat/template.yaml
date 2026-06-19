@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI meetrudi-rudi-chat — conversational endpoint for the "Try Rudi" experience
+  (learn / goal / commit phases, JSON signals, Groq cascade). Requires the meetrudi-base
+  stack (data bucket) and the console-created meetrudi-lambda-runner role.
+
+Resources:
+
+  RudiChatLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-rudi-chat
+      RetentionInDays: 30
+
+  RudiChatFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RudiChatLogGroup
+    Properties:
+      FunctionName: meetrudi-rudi-chat
+      Description: Real-Rudi conversational coach (learn/goal/commit) with JSON signals.
+      Handler: app.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 30
+      MemorySize: 256
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          SESSIONS_LOG_KEY: external_questions/tryrudi_sessions.jsonl
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_SECRET: meetrudi-groq-firstkey
+          ALLOW_ORIGIN: https://meet-rudi.github.io
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - https://meet-rudi.github.io
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - content-type
+
+Outputs:
+  FunctionUrl:
+    Description: Public Function URL for meetrudi-rudi-chat
+    Value: !GetAtt RudiChatFunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref RudiChatFunction
