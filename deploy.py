@@ -148,7 +148,12 @@ def main():
         print(">> Put this Function URL into site/try-rudi.html (RUDI_CHAT_URL), then push.")
     elif name == "whatsapp":
         print("Webhook URL :", _stack_output("meetrudi-whatsapp", "WebhookUrl"))
-        print(">> Set this URL as the Twilio Sandbox 'When a message comes in' webhook (HTTP POST).")
+        print("Console API :", _stack_output("meetrudi-whatsapp", "ConsoleApiUrl"))
+        print("Send test   :", _stack_output("meetrudi-whatsapp", "SendTestUrl"))
+        print(">> Set the Webhook URL as the Twilio Sandbox 'When a message comes in' webhook (HTTP POST).")
+        print(">> Console API + Send test need secret meetrudi/whatsapp/console-token (both fail CLOSED without it).")
+        print(">> Outbound test: open  <Send test URL>?token=<TOKEN>&to=+32470...&body=Hello")
+        print(">> Put the Console API URL into console/config.js (API_BASE) once auth is set.")
 
 
 if __name__ == "__main__":

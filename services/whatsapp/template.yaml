@@ -1,23 +1,31 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  MEET_RUDI WhatsApp connectivity (Twilio): inbound webhook -> SQS FIFO -> processor -> reply.
+  MEET_RUDI WhatsApp operator console (Twilio): inbound webhook -> SQS FIFO -> processor
+  (persist to per-conversation S3 store; NO auto-reply) and a console API (roster / thread /
+  operator send). A human operator answers from the console; there is no AI on the send path.
   Requires meetrudi-base (data bucket), the console-created meetrudi-lambda-runner role
-  (with SQS permissions added), and the console-created meetrudi/whatsapp/twilio secret.
+  (S3 + SQS + Secrets), the meetrudi/whatsapp/twilio secret, and — before pointing the console
+  at live traffic — the meetrudi/whatsapp/console-token secret (interim auth until Cognito).
 
 Parameters:
   WhatsAppFrom:
     Type: String
     Default: "whatsapp:+14155238886"
-    Description: WhatsApp 'From' sender — Twilio Sandbox number by default; change to the approved sender for production.
+    Description: WhatsApp 'From' sender — Twilio Sandbox by default; change to the approved sender for production.
+  ConsoleAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: CORS origin for the console (set to the CloudFront domain once the console is hosted).
 
 Globals:
   Function:
     Runtime: python3.12
     Timeout: 30
     MemorySize: 256
-    CodeUri: src/
-    Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+    # NOTE: Role and CodeUri are set per-function below. Role: SAM disallows it in Globals.
+    # CodeUri: `aws cloudformation package` only rewrites CodeUri on individual functions,
+    # not in Globals — keeping it per-function keeps both `sam` and raw-CLI deploys correct.
 
 Resources:
 
@@ -50,12 +58,32 @@ Resources:
       LogGroupName: /aws/lambda/meetrudi-wa-processor
       RetentionInDays: 30
 
+  WaConsoleApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-console-api
+      RetentionInDays: 30
+
+  WaSendTestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-sendtest
+      RetentionInDays: 30
+
+  WaReengageLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-reengage
+      RetentionInDays: 30
+
   WaWebhookFunction:
     Type: AWS::Serverless::Function
     DependsOn: WaWebhookLogGroup
     Properties:
       FunctionName: meetrudi-wa-webhook
       Handler: webhook.handler
+      CodeUri: src/
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
       Environment:
         Variables:
           INBOUND_QUEUE_URL: !Ref WaInboundQueue
@@ -66,23 +94,33 @@ Resources:
       FunctionUrlConfig:
         AuthType: NONE
 
+  # Inbound: persist to the per-conversation store, then (AI_RESPONDER=true) run the "Real Rudi"
+  # AI responder and reply. Set AI_RESPONDER=false for operator-console mode (persist only).
   WaProcessorFunction:
     Type: AWS::Serverless::Function
     DependsOn: WaProcessorLogGroup
     Properties:
       FunctionName: meetrudi-wa-processor
       Handler: processor.handler
+      CodeUri: src/
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
       Environment:
         Variables:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          AI_RESPONDER: "true"
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
           GROQ_MODEL: llama-3.1-8b-instant
           GROQ_SECRET: meetrudi-groq-firstkey
-          TWILIO_SECRET: meetrudi/whatsapp/twilio
-          WHATSAPP_FROM: !Ref WhatsAppFrom
-          WA_LOG_KEY: external_questions/whatsapp_messages.jsonl
-          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
+          # Keep-warm test mode: nudge shortly after last inbound so the loop is observable fast.
+          # Set PROACTIVE_TEST_MODE=false for production (24h/social-hours anti-drift timing).
+          PROACTIVE_TEST_MODE: "true"
+          PROACTIVE_TEST_LEAD_MIN: "2"
       Events:
         Inbound:
           Type: SQS
@@ -90,9 +128,84 @@ Resources:
             Queue: !GetAtt WaInboundQueue.Arn
             BatchSize: 1
 
+  # Console API: roster / thread / operator send. Fails CLOSED until the console-token secret
+  # exists (CONSOLE_REQUIRE_AUTH=true). Cognito/CloudFront replaces this token gate next.
+  WaConsoleApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaConsoleApiLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-console-api
+      Handler: console_api.handler
+      CodeUri: src/
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          CONSOLE_TOKEN_SECRET: meetrudi/whatsapp/console-token
+          CONSOLE_REQUIRE_AUTH: "true"
+          CONSOLE_ALLOW_ORIGIN: !Ref ConsoleAllowOrigin
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref ConsoleAllowOrigin]
+          AllowMethods: ["GET", "POST"]   # preflight (OPTIONS) is auto-handled by the Function URL
+          AllowHeaders: ["content-type", "authorization", "x-console-token"]
+
+  # Keep-warm runner: every 2 min, poll who is due (meta.next_proactive_at) and nudge/template.
+  # The Schedule event creates the EventBridge rule + Lambda permission (no IAM role needed).
+  WaReengageFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaReengageLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-reengage
+      Handler: reengage.handler
+      CodeUri: src/
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          TEMPLATE_CONTENT_SID: ""          # set once an out-of-window template is Meta-approved
+          PROACTIVE_TEST_MODE: "true"       # keep in sync with the processor
+          PROACTIVE_TEST_LEAD_MIN: "2"
+      Events:
+        Tick:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)       # production keep-warm cadence is rate(5 minutes)
+
+  # Throwaway outbound tester (token-gated). Remove once WhatsApp sending is confirmed.
+  WaSendTestFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaSendTestLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-sendtest
+      Handler: send_test.handler
+      CodeUri: src/
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          CONSOLE_TOKEN_SECRET: meetrudi/whatsapp/console-token
+      FunctionUrlConfig:
+        AuthType: NONE
+
 Outputs:
   WebhookUrl:
     Description: Set this as the Twilio inbound webhook (WHEN A MESSAGE COMES IN, HTTP POST)
     Value: !GetAtt WaWebhookFunctionUrl.FunctionUrl
+  SendTestUrl:
+    Description: Token-gated outbound tester — open in a browser with ?token=&to=&body=
+    Value: !GetAtt WaSendTestFunctionUrl.FunctionUrl
+  ConsoleApiUrl:
+    Description: Put this into console/config.js (API_BASE) once auth is in place
+    Value: !GetAtt WaConsoleApiFunctionUrl.FunctionUrl
   InboundQueueName:
     Value: !GetAtt WaInboundQueue.QueueName

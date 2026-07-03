@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Rudi — Operator Console</title>
+<link rel="icon" href="../visuals/favicon.ico" />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#263d7d; --blue:#3b75a5; --magenta:#e925c9; --cyan:#00e5e5;
+    --bg:#f0f0f0; --surface:#fff; --muted:#9da2af; --border:#d9d9d9;
+    --in:#fff; --out:#d9fdd3; --thread-bg:#eae6df;
+    --font:"Nunito",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font-family:var(--font);color:var(--navy);background:var(--bg);display:flex;flex-direction:column;height:100vh}
+
+  header.topbar{display:flex;align-items:center;gap:.6rem;padding:.5rem 1rem;background:var(--navy);color:#fff}
+  header.topbar img{height:26px}
+  header.topbar .title{font-weight:800;letter-spacing:.02em}
+  header.topbar .mode{margin-left:auto;font-size:.72rem;padding:.2rem .6rem;border-radius:999px;background:rgba(255,255,255,.15)}
+  header.topbar .mode.demo{background:var(--magenta)}
+
+  .app{flex:1;display:flex;min-height:0}
+
+  /* ---- roster ---- */
+  .roster{width:340px;min-width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column}
+  .roster .search{padding:.6rem}
+  .roster .search input{width:100%;padding:.55rem .8rem;border:1px solid var(--border);border-radius:999px;font-family:inherit;font-size:.9rem;outline:none}
+  .roster .list{overflow-y:auto;flex:1}
+  .contact{display:flex;gap:.7rem;align-items:center;padding:.7rem .9rem;cursor:pointer;border-bottom:1px solid #f0f0f0}
+  .contact:hover{background:#f7f8fb}
+  .contact.active{background:#eef2fb}
+  .avatar{width:42px;height:42px;border-radius:50%;background:var(--rudi-gradient,linear-gradient(135deg,var(--magenta),var(--cyan)));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 auto}
+  .contact .meta{flex:1;min-width:0}
+  .contact .row1{display:flex;justify-content:space-between;gap:.5rem}
+  .contact .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .contact .time{font-size:.7rem;color:var(--muted);flex:0 0 auto}
+  .contact .row2{display:flex;justify-content:space-between;gap:.5rem;align-items:center}
+  .contact .preview{font-size:.82rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{background:var(--magenta);color:#fff;border-radius:999px;font-size:.7rem;font-weight:700;padding:.05rem .45rem;min-width:1.2rem;text-align:center}
+  .dot-window{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .dot-window.open{background:#25d366}.dot-window.closed{background:var(--muted)}
+
+  /* ---- thread ---- */
+  .thread{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--thread-bg)}
+  .thread .head{display:flex;align-items:center;gap:.7rem;padding:.6rem 1rem;background:var(--surface);border-bottom:1px solid var(--border)}
+  .thread .head .name{font-weight:700}
+  .thread .head .sub{font-size:.75rem;color:var(--muted)}
+  .thread .head .winpill{margin-left:auto;font-size:.72rem;padding:.25rem .7rem;border-radius:999px}
+  .winpill.open{background:#e7f9ee;color:#127a3e}.winpill.closed{background:#fdeaea;color:#b23b3b}
+  .kwbtn{font-family:inherit;font-size:.72rem;font-weight:700;padding:.25rem .7rem;border-radius:999px;border:1px solid var(--border);cursor:pointer;white-space:nowrap}
+  .kwbtn.on{background:#fff3e0;color:#c25e00;border-color:#f0d3ad}
+  .kwbtn.off{background:#eef0f4;color:var(--muted)}
+  .kwbtn .nxt{font-weight:500;opacity:.8}
+  .messages{flex:1;overflow-y:auto;padding:1rem 12%;display:flex;flex-direction:column;gap:.4rem}
+  .bubble{max-width:70%;padding:.5rem .7rem;border-radius:.6rem;font-size:.92rem;line-height:1.35;box-shadow:0 1px .5px rgba(0,0,0,.08);word-wrap:break-word;white-space:pre-wrap}
+  .bubble .t{display:block}
+  .bubble .stamp{display:block;text-align:right;font-size:.65rem;color:var(--muted);margin-top:.15rem}
+  .msg.in{align-self:flex-start}.msg.in .bubble{background:var(--in);border-top-left-radius:.15rem}
+  .msg.out{align-self:flex-end}.msg.out .bubble{background:var(--out);border-top-right-radius:.15rem}
+  .daysep{align-self:center;background:rgba(255,255,255,.75);color:#54656f;font-size:.72rem;padding:.15rem .7rem;border-radius:999px;margin:.4rem 0}
+  .empty{margin:auto;color:var(--muted);text-align:center;padding:2rem}
+
+  /* ---- composer ---- */
+  .composer{display:flex;gap:.6rem;padding:.6rem 1rem;background:var(--surface);border-top:1px solid var(--border)}
+  .composer textarea{flex:1;resize:none;height:44px;max-height:120px;padding:.6rem .9rem;border:1px solid var(--border);border-radius:1.2rem;font-family:inherit;font-size:.92rem;outline:none}
+  .composer button{background:var(--magenta);color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:1.1rem;cursor:pointer;flex:0 0 auto}
+  .composer button:disabled{background:var(--muted);cursor:not-allowed}
+  .composer.blocked{background:#fdeaea}
+  .composer .oow{flex:1;display:flex;align-items:center;color:#b23b3b;font-size:.85rem;font-weight:600}
+  .toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:.5rem 1rem;border-radius:.6rem;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <img src="../visuals/rudi-logo.png" alt="Rudi" onerror="this.style.display='none'"/>
+  <span class="title">Operator Console</span>
+  <span class="mode" id="mode">connecting…</span>
+</header>
+
+<div class="app">
+  <aside class="roster">
+    <div class="search"><input id="search" placeholder="Search contacts…" autocomplete="off"/></div>
+    <div class="list" id="roster"></div>
+  </aside>
+
+  <section class="thread">
+    <div class="head" id="threadHead" style="display:none">
+      <div class="avatar" id="headAvatar"></div>
+      <div><div class="name" id="headName"></div><div class="sub" id="headSub"></div></div>
+      <div class="winpill" id="winPill"></div>
+      <button class="kwbtn" id="keepWarmBtn" title="Toggle proactive keep-warm for this contact"></button>
+    </div>
+    <div class="messages" id="messages"><div class="empty">Select a conversation to start.</div></div>
+    <div class="composer" id="composer" style="display:none">
+      <textarea id="input" placeholder="Type a reply…" rows="1"></textarea>
+      <button id="send" title="Send">➤</button>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script src="demo-data.js"></script>
+<script>
+(function(){
+  "use strict";
+  var CFG = window.CONSOLE_CONFIG || {};
+  var API = (CFG.API_BASE || "").replace(/\/$/,"");
+  var DEMO = !API;
+  var state = { roster:[], activeUid:null, cursor:null, messages:[], filter:"" };
+
+  var $ = function(id){ return document.getElementById(id); };
+  function initials(n){ return (n||"?").trim().slice(0,1).toUpperCase(); }
+  function esc(s){ var d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; }
+  function fmtTime(iso){ if(!iso) return ""; var d=new Date(iso); return d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }
+  function fmtDay(iso){ var d=new Date(iso); return d.toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"}); }
+  function toast(m){ var t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(function(){t.classList.remove("show");},2200); }
+
+  // ---- transport: real API or in-memory demo -------------------------------
+  var api = DEMO ? window.DEMO_API : {
+    headers: function(){ var h={"Content-Type":"application/json"}; if(CFG.CONSOLE_TOKEN) h["X-Console-Token"]=CFG.CONSOLE_TOKEN; return h; },
+    roster: function(){ return fetch(API+"/conversations",{headers:this.headers()}).then(r=>r.json()); },
+    thread: function(uid,since){ var q=since?("?since="+encodeURIComponent(since)):""; return fetch(API+"/conversations/"+uid+"/messages"+q,{headers:this.headers()}).then(r=>r.json()); },
+    read: function(uid){ return fetch(API+"/conversations/"+uid+"/read",{method:"POST",headers:this.headers()}); },
+    keepwarm: function(uid,enabled){ return fetch(API+"/conversations/"+uid+"/keepwarm",{method:"POST",headers:this.headers(),body:JSON.stringify({enabled:enabled})}).then(function(r){return r.json();}); },
+    send: function(uid,text){ return fetch(API+"/conversations/"+uid+"/messages",{method:"POST",headers:this.headers(),body:JSON.stringify({text:text,operator_id:CFG.OPERATOR_ID||"operator"})}).then(async function(r){ var b=await r.json(); return {status:r.status, body:b}; }); }
+  };
+
+  // ---- rendering -----------------------------------------------------------
+  function renderRoster(){
+    var box=$("roster"); box.innerHTML="";
+    var rows=state.roster.filter(function(c){
+      if(!state.filter) return true;
+      var s=state.filter.toLowerCase();
+      return (c.display_name||"").toLowerCase().indexOf(s)>=0 || (c.phone||"").indexOf(s)>=0;
+    });
+    if(!rows.length){ box.innerHTML='<div class="empty">No contacts yet.</div>'; return; }
+    rows.forEach(function(c){
+      var el=document.createElement("div");
+      el.className="contact"+(c.user_id===state.activeUid?" active":"");
+      el.innerHTML=
+        '<div class="avatar">'+esc(initials(c.display_name))+'</div>'+
+        '<div class="meta">'+
+          '<div class="row1"><span class="name">'+esc(c.display_name||c.phone)+'</span>'+
+            '<span class="time">'+fmtTime(c.last_message_at)+'</span></div>'+
+          '<div class="row2"><span class="preview">'+
+             (c.last_direction==="out"?"✓ ":"")+esc(c.last_message_preview||"")+'</span>'+
+             (c.unread_count?'<span class="badge">'+c.unread_count+'</span>':
+               '<span class="dot-window '+(c.in_window?"open":"closed")+'" title="'+(c.in_window?"in window":"out of window")+'"></span>')+
+          '</div>'+
+        '</div>';
+      el.onclick=function(){ openConversation(c.user_id); };
+      box.appendChild(el);
+    });
+  }
+
+  function renderThread(){
+    var c=state.roster.filter(function(x){return x.user_id===state.activeUid;})[0];
+    var head=$("threadHead"), comp=$("composer"), box=$("messages");
+    if(!c){ head.style.display="none"; comp.style.display="none"; box.innerHTML='<div class="empty">Select a conversation to start.</div>'; return; }
+    head.style.display="flex"; comp.style.display="flex";
+    $("headAvatar").textContent=initials(c.display_name);
+    $("headName").textContent=c.display_name||c.phone;
+    $("headSub").textContent=c.phone||"";
+    var pill=$("winPill");
+    pill.className="winpill "+(c.in_window?"open":"closed");
+    pill.textContent=c.in_window?"● in window":"● out of window (24h)";
+
+    var kw=$("keepWarmBtn");
+    var nxt=c.keep_warm&&c.next_proactive_at?(" · next "+fmtTime(c.next_proactive_at)):"";
+    kw.className="kwbtn "+(c.keep_warm?"on":"off");
+    kw.innerHTML=(c.keep_warm?"🔥 Keep-warm: On":"Keep-warm: Off")+(nxt?'<span class="nxt">'+nxt+'</span>':"");
+    kw.onclick=function(){
+      var enable=!c.keep_warm;
+      Promise.resolve(api.keepwarm(c.user_id,enable)).then(function(){
+        c.keep_warm=enable; renderThread(); loadRoster();
+        toast(enable?"Keep-warm on":"Keep-warm stopped for this contact");
+      });
+    };
+
+    box.innerHTML="";
+    var lastDay="";
+    state.messages.forEach(function(m){
+      var day=fmtDay(m.at);
+      if(day!==lastDay){ lastDay=day; var s=document.createElement("div"); s.className="daysep"; s.textContent=day; box.appendChild(s); }
+      var wrap=document.createElement("div");
+      wrap.className="msg "+(m.direction==="out"?"out":"in");
+      var text = m.text || ({image:"📷 Photo",audio:"🎤 Voice message",media:"📎 Attachment"}[m.type]||"");
+      wrap.innerHTML='<div class="bubble"><span class="t">'+esc(text)+'</span>'+
+                     '<span class="stamp">'+fmtTime(m.at)+(m.direction==="out"?" ✓":"")+'</span></div>';
+      box.appendChild(wrap);
+    });
+    if(!state.messages.length) box.innerHTML='<div class="empty">No messages yet.</div>';
+    box.scrollTop=box.scrollHeight;
+
+    // composer: block free-form when out of window (§3)
+    var input=$("input"), send=$("send");
+    if(c.in_window){ comp.classList.remove("blocked"); comp.innerHTML=''; comp.appendChild(input); comp.appendChild(send); input.disabled=false; send.disabled=false; }
+    else { comp.classList.add("blocked"); comp.innerHTML='<div class="oow">⚠ 24h window closed — a pre-approved template is required to re-engage.</div>'; }
+  }
+
+  // ---- actions -------------------------------------------------------------
+  function loadRoster(){ return Promise.resolve(api.roster()).then(function(r){ state.roster=r.conversations||[]; renderRoster(); }); }
+
+  function openConversation(uid){
+    state.activeUid=uid; state.cursor=null; state.messages=[];
+    renderRoster();
+    Promise.resolve(api.thread(uid,null)).then(function(r){
+      state.messages=r.messages||[]; state.cursor=r.cursor||null;
+      if(r.contact) upsertContact(r.contact);
+      renderThread();
+      api.read(uid); // clear unread
+      var c=byId(uid); if(c){ c.unread_count=0; renderRoster(); }
+    });
+  }
+
+  function byId(uid){ return state.roster.filter(function(x){return x.user_id===uid;})[0]; }
+  function upsertContact(c){ var i=state.roster.findIndex(function(x){return x.user_id===c.user_id;}); if(i>=0) state.roster[i]=c; else state.roster.push(c); }
+
+  function doSend(){
+    var uid=state.activeUid; if(!uid) return;
+    var input=$("input"), text=(input.value||"").trim(); if(!text) return;
+    input.value=""; autosize();
+    Promise.resolve(api.send(uid,text)).then(function(res){
+      if(res.status===201){ state.messages.push(res.body.message); state.cursor=res.body.cursor||state.cursor; renderThread(); loadRoster(); }
+      else if(res.status===409){ toast("Out of window — template required."); loadRoster(); }
+      else { toast("Send failed ("+res.status+")"); }
+    }).catch(function(){ toast("Network error"); });
+  }
+
+  // ---- polling -------------------------------------------------------------
+  function poll(){
+    loadRoster();
+    if(state.activeUid){
+      Promise.resolve(api.thread(state.activeUid,state.cursor)).then(function(r){
+        var incoming=r.messages||[];
+        if(incoming.length){ state.messages=state.messages.concat(incoming); state.cursor=r.cursor||state.cursor; renderThread(); api.read(state.activeUid); }
+      });
+    }
+  }
+
+  // ---- wiring --------------------------------------------------------------
+  function autosize(){ var t=$("input"); t.style.height="44px"; t.style.height=Math.min(120,t.scrollHeight)+"px"; }
+  document.addEventListener("click",function(e){ if(e.target&&e.target.id==="send") doSend(); });
+  $("search").addEventListener("input",function(e){ state.filter=e.target.value; renderRoster(); });
+  document.addEventListener("keydown",function(e){ if(e.target&&e.target.id==="input"){ autosize(); if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); doSend(); } } });
+
+  $("mode").textContent = DEMO ? "DEMO (synthetic data)" : "LIVE";
+  if(DEMO) $("mode").classList.add("demo");
+
+  loadRoster().then(function(){ setInterval(poll, CFG.POLL_MS||4000); });
+})();
+</script>
+</body>
+</html>

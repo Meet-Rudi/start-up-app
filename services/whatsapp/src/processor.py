@@ -1,82 +1,58 @@
 """
 MEET_RUDI — meetrudi-wa-processor handler.
 
-Consumes inbound WhatsApp messages from the FIFO queue, pseudonymizes the phone number,
-generates a reply, and sends it back via the provider. Logs each exchange.
+Consumes inbound WhatsApp messages from the FIFO queue, pseudonymizes the phone number, and
+persists the message into the ConversationStore. Then, when AI_RESPONDER is on (default), runs
+the "Real Rudi" AI responder (learn → goal → commit, ported from meetrudi-rudi-chat) and sends
+the reply. With AI_RESPONDER off it is persist-only (operator-console mode) — a human replies
+from the console instead.
 
-MILESTONE SCOPE: stateless single-turn responder (no memory / window-state yet). Per-user
-state + memory + the full stateful Rudi engine are the NEXT infra step. Media is acknowledged
-(fetch/vision/ASR come later).
+Either way every message is stored, so the operator console always sees the live conversation.
+PII (§5): raw phone stays in meta.json (AWS-EU plane); logs carry the pseudonymous userId only.
 """
 
 import os
 import json
-import hmac
-import hashlib
-import datetime
 
 import boto3
 
+import store
+import i18n
 import provider
 import gateway
+import responder
 
-s3 = boto3.client("s3")
+_s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
-LOG_KEY = os.environ.get("WA_LOG_KEY", "external_questions/whatsapp_messages.jsonl")
-RUDI_CONTEXT_KEY = "contexts/rudi-context.md"
 SALT = os.environ.get("PSEUDONYMIZE_SALT", "meetrudi-pilot-salt")
+AI_RESPONDER = os.environ.get("AI_RESPONDER", "true").lower() == "true"
 
-SYSTEM = (
-    "You are Rudi, a warm, encouraging health & lifestyle accountability buddy chatting on "
-    "WhatsApp. Reply briefly and kindly (1-3 short sentences). Never give medical advice; for "
-    "anything clinical, gently suggest the person speak with their doctor or care team. If "
-    "someone signals self-harm or crisis, share https://findahelpline.com/countries/be . "
-    "Reply in the user's language."
-)
-
-_ctx = {}
+STORE = store.ConversationStore(_s3, DATA_BUCKET)
 
 
-def _context():
-    if "c" in _ctx:
-        return _ctx["c"]
-    try:
-        _ctx["c"] = s3.get_object(Bucket=DATA_BUCKET, Key=RUDI_CONTEXT_KEY)["Body"].read().decode("utf-8")
-    except Exception:  # noqa: BLE001
-        _ctx["c"] = ""
-    return _ctx["c"]
+def _to_message(msg: dict) -> store.Message:
+    return store.Message(
+        id=msg.get("provider_msg_id") or store.new_message_id(),
+        direction="in",
+        type=msg.get("type", "text"),
+        text=msg.get("text", "") or "",
+        media=msg.get("media", []) or [],
+        twilio_sid=msg.get("provider_msg_id"),
+        delivery_status="received",
+    )
 
 
-def _user_id(phone):
-    # Pseudonymous, stable id. Raw phone (PII) stays in the AWS-EU plane; logs/AI use this id.
-    return "wa_" + hmac.new(SALT.encode(), phone.encode(), hashlib.sha256).hexdigest()[:24]
-
-
-def _now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-
-def _log(rec):
-    line = json.dumps(rec, ensure_ascii=False)
-    try:
-        try:
-            existing = s3.get_object(Bucket=DATA_BUCKET, Key=LOG_KEY)["Body"].read()
-        except s3.exceptions.NoSuchKey:
-            existing = b""
-        s3.put_object(Bucket=DATA_BUCKET, Key=LOG_KEY,
-                      Body=existing + line.encode("utf-8") + b"\n",
-                      ContentType="application/x-ndjson")
-    except Exception as e:  # noqa: BLE001
-        print("WARN log: %s" % e)
-
-
-def _respond(msg):
-    text = msg.get("text", "")
-    if msg.get("type") in ("image", "audio", "media") and not text:
-        return "Thanks, I got your %s! 👍 I'll be able to look at these properly soon." % msg.get("type")
-    sys = SYSTEM + ("\n\n# About me\n" + _context() if _context() else "")
-    messages = [{"role": "system", "content": sys}, {"role": "user", "content": text}]
-    return gateway.generate(messages, json_mode=False)["text"]
+def _reply_and_persist(uid: str, phone: str, text: str, meta) -> None:
+    """Run the AI responder for one turn, send the reply, persist outbound + AI state + locale."""
+    locale = meta.locale or i18n.DEFAULT_LOCALE
+    reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale)
+    new_locale = info.get("lang") or locale   # "last used language" (falls back to current)
+    provider.send_text(phone, reply)
+    out = store.Message(id=store.new_message_id(), direction="out", type="text",
+                        text=reply, operator_id="ai:rudi")
+    STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale)
+    print("AI uid=%s phase=%s lang=%s model=%s"
+          % (uid, info.get("phase"), new_locale, info.get("model")))
 
 
 def handler(event, context):
@@ -85,21 +61,42 @@ def handler(event, context):
         try:
             msg = json.loads(record["body"])
             phone = msg.get("user_phone", "")
-            reply = _respond(msg)
-            provider.send_text(phone, reply)
-            _log({"at": _now(), "user": _user_id(phone), "type": msg.get("type"),
-                  "in": msg.get("text", ""), "out": reply, "msg_id": msg.get("provider_msg_id")})
+            if not phone:
+                continue
+            uid = store.user_id(phone, SALT)
+            meta = STORE.record_inbound(uid, phone, _to_message(msg))
+            locale = meta.locale or i18n.DEFAULT_LOCALE
+            print("INBOUND uid=%s type=%s sid=%s" % (uid, msg.get("type"), msg.get("provider_msg_id")))
+
+            if not AI_RESPONDER:
+                continue  # operator-console mode: a human answers from the console
+
+            text = msg.get("text", "") or ""
+            if not text:  # media/non-text: acknowledge (localized), don't advance the AI session
+                provider.send_text(phone, i18n.t("media_ack", locale, kind=(msg.get("type") or "message")))
+                continue
+            _reply_and_persist(uid, phone, text, meta)
+
         except gateway.AllRateLimited:
             if phone:
                 try:
-                    provider.send_text(phone, "😴 I'm resting for a bit — message me again in a little while!")
+                    provider.send_text(phone, i18n.t("tired", _locale_for(phone)))
                 except Exception:  # noqa: BLE001
                     pass
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 - one bad record must not poison the batch
             print("ERROR processor: %s" % e)
             if phone:
                 try:
-                    provider.send_text(phone, "Sorry — I had a hiccup. Please try again in a moment. 💬")
+                    provider.send_text(phone, i18n.t("error", _locale_for(phone)))
                 except Exception:  # noqa: BLE001
                     pass
     return {"ok": True}
+
+
+def _locale_for(phone: str) -> str:
+    """Best-effort locale for error/rate-limit messages (never raises)."""
+    try:
+        meta = STORE.get_meta(store.user_id(phone, SALT))
+        return (meta.locale if meta else "") or i18n.DEFAULT_LOCALE
+    except Exception:  # noqa: BLE001
+        return i18n.DEFAULT_LOCALE

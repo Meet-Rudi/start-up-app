@@ -11,6 +11,11 @@ credentials.csv
 *accessKeys*.csv
 .aws/
 
+# --- GDPR / compliance working docs (internal only, NEVER commit) ---
+# Drafts, RoPA, DPIA, processor register, breach log etc. live here until
+# legal sign-off. Keep out of git so internal compliance notes never leak.
+gdpr-matters/
+
 # --- Python ---
 __pycache__/
 *.py[cod]
