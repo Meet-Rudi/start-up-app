@@ -1,0 +1,9 @@
+{
+  "_comment": "WhatsApp out-of-window re-engagement templates, by locale. After each template is APPROVED in Twilio/Meta, paste its Content SID (HX...) into the matching locale array. Multiple SIDs per locale = rotation (picked by reengage_count, so repeats don't look robotic). The template body's {{1}} variable is the goal — the user's stored commitment when available, else the per-language generic from i18n. Edit THIS repo file and run `python deploy.py whatsapp` to publish (do not edit the S3 copy directly — a redeploy re-seeds it).",
+  "reengage": {
+    "en": [],
+    "nl": [],
+    "fr": [],
+    "de": []
+  }
+}

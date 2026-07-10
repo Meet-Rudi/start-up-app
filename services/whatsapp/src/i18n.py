@@ -26,6 +26,8 @@ STRINGS = {
         "error": "Sorry — I had a hiccup. Please try again in a moment. 💬",
         # Proactive keep-warm nudge (free-form, in-window) — invites a reply to reset the window.
         "nudge": "👋 Just checking in — how's it going? A quick reply keeps us moving together 🙂",
+        # Fallback value for the re-engagement template's {{1}} goal variable (no stored goal).
+        "generic_goal": "our agreed goal",
     },
     "de": {
         "intro": ("👋 Hallo, schön dich kennenzulernen! Ich bin Rudi. Ich helfe Menschen, ihre "
@@ -36,6 +38,7 @@ STRINGS = {
         "tired": "😴 Ich mache gerade eine kurze Pause — schreib mir gleich noch einmal!",
         "error": "Entschuldige — da ist etwas schiefgelaufen. Bitte versuch es gleich noch einmal. 💬",
         "nudge": "👋 Ich schau nur kurz vorbei — wie läuft's? Eine kurze Antwort hält uns gemeinsam in Schwung 🙂",
+        "generic_goal": "unserem vereinbarten Ziel",
     },
     "fr": {
         "intro": ("👋 Bonjour, ravi de te rencontrer ! Je suis Rudi. J'aide les gens à atteindre "
@@ -46,6 +49,7 @@ STRINGS = {
         "tired": "😴 Je me repose un petit instant — réécris-moi dans un moment !",
         "error": "Désolé — j'ai eu un petit souci. Réessaie dans un instant, s'il te plaît. 💬",
         "nudge": "👋 Je passe juste prendre des nouvelles — comment ça va ? Un petit mot et on continue ensemble 🙂",
+        "generic_goal": "notre objectif",
     },
     "nl": {
         "intro": ("👋 Hoi, leuk je te ontmoeten! Ik ben Rudi. Ik help mensen hun doelen te "
@@ -56,6 +60,7 @@ STRINGS = {
         "tired": "😴 Ik rust even uit — stuur me zo nog een berichtje!",
         "error": "Sorry — er ging even iets mis. Probeer het zo meteen opnieuw. 💬",
         "nudge": "👋 Ik check even in — hoe gaat het? Een kort berichtje houdt ons samen op gang 🙂",
+        "generic_goal": "ons afgesproken doel",
     },
 }
 

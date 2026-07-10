@@ -174,7 +174,9 @@ Resources:
           PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
           TWILIO_SECRET: meetrudi/whatsapp/twilio
           WHATSAPP_FROM: !Ref WhatsAppFrom
-          TEMPLATE_CONTENT_SID: ""          # set once an out-of-window template is Meta-approved
+          TEMPLATE_CONTENT_SID: ""          # legacy single-template fallback (unused; see wa_templates.json)
+          TEMPLATES_CONFIG_KEY: config/wa_templates.json   # locale -> [approved Content SID,...]
+          REENGAGE_INSERT_GOAL: "true"      # insert the stored goal into {{1}}; else per-language generic
           PROACTIVE_TEST_MODE: "true"       # keep in sync with the processor
           PROACTIVE_TEST_LEAD_MIN: "2"
           # Gateway (for the contextual AI reach-out) — same providers as the processor.
