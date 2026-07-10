@@ -54,6 +54,13 @@ MAX_TEMPLATE_MISSES = 3              # consecutive unanswered templates → dorm
 TEST_MODE = os.environ.get("PROACTIVE_TEST_MODE", "false").lower() == "true"
 TEST_LEAD = datetime.timedelta(minutes=int(os.environ.get("PROACTIVE_TEST_LEAD_MIN", "3")))
 
+# Consent default. In the testing phase, consent is captured on an EXTERNAL web form BEFORE the
+# user is given the number + join phrase, so any inbound already implies prior consent — new
+# contacts default to "granted". When the consent-form export is linked to the DB directly, set
+# DEFAULT_CONSENT_STATE=unknown and let that pipeline grant consent instead. Never overrides an
+# explicit "revoked"/"granted" already on record (see record_inbound).
+DEFAULT_CONSENT_STATE = os.environ.get("DEFAULT_CONSENT_STATE", "granted")
+
 
 # --------------------------------------------------------------------------- time helpers
 def now_dt() -> datetime.datetime:
@@ -138,6 +145,12 @@ class ContactMeta:
     last_reengage_at: str = ""
     quiet_since: str = ""                # first time we found this contact gone quiet
     ai_state: dict[str, Any] = field(default_factory=dict)  # AI responder session state (phase, counters, history)
+    # Profile counters (source for conversations/{uid}/profile.json):
+    msg_total: int = 0                   # all message turns (in + out, any format)
+    msg_user: int = 0                    # inbound turns
+    msg_image_user: int = 0              # inbound image/video turns
+    msg_audio_user: int = 0              # inbound audio turns
+    proactive_sends: int = 0             # system-initiated nudges + templates ("re-engagement")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -394,12 +407,23 @@ class ConversationStore:
         meta = self.get_meta(uid) or ContactMeta(user_id=uid, phone=phone)
         if phone and not meta.phone:
             meta.phone = phone
+        # External consent form precedes first contact → treat inbound as consented (testing phase).
+        # Only upgrades "unknown"; never overrides an explicit "revoked" or existing "granted".
+        if meta.consent_state == "unknown":
+            meta.consent_state = DEFAULT_CONSENT_STATE
         meta.last_inbound_at = msg.at
         meta.window_open_until = window_open_until(msg.at)
         meta.unread_count += 1
         meta.last_message_at = msg.at
         meta.last_message_preview = _preview(msg)
         meta.last_direction = "in"
+        # Profile counters (created_at doubles as first_message; last_inbound_at as last user turn).
+        meta.msg_total += 1
+        meta.msg_user += 1
+        if msg.type in ("image", "video"):
+            meta.msg_image_user += 1
+        elif msg.type == "audio":
+            meta.msg_audio_user += 1
         # User re-engaged → fresh window: reset proactive state and reschedule from scratch.
         meta.nudge_sent_for_window = ""
         meta.reengage_count = 0
@@ -426,10 +450,13 @@ class ConversationStore:
         meta.last_message_at = msg.at
         meta.last_message_preview = _preview(msg)
         meta.last_direction = "out"
+        meta.msg_total += 1
         if ai_state is not None:
             meta.ai_state = ai_state
         if locale:
             meta.locale = locale
+        if proactive_kind in ("nudge", "template"):
+            meta.proactive_sends += 1
         if proactive_kind == "nudge":
             meta.nudge_sent_for_window = meta.window_open_until
             meta.quiet_since = meta.quiet_since or msg.at
@@ -455,6 +482,55 @@ class ConversationStore:
             meta.unread_count = 0
             self.put_meta(meta)
         return meta
+
+    # ------------------------------------------------------------------ profile
+    def _profile_key(self, uid: str) -> str:
+        return f"{self._prefix}/{uid}/profile.json"
+
+    def get_profile(self, uid: str) -> dict[str, Any]:
+        return self._get_json(self._profile_key(uid)) or {}
+
+    def write_profile(self, uid: str, extracted_goal: Optional[str] = None,
+                      development: Optional[str] = None,
+                      now: Optional[datetime.datetime] = None) -> dict[str, Any]:
+        """Compose/refresh conversations/{uid}/profile.json from meta + derived fields.
+
+        extracted_goal / development default to the existing profile values when not supplied, so
+        a write that doesn't know them won't erase them. Stamps last_profile_update_at each time.
+        """
+        meta = self.get_meta(uid)
+        if meta is None:
+            return {}
+        existing = self.get_profile(uid)
+        total = meta.msg_total
+        proactivity = 0.5 if total <= 0 else round(max(0.0, (total - meta.proactive_sends) / total), 4)
+        profile = {
+            "extracted_goal_commitment": extracted_goal if extracted_goal is not None
+            else existing.get("extracted_goal_commitment"),
+            "proactivity_index": proactivity,
+            "timestamp_last_user_turn": meta.last_inbound_at,
+            "most_recent_development": development if development is not None
+            else existing.get("most_recent_development"),
+            "attitude": existing.get("attitude"),   # reserved (null for now)
+            "timestamp_first_message": meta.created_at,
+            "messages_count_total": meta.msg_total,
+            "messages_count_user": meta.msg_user,
+            "messages_image_user": meta.msg_image_user,
+            "messages_audio_user": meta.msg_audio_user,
+            "last_profile_update_at": to_iso(now or now_dt()),
+        }
+        self._put_json(self._profile_key(uid), profile)
+        return profile
+
+    def profile_is_stale(self, uid: str) -> bool:
+        """True if messages exist newer than the profile's last update (or no profile yet)."""
+        meta = self.get_meta(uid)
+        if meta is None or not meta.last_message_at:
+            return False
+        last_update = self.get_profile(uid).get("last_profile_update_at", "")
+        if not last_update:
+            return True
+        return parse_iso(meta.last_message_at) > parse_iso(last_update)
 
     def set_keep_warm(self, uid: str, enabled: bool,
                       now: Optional[datetime.datetime] = None) -> Optional[ContactMeta]:

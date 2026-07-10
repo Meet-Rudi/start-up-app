@@ -110,6 +110,9 @@ Resources:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
           PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
           AI_RESPONDER: "true"
+          # Testing phase: external consent form precedes first contact → inbound implies consent.
+          # Set to "unknown" once the consent-form export grants consent in the DB directly.
+          DEFAULT_CONSENT_STATE: "granted"
           TWILIO_SECRET: meetrudi/whatsapp/twilio
           WHATSAPP_FROM: !Ref WhatsAppFrom
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
@@ -174,6 +177,12 @@ Resources:
           TEMPLATE_CONTENT_SID: ""          # set once an out-of-window template is Meta-approved
           PROACTIVE_TEST_MODE: "true"       # keep in sync with the processor
           PROACTIVE_TEST_LEAD_MIN: "2"
+          # Gateway (for the contextual AI reach-out) — same providers as the processor.
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_SECRET: meetrudi-groq-firstkey
+          HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
       Events:
         Tick:
           Type: Schedule
