@@ -59,6 +59,11 @@ COMPONENTS = {
         "seed_dir": "services/whatsapp/seed",   # WhatsApp-aware prompt(s)
         "seed_bucket_from": "meetrudi-base",
     },
+    "registration": {
+        "stack": "meetrudi-registration",
+        "template": "services/registration/template.yaml",
+        "build": True,   # consent intake endpoint (CM pilot form)
+    },
 }
 
 
@@ -168,6 +173,12 @@ def main():
         print(">> Test console needs secret meetrudi/test-console/auth (fails CLOSED without it).")
         print(">> Put the Test console URL into site/test-console/test-config.js (API_BASE), then")
         print("   push to main -> GitHub Pages publishes https://meet-rudi.github.io/start-up-app/test-console/")
+    elif name == "registration":
+        url = _stack_output("meetrudi-registration", "ConsentIntakeUrl")
+        print("Consent intake URL:", url)
+        print(">> Put this URL into web/cm-consent-form/*.html (API_BASE).")
+        print(">> Records land in s3://<data-bucket>/registrations/consent_documents/ .")
+        print(">> Enable S3 Versioning on the data bucket to keep an immutable consent audit trail.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI registration/consent intake: a public Function-URL endpoint the CM pilot consent form
+  POSTs to. Validates server-side and writes a GDPR record-of-consent to the EU data bucket under
+  registrations/consent_documents/. Uses the console-created meetrudi-lambda-runner role (S3 write
+  on the data bucket). No IAM resources here (rudi-deployer cannot create IAM).
+
+Parameters:
+  ConsentAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: CORS origin for the consent form (set to the external partner's site origin for production).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 256
+
+Resources:
+
+  ConsentIntakeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-consent-intake
+      RetentionInDays: 30
+
+  ConsentIntakeFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ConsentIntakeLogGroup
+    Properties:
+      FunctionName: meetrudi-consent-intake
+      Handler: consent_intake.handler
+      CodeUri: src/
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          CONSENT_PREFIX: registrations/consent_documents
+          # Same salt as the WhatsApp store so the pseudonym links a consent record to its contact.
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          DEFAULT_COUNTRY_CODE: "+32"
+          FORM_VERSION: cm-2026-07
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref ConsentAllowOrigin]
+          AllowMethods: ["POST"]   # preflight (OPTIONS) is auto-handled by the Function URL
+          AllowHeaders: ["content-type"]
+
+Outputs:
+  ConsentIntakeUrl:
+    Description: Put this into the consent form (API_BASE) as the POST target
+    Value: !GetAtt ConsentIntakeFunctionUrl.FunctionUrl

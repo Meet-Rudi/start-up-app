@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — Your Health's Best Friend</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#253e7f; --secondary:#3979aa; --accent:#eb23c5; --bg:#efefef; --card:#fff;
+    --border:#d9d9d9; --muted:#6b7280; --ok:#16a34a; --err:#b23b3b;
+    --radius:.75rem; --font:"Nunito",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font);color:var(--navy);background:var(--bg);line-height:1.5}
+  .wrap{max-width:42rem;margin:0 auto;padding:2rem 1.25rem}
+  h1{font-size:2rem;font-weight:800;margin:.2rem 0 .75rem;line-height:1.15}
+  h2{font-size:1.5rem;font-weight:700;margin:0 0 .5rem}
+  p{margin:0 0 .75rem}
+  a{color:var(--accent);text-decoration:underline}
+  .req{color:var(--accent)}
+  .muted{color:var(--muted)}
+  .sm{font-size:.875rem}
+  .xs{font-size:.75rem}
+  .lead{font-size:1.125rem;color:#3a4256;margin-bottom:1.5rem}
+  .brandrow{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem}
+  .brandlogo{width:4rem;height:4rem;border-radius:50%;background:linear-gradient(135deg,var(--navy),var(--secondary));
+    color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 auto;box-shadow:0 4px 6px rgba(0,0,0,.1)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem}
+  .note{border-left:4px solid var(--accent);background:rgba(235,35,197,.05);border-radius:var(--radius);padding:1.25rem}
+  ol,ul{margin:0;padding-left:1.25rem}
+  ol li,ul li{margin:.3rem 0}
+  section{margin-bottom:2.5rem}
+  .step{font-size:.875rem;font-weight:700;color:var(--accent);margin-bottom:.5rem}
+  label.fld{display:block;font-weight:600;margin:0 0 .25rem}
+  .hint{font-size:.875rem;color:var(--muted);margin:0 0 .5rem}
+  input[type=text],input[type=tel],input[type=email],select,textarea{
+    width:100%;border:1px solid var(--border);background:var(--card);border-radius:var(--radius);
+    padding:.75rem 1rem;font-family:inherit;font-size:1rem;color:var(--navy);outline:none;transition:border .15s,box-shadow .15s}
+  input:focus,select:focus,textarea:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(37,62,127,.25)}
+  textarea{resize:vertical;min-height:5rem}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
+  .optrow{display:flex;align-items:center;gap:.6rem;border:1px solid var(--border);border-radius:var(--radius);
+    padding:.75rem;cursor:pointer;transition:border .15s}
+  .optrow:hover{border-color:rgba(37,62,127,.5)}
+  .optrow input{accent-color:var(--navy);width:1.15rem;height:1.15rem}
+  .field{margin-bottom:1.25rem}
+  .space > *{margin-bottom:1.25rem}
+  .pill{padding:.5rem 1rem;border-radius:999px;border:1px solid var(--border);background:var(--card);
+    font-size:.875rem;font-weight:500;font-family:inherit;color:var(--navy);cursor:pointer;transition:all .15s}
+  .pill:hover{border-color:var(--navy);background:rgba(37,62,127,.05)}
+  .pill.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .pills{display:flex;flex-wrap:wrap;gap:.5rem}
+  .sliderrow{display:flex;align-items:center;gap:1rem}
+  input[type=range]{flex:1;accent-color:var(--navy);height:.5rem}
+  .sval{min-width:3rem;text-align:center;font-weight:700;font-size:1.25rem;padding:.25rem .75rem;
+    border-radius:var(--radius);background:#e9e9e9;color:var(--muted)}
+  .scale{display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);margin-top:.5rem}
+  .daygrid{display:grid;grid-template-columns:repeat(8,1fr);gap:.4rem}
+  .day{aspect-ratio:1;min-height:2.75rem;border-radius:var(--radius);border:1px solid var(--border);
+    background:var(--card);font-weight:600;font-family:inherit;color:var(--navy);cursor:pointer;transition:all .15s}
+  .day:hover{border-color:var(--navy);background:rgba(37,62,127,.05)}
+  .day.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .cta{width:100%;background:var(--navy);color:#fff;font-weight:700;font-size:1.125rem;border:none;
+    padding:1rem;border-radius:var(--radius);cursor:pointer;box-shadow:0 4px 6px rgba(0,0,0,.1);min-height:3.5rem}
+  .cta:hover{background:#1e3468}
+  .cta:disabled{opacity:.6;cursor:not-allowed}
+  .fielderr{color:var(--err);font-size:.8rem;margin-top:.35rem;display:none}
+  .invalid input,.invalid select,.invalid textarea{border-color:var(--err)}
+  .invalid .fielderr{display:block}
+  .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(20,26,48,.55);display:none;align-items:center;justify-content:center;padding:1rem;z-index:50}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:1rem;max-width:26rem;width:100%;padding:1.5rem;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .modal h3{margin:0 0 .5rem}
+  .modal .mfield{margin:.9rem 0}
+  .modal .row{display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.2rem}
+  .btn{border:none;border-radius:.6rem;padding:.6rem 1rem;font-weight:700;font-family:inherit;cursor:pointer}
+  .btn.primary{background:var(--navy);color:#fff}
+  .btn.light{background:#eef2fb;color:var(--navy);border:1px solid var(--border)}
+  .modal .merr{color:var(--err);font-size:.8rem;min-height:1rem;margin-top:.4rem}
+  .done{text-align:center;padding:3rem 1rem}
+  .done .check{width:4rem;height:4rem;border-radius:50%;background:var(--ok);color:#fff;font-size:2rem;
+    display:flex;align-items:center;justify-content:center;margin:0 auto 1rem}
+  .banner{background:#fdeaea;color:var(--err);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:1rem;display:none}
+  .banner.show{display:block}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <div class="brandrow">
+      <div class="brandlogo">CM</div>
+      <div class="sm muted" style="line-height:1.3">In partnership with<br><span style="font-weight:700;color:var(--navy)">Christelijke Mutualiteit</span></div>
+    </div>
+    <h1 style="color:var(--navy)">Welcome to the Rudi pilot project</h1>
+    <p class="lead">Great to have you on board. Just a few short questions (± 2 minutes) and Rudi will send you your first WhatsApp message.</p>
+    <div class="card">
+      <h2 style="font-size:1.125rem;color:var(--navy)">How it works:</h2>
+      <ol>
+        <li>Answer the questions below so Rudi can already get to know you.</li>
+        <li>Give your consent.</li>
+        <li>Rudi will contact you to start pilot project. You don't need to do anything else.</li>
+      </ol>
+    </div>
+  </header>
+
+  <section style="margin-top:2.5rem">
+    <h2 style="color:var(--navy)">Who is Rudi?</h2>
+    <p>Rudi is a digital health coach, developed by general practitioner Dr. Frederik Dierick and clinical psychologist Beata Bouwer. Over 90 days, Rudi guides you via WhatsApp towards eating healthier, moving more and sleeping better — with small, achievable steps that fit your life.</p>
+    <p>The big difference from an app: Rudi doesn't wait until you ask something. Rudi sends you messages himself, encourages you, thinks along with you when things aren't going well, and adapts the coaching to your pace. You can think of him as a health coach in your pocket, with endless knowledge and motivation to work on your health together with you.</p>
+    <div class="note">
+      <p style="font-weight:700;color:var(--navy)">Good to know:</p>
+      <ul>
+        <li>Rudi does not replace your doctor and gives no advice about medication. For medical questions, your GP or specialist remains your point of contact.</li>
+        <li>This is a pilot project. Your experience helps us improve Rudi further. That's why we ask you a few short questions now, and the same ones again after 90 days. That way we can see your progress together.</li>
+        <li>You can stop at any time, without giving a reason.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="banner" id="banner"></div>
+
+  <form id="form" novalidate>
+    <!-- honeypot: hidden from humans -->
+    <div class="hp" aria-hidden="true"><label>Leave this field empty<input type="text" id="hp_field" tabindex="-1" autocomplete="off"></label></div>
+
+    <!-- STEP 1 -->
+    <section>
+      <div class="step">Step 1 of 3</div>
+      <h2 style="color:var(--navy)">About you</h2>
+      <p class="muted">Tell Rudi who you are. The better Rudi knows you, the more personal the coaching from day one.</p>
+      <div class="space" style="margin-top:1.5rem">
+        <div class="field" data-field="first_name">
+          <label class="fld" for="voornaam">First name <span class="req">*</span></label>
+          <p class="hint">So Rudi knows how to address you.</p>
+          <input type="text" id="voornaam" autocomplete="given-name" maxlength="120">
+          <div class="fielderr">Please enter your first name.</div>
+        </div>
+        <div class="field" data-field="mobile_number">
+          <label class="fld" for="gsm">Mobile number (important: this number is registered on WhatsApp) <span class="req">*</span></label>
+          <p class="hint">Rudi will send your messages to this number.</p>
+          <input type="tel" id="gsm" inputmode="tel" autocomplete="tel" placeholder="+32 4XX XX XX XX or 04XX XX XX XX">
+          <div class="fielderr">Please enter a valid mobile number.</div>
+        </div>
+        <div class="field" data-field="whatsapp_number_confirmed">
+          <label class="optrow" style="align-items:flex-start">
+            <input type="checkbox" id="gsmConfirm" style="margin-top:.15rem">
+            <span>I confirm I am already using this number for WhatsApp communication. <span class="req">*</span></span>
+          </label>
+          <div class="fielderr">Please confirm this number is active on WhatsApp.</div>
+        </div>
+        <div class="field" data-field="email">
+          <label class="fld" for="email">Email address <span class="req">*</span></label>
+          <p class="hint">For your confirmation and practical info about the pilot project.</p>
+          <input type="email" id="email" autocomplete="email" maxlength="254">
+          <div class="fielderr">Please enter a valid email address.</div>
+        </div>
+        <div class="field" data-field="year_of_birth">
+          <label class="fld" for="geboortejaar">Year of birth <span class="req">*</span></label>
+          <select id="geboortejaar"><option value="">Choose a year…</option></select>
+          <div class="fielderr">Please choose your year of birth.</div>
+        </div>
+        <div class="field" data-field="gender">
+          <label class="fld">Gender <span class="req">*</span></label>
+          <div class="grid2" id="gender">
+            <label class="optrow"><input type="radio" name="geslacht" value="female"><span>female</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="male"><span>male</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="other"><span>other</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="prefer not to say"><span>prefer not to say</span></label>
+          </div>
+          <div class="fielderr">Please select an option.</div>
+        </div>
+        <div class="field" data-field="municipality">
+          <label class="fld" for="gemeente">In which municipality or city do you live? <span class="req">*</span></label>
+          <p class="hint">This way Rudi can take things like the weather into account when giving you exercise tips.</p>
+          <input type="text" id="gemeente" autocomplete="address-level2" maxlength="120">
+          <div class="fielderr">Please enter your municipality or city.</div>
+        </div>
+        <div class="field" data-field="cm_member_t2d">
+          <label class="optrow" style="align-items:flex-start">
+            <input type="checkbox" id="cmLid" style="margin-top:.15rem">
+            <span>I am a CM member and was diagnosed with type 2 diabetes after 2016.</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP 2 -->
+    <section>
+      <div class="step">Step 2 of 3</div>
+      <h2 style="color:var(--navy)">Your starting point</h2>
+      <p class="muted">There are no right or wrong answers — choose whatever fits you best today. Rudi uses this to start fully tailored to you right away, and after 90 days we'll look together at how far you've come.</p>
+      <div style="margin-top:1.5rem">
+        <div class="field" data-field="help_areas">
+          <p class="fld">What would you most like help with over the next 90 days? (choose a maximum of 2) <span class="req">*</span></p>
+          <p class="hint">Selected: <span id="helpCount">0</span>/2</p>
+          <div class="pills" id="help">
+            <button type="button" class="pill">Eating healthier</button>
+            <button type="button" class="pill">Moving more</button>
+            <button type="button" class="pill">Sleeping better</button>
+            <button type="button" class="pill">Keeping up my motivation</button>
+            <button type="button" class="pill">Dealing with stress</button>
+            <button type="button" class="pill">Getting more energy</button>
+          </div>
+          <div class="fielderr">Please choose 1 or 2 options.</div>
+        </div>
+
+        <div class="field slider" data-field="confidence_self_improve">
+          <p class="fld">How much confidence do you have today that you can improve your health yourself? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = no confidence at all</span><span>10 = a lot of confidence</span></div>
+          <div class="fielderr">Please move the slider to answer.</div>
+        </div>
+        <div class="field slider" data-field="energy_past_week">
+          <p class="fld">How much energy did you have over the past week? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = constantly tired</span><span>10 = full of energy</span></div>
+          <div class="fielderr">Please move the slider to answer.</div>
+        </div>
+        <div class="field slider" data-field="healthy_living_past_week">
+          <p class="fld">How well did you manage over the past week to live as healthily as you would like — in terms of eating, moving and sleeping? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = not at all</span><span>10 = completely</span></div>
+          <div class="fielderr">Please move the slider to answer.</div>
+        </div>
+        <div class="field slider" data-field="support_felt">
+          <p class="fld">How supported do you feel right now in working on your health? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = I'm on my own</span><span>10 = I feel very well supported</span></div>
+          <div class="fielderr">Please move the slider to answer.</div>
+        </div>
+
+        <div class="field" data-field="active_days_past_week">
+          <p class="fld">On how many days over the past week were you active for at least 30 minutes, for example brisk walking or cycling? <span class="req">*</span></p>
+          <div class="daygrid" id="days">
+            <button type="button" class="day">0</button><button type="button" class="day">1</button>
+            <button type="button" class="day">2</button><button type="button" class="day">3</button>
+            <button type="button" class="day">4</button><button type="button" class="day">5</button>
+            <button type="button" class="day">6</button><button type="button" class="day">7</button>
+          </div>
+          <div class="fielderr">Please select a number of days.</div>
+        </div>
+
+        <div class="field" data-field="prior_digital_tools">
+          <p class="fld">Have you used apps or digital tools before to live healthier? <span class="req">*</span></p>
+          <div class="space" style="display:flex;flex-direction:column;gap:.5rem" id="prior">
+            <label class="optrow"><input type="radio" name="q7" value="No, this is the first time"><span>No, this is the first time</span></label>
+            <label class="optrow"><input type="radio" name="q7" value="Yes, but I dropped out"><span>Yes, but I dropped out</span></label>
+            <label class="optrow"><input type="radio" name="q7" value="Yes, and I still use one"><span>Yes, and I still use one</span></label>
+          </div>
+          <div class="fielderr">Please select an option.</div>
+        </div>
+
+        <div class="field" data-field="notes_for_rudi">
+          <label class="fld" for="q8">Is there anything Rudi should definitely know about you to coach you well? <span class="muted" style="font-weight:400">(optional)</span></label>
+          <textarea id="q8" rows="4" maxlength="2000"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP 3 -->
+    <section>
+      <div class="step">Step 3 of 3</div>
+      <h2 style="color:var(--navy)">Your data is in safe hands</h2>
+      <ul style="margin-bottom:1.5rem">
+        <li>Everything you fill in here and everything you later discuss with Rudi is encrypted and stored securely on servers within the European Union.</li>
+        <li>Your data is never sold and never used for advertising purposes and it will be deleted after the pilot project completion in line with privacy policy.</li>
+        <li>CM does not receive individual answers or conversations — only anonymous group results about the pilot project.</li>
+        <li>You can view, correct or delete your data at any time. One email to <a href="mailto:privacy@meetrudi.eu">privacy@meetrudi.eu</a> is all it takes.</li>
+        <li>You can stop at any time: just send "STOP" to Rudi. Withdrawing your consent is as easy as giving it.</li>
+      </ul>
+      <div class="field" data-field="consent_health_data_processing">
+        <label class="optrow" style="align-items:flex-start">
+          <input type="checkbox" id="consent1" style="margin-top:.15rem">
+          <span class="sm" id="consent1text">I have read the <a href="#privacy" target="_blank" rel="noopener noreferrer">privacy statement</a> and the <a href="#terms" target="_blank" rel="noopener noreferrer">terms and conditions</a> and agree to them. I explicitly consent to the processing of my health data for my personal coaching by Rudi and for the anonymous evaluation of this pilot project.</span>
+        </label>
+        <div class="fielderr">This consent is required to take part.</div>
+      </div>
+      <label class="optrow" style="align-items:flex-start">
+        <input type="checkbox" id="consent2" style="margin-top:.15rem">
+        <span class="sm" id="consent2text">Rudi may contact me after the pilot project ends about a possible follow-up.</span>
+      </label>
+    </section>
+
+    <div>
+      <button type="submit" class="cta" id="cta">I Agree &amp; Register me for Rudi Pilot Project</button>
+      <p class="sm muted" style="text-align:center;margin-top:1rem">After you register, Rudi will reach out as soon as the pilot project begins. If something goes wrong or you have questions, send an email to <a href="mailto:support@meetrudi.eu">support@meetrudi.eu</a>.</p>
+    </div>
+  </form>
+</div>
+
+<!-- re-entry challenge modal -->
+<div class="overlay" id="challenge">
+  <div class="modal">
+    <h3>Quick confirmation</h3>
+    <p class="sm muted">To confirm you're a real person and your details are correct, please re-type the following exactly as you entered them.</p>
+    <div id="challengeFields"></div>
+    <div class="merr" id="challengeErr"></div>
+    <div class="row">
+      <button class="btn light" type="button" id="challengeCancel">Back</button>
+      <button class="btn primary" type="button" id="challengeConfirm">Confirm &amp; send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  // ---- config -------------------------------------------------------------
+  var API_BASE = "https://hgailnjxcox3jyett3hqqfo52u0rwyym.lambda-url.eu-central-1.on.aws";
+  var FORM_LANGUAGE = "en";
+  var FORM_VERSION = "cm-2026-07";
+  var PRIVACY_POLICY_VERSION = "";         // <-- set when the versioned policy URL exists
+  var TERMS_VERSION = "";
+
+  var $ = function(s,r){ return (r||document).querySelector(s); };
+  var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
+
+  // year-of-birth options 2008..1930
+  var sel = $("#geboortejaar");
+  for(var y=2008; y>=1930; y--){ var o=document.createElement("option"); o.value=String(y); o.textContent=String(y); sel.appendChild(o); }
+
+  // ---- interactive controls ----------------------------------------------
+  // help pills (max 2)
+  var helpSel = [];
+  $$("#help .pill").forEach(function(b){
+    b.onclick=function(){
+      var t=b.textContent, i=helpSel.indexOf(t);
+      if(i>=0){ helpSel.splice(i,1); b.classList.remove("on"); }
+      else { if(helpSel.length>=2) return; helpSel.push(t); b.classList.add("on"); }
+      $("#helpCount").textContent=helpSel.length;
+    };
+  });
+  // day buttons (single select)
+  var daySel = null;
+  $$("#days .day").forEach(function(b){
+    b.onclick=function(){ $$("#days .day").forEach(function(x){x.classList.remove("on");}); b.classList.add("on"); daySel=parseInt(b.textContent,10); };
+  });
+  // sliders (track touched)
+  $$(".slider").forEach(function(f){
+    var r=$("input[type=range]",f), out=$(".sval",f);
+    r.addEventListener("input",function(){ f.dataset.touched="1"; out.textContent=r.value; out.style.background="var(--navy)"; out.style.color="#fff"; });
+  });
+
+  // ---- value collection ---------------------------------------------------
+  function answers(){
+    var a={
+      first_name: $("#voornaam").value.trim(),
+      mobile_number: $("#gsm").value.trim(),
+      whatsapp_number_confirmed: $("#gsmConfirm").checked,
+      email: $("#email").value.trim(),
+      year_of_birth: $("#geboortejaar").value ? parseInt($("#geboortejaar").value,10) : null,
+      gender: (document.querySelector("input[name=geslacht]:checked")||{}).value || null,
+      municipality: $("#gemeente").value.trim(),
+      cm_member_t2d: $("#cmLid").checked,
+      help_areas: helpSel.slice(),
+      support_felt: sliderVal("support_felt"),
+      confidence_self_improve: sliderVal("confidence_self_improve"),
+      energy_past_week: sliderVal("energy_past_week"),
+      healthy_living_past_week: sliderVal("healthy_living_past_week"),
+      active_days_past_week: daySel,
+      prior_digital_tools: (document.querySelector("input[name=q7]:checked")||{}).value || null,
+      notes_for_rudi: $("#q8").value.trim()
+    };
+    return a;
+  }
+  function sliderVal(key){
+    var f=document.querySelector('.slider[data-field="'+key+'"]');
+    if(!f || f.dataset.touched!=="1") return null;
+    return parseInt($("input[type=range]",f).value,10);
+  }
+
+  // ---- validation (mirrors the server) ------------------------------------
+  var EMAIL=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  function phoneOk(v){ var s=v.replace(/[^\d+]/g,""); if(s.indexOf("00")===0)s="+"+s.slice(2); else if(s[0]==="0")s="+32"+s.slice(1); else if(s[0]!=="+")s="+32"+s; return /^\+\d{8,15}$/.test(s); }
+  function mark(field, bad){ var el=document.querySelector('[data-field="'+field+'"]'); if(el) el.classList.toggle("invalid", !!bad); return el; }
+
+  function validate(){
+    var a=answers(), firstBad=null;
+    function fail(f){ mark(f,true); if(!firstBad) firstBad=document.querySelector('[data-field="'+f+'"]'); }
+    ["first_name","municipality"].forEach(function(f){ mark(f,false); if(!a[f]) fail(f); });
+    mark("mobile_number",false); if(!a.mobile_number || !phoneOk(a.mobile_number)) fail("mobile_number");
+    mark("whatsapp_number_confirmed",false); if(!a.whatsapp_number_confirmed) fail("whatsapp_number_confirmed");
+    mark("email",false); if(!EMAIL.test(a.email)) fail("email");
+    mark("year_of_birth",false); if(!a.year_of_birth) fail("year_of_birth");
+    mark("gender",false); if(!a.gender) fail("gender");
+    mark("help_areas",false); if(a.help_areas.length<1 || a.help_areas.length>2) fail("help_areas");
+    ["confidence_self_improve","energy_past_week","healthy_living_past_week","support_felt"].forEach(function(f){
+      mark(f,false); if(a[f]===null) fail(f); });
+    mark("active_days_past_week",false); if(a.active_days_past_week===null) fail("active_days_past_week");
+    mark("prior_digital_tools",false); if(!a.prior_digital_tools) fail("prior_digital_tools");
+    mark("consent_health_data_processing",false); if(!$("#consent1").checked) fail("consent_health_data_processing");
+    return {ok:!firstBad, first:firstBad, answers:a};
+  }
+
+  // ---- submit flow --------------------------------------------------------
+  var pending=null;   // {answers}
+  $("#form").addEventListener("submit", function(e){
+    e.preventDefault();
+    hideBanner();
+    var v=validate();
+    if(!v.ok){ v.first.scrollIntoView({behavior:"smooth",block:"center"}); return; }
+    pending={answers:v.answers};
+    openChallenge(v.answers);
+  });
+
+  // re-entry challenge: pick 2 random filled text fields to re-type
+  var CH_FIELDS=[["first_name","First name","#voornaam"],["mobile_number","Mobile number","#gsm"],
+                 ["email","Email address","#email"],["municipality","Municipality / city","#gemeente"]];
+  var chPicked=[];
+  function openChallenge(a){
+    var pool=CH_FIELDS.filter(function(f){ return (a[f[0]]||"").length>0; });
+    // pseudo-shuffle by rotating from a changing index (no Math.random dependency for determinism-safety)
+    for(var i=pool.length-1;i>0;i--){ var j=(i*7+ (a.first_name.length+a.mobile_number.length)) % (i+1); var t=pool[i];pool[i]=pool[j];pool[j]=t; }
+    chPicked=pool.slice(0,Math.min(2,pool.length));
+    var host=$("#challengeFields"); host.innerHTML="";
+    chPicked.forEach(function(f){
+      var d=document.createElement("div"); d.className="mfield";
+      d.innerHTML='<label class="fld sm">'+f[1]+'</label><input type="text" data-key="'+f[0]+'" autocomplete="off">';
+      host.appendChild(d);
+    });
+    $("#challengeErr").textContent="";
+    $("#challenge").classList.add("show");
+    var first=$("#challengeFields input"); if(first) first.focus();
+  }
+  $("#challengeCancel").onclick=function(){ $("#challenge").classList.remove("show"); };
+  $("#challengeConfirm").onclick=function(){
+    var a=pending.answers, allOk=true;
+    $$("#challengeFields input").forEach(function(inp){
+      var key=inp.dataset.key, orig=String(a[key]||"").trim().toLowerCase(), re=inp.value.trim().toLowerCase();
+      if(orig!==re) allOk=false;
+    });
+    if(!allOk){ $("#challengeErr").textContent="That doesn't match what you entered above. Please re-type it exactly."; return; }
+    $("#challenge").classList.remove("show");
+    submit(a);
+  };
+
+  function submit(a){
+    var cta=$("#cta"); cta.disabled=true; cta.textContent="Sending…";
+    var payload={
+      form_language: FORM_LANGUAGE, form_version: FORM_VERSION,
+      privacy_policy_version: PRIVACY_POLICY_VERSION, terms_version: TERMS_VERSION,
+      answers: a,
+      consents: { consent_health_data_processing: $("#consent1").checked,
+                  consent_followup_contact: $("#consent2").checked },
+      consent_texts: { consent_health_data_processing: $("#consent1text").textContent.trim(),
+                       consent_followup_contact: $("#consent2text").textContent.trim() },
+      challenge: chPicked.length ? {field: chPicked[0][0], value: String(a[chPicked[0][0]])} : null,
+      hp_field: $("#hp_field").value
+    };
+    if(!API_BASE){ showBanner("Form is not configured yet (missing API endpoint). Please contact support@meetrudi.eu."); reset(); return; }
+    fetch(API_BASE.replace(/\/$/,""), {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)})
+      .then(async function(r){ var b={}; try{ b=await r.json(); }catch(e){} return {status:r.status,body:b}; })
+      .then(function(res){
+        if(res.status===201){ success(); }
+        else if(res.status===422){ reset(); var f=res.body.field; if(f){ mark(f,true); var el=document.querySelector('[data-field="'+f+'"]'); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); } showBanner("Please check the highlighted field and try again."); }
+        else if(res.status===413){ reset(); showBanner("Your message is too long. Please shorten it and try again."); }
+        else { reset(); showBanner("Something went wrong ("+res.status+"). Please try again in a moment."); }
+      })
+      .catch(function(){ reset(); showBanner("Network error — please check your connection and try again."); });
+  }
+  function reset(){ var cta=$("#cta"); cta.disabled=false; cta.textContent="I Agree & Register me for Rudi Pilot Project"; }
+  function success(){
+    $("#app").innerHTML='<div class="done"><div class="check">✓</div>'+
+      '<h1 style="color:var(--navy)">Thank you — you\'re all set!</h1>'+
+      '<p class="lead">Rudi will contact you as soon as the pilot project begins. You don\'t need to do anything else.</p>'+
+      '<p class="sm muted">Questions? Email <a href="mailto:support@meetrudi.eu">support@meetrudi.eu</a>.</p></div>';
+    window.scrollTo(0,0);
+  }
+  function showBanner(m){ var b=$("#banner"); b.textContent=m; b.classList.add("show"); b.scrollIntoView({behavior:"smooth",block:"center"}); }
+  function hideBanner(){ $("#banner").classList.remove("show"); }
+})();
+</script>
+</body>
+</html>

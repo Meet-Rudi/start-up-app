@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — Jouw beste gezondheidsmaatje</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#253e7f; --secondary:#3979aa; --accent:#eb23c5; --bg:#efefef; --card:#fff;
+    --border:#d9d9d9; --muted:#6b7280; --ok:#16a34a; --err:#b23b3b;
+    --radius:.75rem; --font:"Nunito",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font);color:var(--navy);background:var(--bg);line-height:1.5}
+  .wrap{max-width:42rem;margin:0 auto;padding:2rem 1.25rem}
+  h1{font-size:2rem;font-weight:800;margin:.2rem 0 .75rem;line-height:1.15}
+  h2{font-size:1.5rem;font-weight:700;margin:0 0 .5rem}
+  p{margin:0 0 .75rem}
+  a{color:var(--accent);text-decoration:underline}
+  .req{color:var(--accent)}
+  .muted{color:var(--muted)}
+  .sm{font-size:.875rem}
+  .xs{font-size:.75rem}
+  .lead{font-size:1.125rem;color:#3a4256;margin-bottom:1.5rem}
+  .brandrow{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem}
+  .brandlogo{width:4rem;height:4rem;border-radius:50%;background:linear-gradient(135deg,var(--navy),var(--secondary));
+    color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 auto;box-shadow:0 4px 6px rgba(0,0,0,.1)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem}
+  .note{border-left:4px solid var(--accent);background:rgba(235,35,197,.05);border-radius:var(--radius);padding:1.25rem}
+  ol,ul{margin:0;padding-left:1.25rem}
+  ol li,ul li{margin:.3rem 0}
+  section{margin-bottom:2.5rem}
+  .step{font-size:.875rem;font-weight:700;color:var(--accent);margin-bottom:.5rem}
+  label.fld{display:block;font-weight:600;margin:0 0 .25rem}
+  .hint{font-size:.875rem;color:var(--muted);margin:0 0 .5rem}
+  input[type=text],input[type=tel],input[type=email],select,textarea{
+    width:100%;border:1px solid var(--border);background:var(--card);border-radius:var(--radius);
+    padding:.75rem 1rem;font-family:inherit;font-size:1rem;color:var(--navy);outline:none;transition:border .15s,box-shadow .15s}
+  input:focus,select:focus,textarea:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(37,62,127,.25)}
+  textarea{resize:vertical;min-height:5rem}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
+  .optrow{display:flex;align-items:center;gap:.6rem;border:1px solid var(--border);border-radius:var(--radius);
+    padding:.75rem;cursor:pointer;transition:border .15s}
+  .optrow:hover{border-color:rgba(37,62,127,.5)}
+  .optrow input{accent-color:var(--navy);width:1.15rem;height:1.15rem}
+  .field{margin-bottom:1.25rem}
+  .space > *{margin-bottom:1.25rem}
+  .pill{padding:.5rem 1rem;border-radius:999px;border:1px solid var(--border);background:var(--card);
+    font-size:.875rem;font-weight:500;font-family:inherit;color:var(--navy);cursor:pointer;transition:all .15s}
+  .pill:hover{border-color:var(--navy);background:rgba(37,62,127,.05)}
+  .pill.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .pills{display:flex;flex-wrap:wrap;gap:.5rem}
+  .sliderrow{display:flex;align-items:center;gap:1rem}
+  input[type=range]{flex:1;accent-color:var(--navy);height:.5rem}
+  .sval{min-width:3rem;text-align:center;font-weight:700;font-size:1.25rem;padding:.25rem .75rem;
+    border-radius:var(--radius);background:#e9e9e9;color:var(--muted)}
+  .scale{display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);margin-top:.5rem}
+  .daygrid{display:grid;grid-template-columns:repeat(8,1fr);gap:.4rem}
+  .day{aspect-ratio:1;min-height:2.75rem;border-radius:var(--radius);border:1px solid var(--border);
+    background:var(--card);font-weight:600;font-family:inherit;color:var(--navy);cursor:pointer;transition:all .15s}
+  .day:hover{border-color:var(--navy);background:rgba(37,62,127,.05)}
+  .day.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .cta{width:100%;background:var(--navy);color:#fff;font-weight:700;font-size:1.125rem;border:none;
+    padding:1rem;border-radius:var(--radius);cursor:pointer;box-shadow:0 4px 6px rgba(0,0,0,.1);min-height:3.5rem}
+  .cta:hover{background:#1e3468}
+  .cta:disabled{opacity:.6;cursor:not-allowed}
+  .fielderr{color:var(--err);font-size:.8rem;margin-top:.35rem;display:none}
+  .invalid input,.invalid select,.invalid textarea{border-color:var(--err)}
+  .invalid .fielderr{display:block}
+  .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+  .overlay{position:fixed;inset:0;background:rgba(20,26,48,.55);display:none;align-items:center;justify-content:center;padding:1rem;z-index:50}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:1rem;max-width:26rem;width:100%;padding:1.5rem;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .modal h3{margin:0 0 .5rem}
+  .modal .mfield{margin:.9rem 0}
+  .modal .row{display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.2rem}
+  .btn{border:none;border-radius:.6rem;padding:.6rem 1rem;font-weight:700;font-family:inherit;cursor:pointer}
+  .btn.primary{background:var(--navy);color:#fff}
+  .btn.light{background:#eef2fb;color:var(--navy);border:1px solid var(--border)}
+  .modal .merr{color:var(--err);font-size:.8rem;min-height:1rem;margin-top:.4rem}
+  .done{text-align:center;padding:3rem 1rem}
+  .done .check{width:4rem;height:4rem;border-radius:50%;background:var(--ok);color:#fff;font-size:2rem;
+    display:flex;align-items:center;justify-content:center;margin:0 auto 1rem}
+  .banner{background:#fdeaea;color:var(--err);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:1rem;display:none}
+  .banner.show{display:block}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <div class="brandrow">
+      <div class="brandlogo">CM</div>
+      <div class="sm muted" style="line-height:1.3">In samenwerking met<br><span style="font-weight:700;color:var(--navy)">Christelijke Mutualiteit</span></div>
+    </div>
+    <h1 style="color:var(--navy)">Welkom bij het Rudi-testproject</h1>
+    <p class="lead">Fijn dat je meedoet. Nog een paar korte vragen (± 2 minuten) en Rudi stuurt je een eerste WhatsApp-bericht.</p>
+    <div class="card">
+      <h2 style="font-size:1.125rem;color:var(--navy)">Zo werkt het:</h2>
+      <ol>
+        <li>Beantwoord de vragen hieronder, zo leert Rudi je alvast kennen.</li>
+        <li>Geef je toestemming.</li>
+        <li>Rudi neemt contact met je op om het testproject te starten. Je hoeft verder niets te doen.</li>
+      </ol>
+    </div>
+  </header>
+
+  <section style="margin-top:2.5rem">
+    <h2 style="color:var(--navy)">Wie is Rudi?</h2>
+    <p>Rudi is een digitale gezondheidscoach, ontwikkeld door huisarts dr. Frederik Dierick en klinisch psycholoog Beata Bouwer. Gedurende 90 dagen begeleidt Rudi je via WhatsApp bij gezonder eten, meer bewegen en beter slapen — met kleine, haalbare stappen die passen bij jouw leven.</p>
+    <p>Het grote verschil met een app: Rudi wacht niet tot jij iets vraagt. Rudi stuurt je zelf berichtjes, moedigt je aan, denkt met je mee als het even niet lukt en past de begeleiding aan jouw tempo aan. Je kan hem zien als een gezondheidscoach op zak, met eindeloze kennis en motivatie om samen met jou aan je gezondheid te werken.</p>
+    <div class="note">
+      <p style="font-weight:700;color:var(--navy)">Goed om te weten:</p>
+      <ul>
+        <li>Rudi vervangt je arts niet en geeft geen advies over medicatie. Voor medische vragen blijft je huisarts of specialist het aanspreekpunt.</li>
+        <li>Dit is een testproject. Jouw ervaring helpt ons om Rudi verder te verbeteren. We stellen je daarom nu enkele korte vragen, en na 90 dagen nog eens dezelfde. Zo zien we samen jouw vooruitgang.</li>
+        <li>Stoppen kan altijd, zonder een reden op te geven.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="banner" id="banner"></div>
+
+  <form id="form" novalidate>
+    <div class="hp" aria-hidden="true"><label>Laat dit veld leeg<input type="text" id="hp_field" tabindex="-1" autocomplete="off"></label></div>
+
+    <!-- STAP 1 -->
+    <section>
+      <div class="step">Stap 1 van 3</div>
+      <h2 style="color:var(--navy)">Over jou</h2>
+      <p class="muted">Vertel Rudi wie je bent. Hoe beter Rudi je kent, hoe persoonlijker de begeleiding vanaf dag één.</p>
+      <div class="space" style="margin-top:1.5rem">
+        <div class="field" data-field="first_name">
+          <label class="fld" for="voornaam">Voornaam <span class="req">*</span></label>
+          <p class="hint">Zo weet Rudi hoe hij je mag aanspreken.</p>
+          <input type="text" id="voornaam" autocomplete="given-name" maxlength="120">
+          <div class="fielderr">Vul je voornaam in.</div>
+        </div>
+        <div class="field" data-field="mobile_number">
+          <label class="fld" for="gsm">GSM-nummer (belangrijk: dit nummer is geregistreerd op WhatsApp) <span class="req">*</span></label>
+          <p class="hint">Op dit nummer stuurt Rudi je berichten.</p>
+          <input type="tel" id="gsm" inputmode="tel" autocomplete="tel" placeholder="+32 4XX XX XX XX of 04XX XX XX XX">
+          <div class="fielderr">Vul een geldig gsm-nummer in.</div>
+        </div>
+        <div class="field" data-field="whatsapp_number_confirmed">
+          <label class="optrow" style="align-items:flex-start">
+            <input type="checkbox" id="gsmConfirm" style="margin-top:.15rem">
+            <span>Ik bevestig dat ik dit nummer al gebruik voor WhatsApp-communicatie. <span class="req">*</span></span>
+          </label>
+          <div class="fielderr">Bevestig dat dit nummer actief is op WhatsApp.</div>
+        </div>
+        <div class="field" data-field="email">
+          <label class="fld" for="email">E-mailadres <span class="req">*</span></label>
+          <p class="hint">Voor je bevestiging en praktische info over het testproject.</p>
+          <input type="email" id="email" autocomplete="email" maxlength="254">
+          <div class="fielderr">Vul een geldig e-mailadres in.</div>
+        </div>
+        <div class="field" data-field="year_of_birth">
+          <label class="fld" for="geboortejaar">Geboortejaar <span class="req">*</span></label>
+          <select id="geboortejaar"><option value="">Kies een jaar…</option></select>
+          <div class="fielderr">Kies je geboortejaar.</div>
+        </div>
+        <div class="field" data-field="gender">
+          <label class="fld">Geslacht <span class="req">*</span></label>
+          <div class="grid2" id="gender">
+            <label class="optrow"><input type="radio" name="geslacht" value="vrouw"><span>vrouw</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="man"><span>man</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="anders"><span>anders</span></label>
+            <label class="optrow"><input type="radio" name="geslacht" value="zeg ik liever niet"><span>zeg ik liever niet</span></label>
+          </div>
+          <div class="fielderr">Kies een optie.</div>
+        </div>
+        <div class="field" data-field="municipality">
+          <label class="fld" for="gemeente">In welke gemeente of stad woon je? <span class="req">*</span></label>
+          <p class="hint">Zo kan Rudi rekening houden met bijvoorbeeld het weer wanneer hij je beweegtips geeft.</p>
+          <input type="text" id="gemeente" autocomplete="address-level2" maxlength="120">
+          <div class="fielderr">Vul je gemeente of stad in.</div>
+        </div>
+        <div class="field" data-field="cm_member_t2d">
+          <label class="optrow" style="align-items:flex-start">
+            <input type="checkbox" id="cmLid" style="margin-top:.15rem">
+            <span>Ik ben CM-lid en kreeg na 2016 de diagnose type 2 diabetes.</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAP 2 -->
+    <section>
+      <div class="step">Stap 2 van 3</div>
+      <h2 style="color:var(--navy)">Jouw startpunt</h2>
+      <p class="muted">Er zijn geen goede of foute antwoorden — kies wat vandaag het best bij je past. Rudi gebruikt dit om meteen op maat te starten, en na 90 dagen kijken we samen hoe ver je bent gekomen.</p>
+      <div style="margin-top:1.5rem">
+        <div class="field" data-field="help_areas">
+          <p class="fld">Waar zou je de komende 90 dagen het liefst hulp bij krijgen? (kies er maximum 2) <span class="req">*</span></p>
+          <p class="hint">Geselecteerd: <span id="helpCount">0</span>/2</p>
+          <div class="pills" id="help">
+            <button type="button" class="pill">Gezonder eten</button>
+            <button type="button" class="pill">Meer bewegen</button>
+            <button type="button" class="pill">Beter slapen</button>
+            <button type="button" class="pill">Mijn motivatie volhouden</button>
+            <button type="button" class="pill">Omgaan met stress</button>
+            <button type="button" class="pill">Meer energie krijgen</button>
+          </div>
+          <div class="fielderr">Kies 1 of 2 opties.</div>
+        </div>
+
+        <div class="field slider" data-field="confidence_self_improve">
+          <p class="fld">Hoeveel vertrouwen heb je er vandaag in dat je je gezondheid zelf kan verbeteren? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = helemaal geen vertrouwen</span><span>10 = heel veel vertrouwen</span></div>
+          <div class="fielderr">Schuif de balk om te antwoorden.</div>
+        </div>
+        <div class="field slider" data-field="energy_past_week">
+          <p class="fld">Hoeveel energie had je de voorbije week? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = voortdurend moe</span><span>10 = vol energie</span></div>
+          <div class="fielderr">Schuif de balk om te antwoorden.</div>
+        </div>
+        <div class="field slider" data-field="healthy_living_past_week">
+          <p class="fld">Hoe goed lukte het je de voorbije week om zo gezond te leven als je zelf zou willen — qua eten, bewegen en slapen? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = helemaal niet</span><span>10 = helemaal</span></div>
+          <div class="fielderr">Schuif de balk om te antwoorden.</div>
+        </div>
+        <div class="field slider" data-field="support_felt">
+          <p class="fld">Hoe gesteund voel je je op dit moment bij het werken aan je gezondheid? <span class="req">*</span></p>
+          <div class="sliderrow"><input type="range" min="0" max="10" step="1" value="5"><span class="sval">—</span></div>
+          <div class="scale"><span>0 = ik sta er alleen voor</span><span>10 = ik voel me heel goed omringd</span></div>
+          <div class="fielderr">Schuif de balk om te antwoorden.</div>
+        </div>
+
+        <div class="field" data-field="active_days_past_week">
+          <p class="fld">Op hoeveel dagen bewoog je de voorbije week minstens 30 minuten, bijvoorbeeld stevig wandelen of fietsen? <span class="req">*</span></p>
+          <div class="daygrid" id="days">
+            <button type="button" class="day">0</button><button type="button" class="day">1</button>
+            <button type="button" class="day">2</button><button type="button" class="day">3</button>
+            <button type="button" class="day">4</button><button type="button" class="day">5</button>
+            <button type="button" class="day">6</button><button type="button" class="day">7</button>
+          </div>
+          <div class="fielderr">Kies een aantal dagen.</div>
+        </div>
+
+        <div class="field" data-field="prior_digital_tools">
+          <p class="fld">Heb je al eerder apps of digitale hulpmiddelen gebruikt om gezonder te leven? <span class="req">*</span></p>
+          <div class="space" style="display:flex;flex-direction:column;gap:.5rem" id="prior">
+            <label class="optrow"><input type="radio" name="q7" value="Nee, dit is de eerste keer"><span>Nee, dit is de eerste keer</span></label>
+            <label class="optrow"><input type="radio" name="q7" value="Ja, maar ik haakte af"><span>Ja, maar ik haakte af</span></label>
+            <label class="optrow"><input type="radio" name="q7" value="Ja, en ik gebruik er nog steeds een"><span>Ja, en ik gebruik er nog steeds een</span></label>
+          </div>
+          <div class="fielderr">Kies een optie.</div>
+        </div>
+
+        <div class="field" data-field="notes_for_rudi">
+          <label class="fld" for="q8">Is er iets dat Rudi zeker over jou moet weten om je goed te begeleiden? <span class="muted" style="font-weight:400">(optioneel)</span></label>
+          <textarea id="q8" rows="4" maxlength="2000"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAP 3 -->
+    <section>
+      <div class="step">Stap 3 van 3</div>
+      <h2 style="color:var(--navy)">Jouw gegevens zijn in veilige handen</h2>
+      <ul style="margin-bottom:1.5rem">
+        <li>Alles wat je hier invult en alles wat je later met Rudi bespreekt, wordt versleuteld en veilig opgeslagen op servers binnen de Europese Unie.</li>
+        <li>Je gegevens worden nooit verkocht en nooit gebruikt voor reclame-doeleinden en worden na afloop van het testproject verwijderd conform de privacyverklaring.</li>
+        <li>De CM ontvangt geen individuele antwoorden of gesprekken — enkel anonieme groepsresultaten over het testproject.</li>
+        <li>Je kan je gegevens op elk moment inkijken, laten aanpassen of laten verwijderen. Eén mailtje naar <a href="mailto:privacy@meetrudi.eu">privacy@meetrudi.eu</a> volstaat.</li>
+        <li>Stoppen kan altijd: stuur gewoon "STOP" naar Rudi. Je toestemming intrekken is even makkelijk als ze geven.</li>
+      </ul>
+      <div class="field" data-field="consent_health_data_processing">
+        <label class="optrow" style="align-items:flex-start">
+          <input type="checkbox" id="consent1" style="margin-top:.15rem">
+          <span class="sm" id="consent1text">Ik heb de <a href="#privacy" target="_blank" rel="noopener noreferrer">privacyverklaring</a> en de <a href="#voorwaarden" target="_blank" rel="noopener noreferrer">algemene voorwaarden</a> gelezen en ga ermee akkoord. Ik geef uitdrukkelijk toestemming om mijn gezondheidsgegevens te verwerken voor mijn persoonlijke begeleiding door Rudi en voor de anonieme evaluatie van dit testproject.</span>
+        </label>
+        <div class="fielderr">Deze toestemming is nodig om deel te nemen.</div>
+      </div>
+      <label class="optrow" style="align-items:flex-start">
+        <input type="checkbox" id="consent2" style="margin-top:.15rem">
+        <span class="sm" id="consent2text">Rudi mag me na afloop van het testproject contacteren over een mogelijk vervolg.</span>
+      </label>
+    </section>
+
+    <div>
+      <button type="submit" class="cta" id="cta">Ik ga akkoord &amp; schrijf me in voor het Rudi-testproject</button>
+      <p class="sm muted" style="text-align:center;margin-top:1rem">Na je inschrijving neemt Rudi contact met je op zodra het testproject begint. Loopt er iets mis of heb je vragen? Stuur dan een mail naar <a href="mailto:support@meetrudi.eu">support@meetrudi.eu</a>.</p>
+    </div>
+  </form>
+</div>
+
+<div class="overlay" id="challenge">
+  <div class="modal">
+    <h3>Snelle bevestiging</h3>
+    <p class="sm muted">Om te bevestigen dat je een echte persoon bent en je gegevens correct zijn, typ de volgende gegevens exact opnieuw zoals je ze hebt ingevuld.</p>
+    <div id="challengeFields"></div>
+    <div class="merr" id="challengeErr"></div>
+    <div class="row">
+      <button class="btn light" type="button" id="challengeCancel">Terug</button>
+      <button class="btn primary" type="button" id="challengeConfirm">Bevestigen &amp; verzenden</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var API_BASE = "https://hgailnjxcox3jyett3hqqfo52u0rwyym.lambda-url.eu-central-1.on.aws";
+  var FORM_LANGUAGE = "nl";
+  var FORM_VERSION = "cm-2026-07";
+  var PRIVACY_POLICY_VERSION = "";
+  var TERMS_VERSION = "";
+
+  var $ = function(s,r){ return (r||document).querySelector(s); };
+  var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
+
+  var sel = $("#geboortejaar");
+  for(var y=2008; y>=1930; y--){ var o=document.createElement("option"); o.value=String(y); o.textContent=String(y); sel.appendChild(o); }
+
+  var helpSel = [];
+  $$("#help .pill").forEach(function(b){
+    b.onclick=function(){
+      var t=b.textContent, i=helpSel.indexOf(t);
+      if(i>=0){ helpSel.splice(i,1); b.classList.remove("on"); }
+      else { if(helpSel.length>=2) return; helpSel.push(t); b.classList.add("on"); }
+      $("#helpCount").textContent=helpSel.length;
+    };
+  });
+  var daySel = null;
+  $$("#days .day").forEach(function(b){
+    b.onclick=function(){ $$("#days .day").forEach(function(x){x.classList.remove("on");}); b.classList.add("on"); daySel=parseInt(b.textContent,10); };
+  });
+  $$(".slider").forEach(function(f){
+    var r=$("input[type=range]",f), out=$(".sval",f);
+    r.addEventListener("input",function(){ f.dataset.touched="1"; out.textContent=r.value; out.style.background="var(--navy)"; out.style.color="#fff"; });
+  });
+
+  function answers(){
+    return {
+      first_name: $("#voornaam").value.trim(),
+      mobile_number: $("#gsm").value.trim(),
+      whatsapp_number_confirmed: $("#gsmConfirm").checked,
+      email: $("#email").value.trim(),
+      year_of_birth: $("#geboortejaar").value ? parseInt($("#geboortejaar").value,10) : null,
+      gender: (document.querySelector("input[name=geslacht]:checked")||{}).value || null,
+      municipality: $("#gemeente").value.trim(),
+      cm_member_t2d: $("#cmLid").checked,
+      help_areas: helpSel.slice(),
+      support_felt: sliderVal("support_felt"),
+      confidence_self_improve: sliderVal("confidence_self_improve"),
+      energy_past_week: sliderVal("energy_past_week"),
+      healthy_living_past_week: sliderVal("healthy_living_past_week"),
+      active_days_past_week: daySel,
+      prior_digital_tools: (document.querySelector("input[name=q7]:checked")||{}).value || null,
+      notes_for_rudi: $("#q8").value.trim()
+    };
+  }
+  function sliderVal(key){
+    var f=document.querySelector('.slider[data-field="'+key+'"]');
+    if(!f || f.dataset.touched!=="1") return null;
+    return parseInt($("input[type=range]",f).value,10);
+  }
+
+  var EMAIL=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  function phoneOk(v){ var s=v.replace(/[^\d+]/g,""); if(s.indexOf("00")===0)s="+"+s.slice(2); else if(s[0]==="0")s="+32"+s.slice(1); else if(s[0]!=="+")s="+32"+s; return /^\+\d{8,15}$/.test(s); }
+  function mark(field, bad){ var el=document.querySelector('[data-field="'+field+'"]'); if(el) el.classList.toggle("invalid", !!bad); return el; }
+
+  function validate(){
+    var a=answers(), firstBad=null;
+    function fail(f){ mark(f,true); if(!firstBad) firstBad=document.querySelector('[data-field="'+f+'"]'); }
+    ["first_name","municipality"].forEach(function(f){ mark(f,false); if(!a[f]) fail(f); });
+    mark("mobile_number",false); if(!a.mobile_number || !phoneOk(a.mobile_number)) fail("mobile_number");
+    mark("whatsapp_number_confirmed",false); if(!a.whatsapp_number_confirmed) fail("whatsapp_number_confirmed");
+    mark("email",false); if(!EMAIL.test(a.email)) fail("email");
+    mark("year_of_birth",false); if(!a.year_of_birth) fail("year_of_birth");
+    mark("gender",false); if(!a.gender) fail("gender");
+    mark("help_areas",false); if(a.help_areas.length<1 || a.help_areas.length>2) fail("help_areas");
+    ["confidence_self_improve","energy_past_week","healthy_living_past_week","support_felt"].forEach(function(f){
+      mark(f,false); if(a[f]===null) fail(f); });
+    mark("active_days_past_week",false); if(a.active_days_past_week===null) fail("active_days_past_week");
+    mark("prior_digital_tools",false); if(!a.prior_digital_tools) fail("prior_digital_tools");
+    mark("consent_health_data_processing",false); if(!$("#consent1").checked) fail("consent_health_data_processing");
+    return {ok:!firstBad, first:firstBad, answers:a};
+  }
+
+  var pending=null;
+  $("#form").addEventListener("submit", function(e){
+    e.preventDefault();
+    hideBanner();
+    var v=validate();
+    if(!v.ok){ v.first.scrollIntoView({behavior:"smooth",block:"center"}); return; }
+    pending={answers:v.answers};
+    openChallenge(v.answers);
+  });
+
+  var CH_FIELDS=[["first_name","Voornaam","#voornaam"],["mobile_number","Gsm-nummer","#gsm"],
+                 ["email","E-mailadres","#email"],["municipality","Gemeente / stad","#gemeente"]];
+  var chPicked=[];
+  function openChallenge(a){
+    var pool=CH_FIELDS.filter(function(f){ return (a[f[0]]||"").length>0; });
+    for(var i=pool.length-1;i>0;i--){ var j=(i*7+ (a.first_name.length+a.mobile_number.length)) % (i+1); var t=pool[i];pool[i]=pool[j];pool[j]=t; }
+    chPicked=pool.slice(0,Math.min(2,pool.length));
+    var host=$("#challengeFields"); host.innerHTML="";
+    chPicked.forEach(function(f){
+      var d=document.createElement("div"); d.className="mfield";
+      d.innerHTML='<label class="fld sm">'+f[1]+'</label><input type="text" data-key="'+f[0]+'" autocomplete="off">';
+      host.appendChild(d);
+    });
+    $("#challengeErr").textContent="";
+    $("#challenge").classList.add("show");
+    var first=$("#challengeFields input"); if(first) first.focus();
+  }
+  $("#challengeCancel").onclick=function(){ $("#challenge").classList.remove("show"); };
+  $("#challengeConfirm").onclick=function(){
+    var a=pending.answers, allOk=true;
+    $$("#challengeFields input").forEach(function(inp){
+      var key=inp.dataset.key, orig=String(a[key]||"").trim().toLowerCase(), re=inp.value.trim().toLowerCase();
+      if(orig!==re) allOk=false;
+    });
+    if(!allOk){ $("#challengeErr").textContent="Dit komt niet overeen met wat je hierboven hebt ingevuld. Typ het exact opnieuw."; return; }
+    $("#challenge").classList.remove("show");
+    submit(a);
+  };
+
+  function submit(a){
+    var cta=$("#cta"); cta.disabled=true; cta.textContent="Bezig met verzenden…";
+    var payload={
+      form_language: FORM_LANGUAGE, form_version: FORM_VERSION,
+      privacy_policy_version: PRIVACY_POLICY_VERSION, terms_version: TERMS_VERSION,
+      answers: a,
+      consents: { consent_health_data_processing: $("#consent1").checked,
+                  consent_followup_contact: $("#consent2").checked },
+      consent_texts: { consent_health_data_processing: $("#consent1text").textContent.trim(),
+                       consent_followup_contact: $("#consent2text").textContent.trim() },
+      challenge: chPicked.length ? {field: chPicked[0][0], value: String(a[chPicked[0][0]])} : null,
+      hp_field: $("#hp_field").value
+    };
+    if(!API_BASE){ showBanner("Het formulier is nog niet geconfigureerd (API ontbreekt). Neem contact op met support@meetrudi.eu."); reset(); return; }
+    fetch(API_BASE.replace(/\/$/,""), {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)})
+      .then(async function(r){ var b={}; try{ b=await r.json(); }catch(e){} return {status:r.status,body:b}; })
+      .then(function(res){
+        if(res.status===201){ success(); }
+        else if(res.status===422){ reset(); var f=res.body.field; if(f){ mark(f,true); var el=document.querySelector('[data-field="'+f+'"]'); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); } showBanner("Controleer het gemarkeerde veld en probeer opnieuw."); }
+        else if(res.status===413){ reset(); showBanner("Je bericht is te lang. Kort het in en probeer opnieuw."); }
+        else { reset(); showBanner("Er ging iets mis ("+res.status+"). Probeer het zo dadelijk opnieuw."); }
+      })
+      .catch(function(){ reset(); showBanner("Netwerkfout — controleer je verbinding en probeer opnieuw."); });
+  }
+  function reset(){ var cta=$("#cta"); cta.disabled=false; cta.textContent="Ik ga akkoord & schrijf me in voor het Rudi-testproject"; }
+  function success(){
+    $("#app").innerHTML='<div class="done"><div class="check">✓</div>'+
+      '<h1 style="color:var(--navy)">Bedankt — je bent helemaal klaar!</h1>'+
+      '<p class="lead">Rudi neemt contact met je op zodra het testproject begint. Je hoeft verder niets te doen.</p>'+
+      '<p class="sm muted">Vragen? Mail naar <a href="mailto:support@meetrudi.eu">support@meetrudi.eu</a>.</p></div>';
+    window.scrollTo(0,0);
+  }
+  function showBanner(m){ var b=$("#banner"); b.textContent=m; b.classList.add("show"); b.scrollIntoView({behavior:"smooth",block:"center"}); }
+  function hideBanner(){ $("#banner").classList.remove("show"); }
+})();
+</script>
+</body>
+</html>
