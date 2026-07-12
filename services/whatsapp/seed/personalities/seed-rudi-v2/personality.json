@@ -1,0 +1,13 @@
+{
+  "name": "Seed Rudi v2",
+  "slug": "seed-rudi-v2",
+  "version": 1,
+  "ocean": {
+    "O": 59,
+    "C": 71,
+    "E": 57,
+    "A": 60,
+    "N": 19
+  },
+  "briefing": null
+}

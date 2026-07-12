@@ -28,7 +28,7 @@ sys.modules["boto3"] = boto3_stub
 os.environ["DATA_BUCKET"] = "meetrudi-ai-data-test"
 
 # Seed the prompt/context assets the responder reads.
-for key in ("prompts/rudi_guardrails.md", "prompts/rudi_learn_prompt.md",
+for key in ("prompts/rudi_guardrails.md", "prompts/rudi_learn_prompt_wa.md",
             "prompts/rudi_goal_prompt.md", "prompts/rudi_commit_prompt.md",
             "contexts/rudi-context.md", "contexts/diabetes-t2d-guidance.md"):
     _FAKE_S3.put_object(Bucket="meetrudi-ai-data-test", Key=key, Body=("PROMPT " + key).encode())
@@ -59,6 +59,10 @@ def queue(reply, signals):
 class ResponderTests(unittest.TestCase):
     def setUp(self):
         _NEXT.clear()
+        # Re-assert our bindings (another test file may have rebound these module globals).
+        responder.s3 = _FAKE_S3
+        responder.gateway.generate = _fake_generate
+        responder._asset_cache.clear()
 
     # -- greeting (no LLM) ------------------------------------------------
     def test_new_contact_gets_intro_without_llm(self):
@@ -73,6 +77,41 @@ class ResponderTests(unittest.TestCase):
 
     def test_markdown_bold_converted_to_whatsapp(self):
         self.assertEqual(responder._to_whatsapp("say **hi** now"), "say *hi* now")
+
+    # -- personality injection (tone/style, after guardrails) -------------
+    def _goal_state(self):
+        return {"phase": "goal", "session_id": 1, "history": [], "clarifiers_used": 0,
+                "commit_attempts": 0, "reject_count": 0, "goal": None, "goal_domain": None}
+
+    def _capture_system(self):
+        """Swap in a generate() that records the system prompt it was handed."""
+        cap = {}
+
+        def gen(messages, json_mode=False):
+            cap["system"] = messages[0]["content"]
+            return {"text": json.dumps({"reply": "ok", "signals": {}}), "model": "fake"}
+
+        responder.gateway.generate = gen
+        return cap
+
+    def test_personality_block_injected_after_guardrails(self):
+        cap = self._capture_system()
+        responder.respond(self._goal_state(), "hello", personality_block="PERSONA-XYZ")
+        self.assertIn("PERSONA-XYZ", cap["system"])
+        # guardrails lead; persona sits after them (precedence promise in the block header)
+        self.assertLess(cap["system"].index("PROMPT prompts/rudi_guardrails.md"),
+                        cap["system"].index("PERSONA-XYZ"))
+
+    def test_no_personality_block_by_default(self):
+        cap = self._capture_system()
+        responder.respond(self._goal_state(), "hello")
+        self.assertNotIn("PERSONA", cap["system"])
+
+    def test_reach_out_includes_personality_block(self):
+        cap = self._capture_system()
+        responder.reach_out({"history": []}, "en", goal="walk daily",
+                            personality_block="PERSONA-REACH")
+        self.assertIn("PERSONA-REACH", cap["system"])
 
     # -- learn → goal -----------------------------------------------------
     def test_learn_intent_switches_to_goal_and_clears_history(self):
@@ -147,6 +186,37 @@ class ResponderTests(unittest.TestCase):
         self.assertEqual(state["phase"], "learn")
         self.assertEqual(state["session_id"], 4)    # session counter advanced
         self.assertEqual(_NEXT, [])                 # greeting, no model call
+
+    # -- proactive reach-out ---------------------------------------------
+    def test_reach_out_is_contextual_and_appended(self):
+        state = {"phase": "commit", "session_id": 1, "goal": "walk daily", "goal_domain": "fitness",
+                 "history": [{"role": "assistant", "content": "nice — walking daily it is"}]}
+        queue("How did today's walk go? 🙂", {})
+        text, new_state, info = responder.reach_out(state, locale="en")
+        self.assertIn("walk", text.lower())
+        self.assertEqual(new_state["history"][-1]["content"], text)   # appended for continuity
+        self.assertGreater(len(new_state["history"]), len(state["history"]))
+
+    def test_reach_out_without_goal_still_works(self):
+        queue("Hey — how are things going lately?", {})
+        text, new_state, _ = responder.reach_out({}, locale="en")
+        self.assertTrue(text)
+        self.assertEqual(new_state["history"][-1]["content"], text)
+
+    def test_reach_out_accepts_profile_goal_and_development(self):
+        queue("How's the sleep routine coming along?", {})
+        text, ns, _ = responder.reach_out({}, locale="en", goal="sleep 8h",
+                                          development="struggled with late nights")
+        self.assertTrue(text)
+        self.assertEqual(ns["history"][-1]["content"], text)
+
+    def test_summarize_returns_one_line(self):
+        history = [{"role": "user", "content": "I walked 5k today"},
+                   {"role": "assistant", "content": "amazing!"}]
+        queue("The person reported walking 5k steps.", {})
+        s = responder.summarize(history)
+        self.assertIn("5k", s)
+        self.assertEqual(responder.summarize([]), "")   # empty history → no call
 
     # -- language scaffold ------------------------------------------------
     def test_language_signal_captured(self):

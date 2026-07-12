@@ -24,6 +24,7 @@ import boto3
 
 import provider
 import store
+import personality
 
 _s3 = boto3.client("s3")
 _secrets = boto3.client("secretsmanager")
@@ -42,6 +43,10 @@ REQUIRE_AUTH = os.environ.get("CONSOLE_REQUIRE_AUTH", "false").lower() == "true"
 STORE = store.ConversationStore(_s3, DATA_BUCKET)
 _tok_cache: dict = {}
 
+# NOTE: CORS is handled by the Lambda Function URL's own CORS config (template.yaml). The handler
+# must NOT also emit Access-Control-* headers, or responses carry duplicate
+# Access-Control-Allow-Origin values and browsers reject them.
+
 
 def _console_token():
     if CONSOLE_AUTH_TOKEN:
@@ -56,17 +61,10 @@ def _console_token():
             _tok_cache["t"] = raw.strip()
     return _tok_cache["t"]
 
-_CORS = {
-    "Access-Control-Allow-Origin": ALLOW_ORIGIN,
-    "Access-Control-Allow-Headers": "content-type,authorization,x-console-token",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-}
-
-
 def _resp(status, obj):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", **_CORS},
+        "headers": {"Content-Type": "application/json"},
         "body": json.dumps(obj, ensure_ascii=False),
     }
 
@@ -122,6 +120,8 @@ def _roster_row(m):
         "keep_warm": m.keep_warm,
         "next_proactive_at": m.next_proactive_at,
         "next_proactive_kind": m.next_proactive_kind,
+        "persona": m.persona,                     # operator-chosen personality slug ("" = default)
+        "persona_effective": m.persona or personality.DEFAULT_SLUG,
     }
 
 
@@ -157,6 +157,28 @@ def _post_keepwarm(uid, payload):
     return _resp(200, {"ok": True, "keep_warm": meta.keep_warm,
                        "next_proactive_at": meta.next_proactive_at,
                        "next_proactive_kind": meta.next_proactive_kind})
+
+
+def _get_personalities():
+    """Available personas + the configured default, for the console dropdown."""
+    return _resp(200, {"personalities": personality.list_available(),
+                       "default": personality.DEFAULT_SLUG})
+
+
+def _post_personality(uid, payload):
+    """Operator sets which persona answers this conversation. "" resets to the default. The slug
+    must be one of the available personalities (guard against a stale/typo'd dropdown value)."""
+    slug = (payload.get("slug") or "").strip()
+    if slug:
+        available = {p["slug"] for p in personality.list_available()}
+        if slug not in available:
+            return _resp(400, {"error": "unknown_personality", "slug": slug})
+    meta = STORE.set_persona(uid, slug)
+    if meta is None:
+        return _resp(404, {"error": "unknown conversation"})
+    print("PERSONA uid=%s slug=%s" % (uid, slug or "(default)"))
+    return _resp(200, {"ok": True, "persona": meta.persona,
+                       "persona_effective": meta.persona or personality.DEFAULT_SLUG})
 
 
 def _post_send(uid, payload):
@@ -210,6 +232,9 @@ def handler(event, context):
         if parts == ["conversations"] and method == "GET":
             return _get_roster()
 
+        if parts == ["personalities"] and method == "GET":
+            return _get_personalities()
+
         if len(parts) >= 2 and parts[0] == "conversations":
             uid = parts[1]
             if len(parts) == 3 and parts[2] == "messages":
@@ -221,6 +246,8 @@ def handler(event, context):
                 return _post_read(uid)
             if len(parts) == 3 and parts[2] == "keepwarm" and method == "POST":
                 return _post_keepwarm(uid, _body(event))
+            if len(parts) == 3 and parts[2] == "personality" and method == "POST":
+                return _post_personality(uid, _body(event))
 
         return _resp(404, {"error": "not found"})
     except Exception as e:  # noqa: BLE001

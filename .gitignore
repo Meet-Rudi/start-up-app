@@ -10,6 +10,8 @@ samconfig.toml
 credentials.csv
 *accessKeys*.csv
 .aws/
+# Operator console runtime config holds the interim console token — keep it local only.
+console/config.js
 
 # --- GDPR / compliance working docs (internal only, NEVER commit) ---
 # Drafts, RoPA, DPIA, processor register, breach log etc. live here until

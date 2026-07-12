@@ -50,8 +50,12 @@
              in_window:inWindow(c.meta), window_open_until:windowUntil(c.meta),
              keep_warm:c.meta.keep_warm!==false,
              next_proactive_at:(c.meta.keep_warm!==false&&inWindow(c.meta))?windowUntil(c.meta):"",
-             next_proactive_kind:(c.meta.keep_warm!==false&&inWindow(c.meta))?"nudge":"" };
+             next_proactive_kind:(c.meta.keep_warm!==false&&inWindow(c.meta))?"nudge":"",
+             persona:c.meta.persona||"", persona_effective:c.meta.persona||DEFAULT_PERSONA };
   }
+
+  var DEFAULT_PERSONA = "seed-rudi-v2";
+  var DEMO_PERSONAS = [{slug:"seed-rudi-v2", name:"Seed Rudi v2"}];
 
   // seed unread on the ones ending with an inbound
   Object.keys(DB).forEach(function(k){ var c=DB[k]; var last=c.messages[c.messages.length-1]; c.meta._unread = last&&last.direction==="in"?(k==="wa_demo0001"?2:1):0; });
@@ -71,6 +75,8 @@
     },
     read:function(uid){ if(DB[uid]) DB[uid].meta._unread=0; return Promise.resolve({ok:true}); },
     keepwarm:function(uid,enabled){ if(DB[uid]) DB[uid].meta.keep_warm=enabled; return Promise.resolve({ok:true,keep_warm:enabled}); },
+    personalities:function(){ return Promise.resolve({personalities:DEMO_PERSONAS, default:DEFAULT_PERSONA}); },
+    setPersonality:function(uid,slug){ if(DB[uid]) DB[uid].meta.persona=slug||""; return Promise.resolve({ok:true, persona:slug||"", persona_effective:slug||DEFAULT_PERSONA}); },
     send:function(uid,text){
       var c=DB[uid]; if(!c) return Promise.resolve({status:404,body:{error:"unknown"}});
       if(!inWindow(c.meta)) return Promise.resolve({status:409,body:{error:"out_of_window"}});

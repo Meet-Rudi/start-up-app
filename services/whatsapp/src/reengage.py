@@ -23,6 +23,7 @@ import store
 import i18n
 import provider
 import responder
+import personality
 
 _s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -116,7 +117,8 @@ def _send_nudge(meta, now) -> bool:
         text, ai_state, _ = responder.reach_out(
             meta.ai_state, locale,
             goal=profile.get("extracted_goal_commitment"),
-            development=profile.get("most_recent_development"))
+            development=profile.get("most_recent_development"),
+            personality_block=personality.resolve_block(meta.persona))
     except Exception as e:  # noqa: BLE001 - rate-limited / AI error → safe canned nudge
         print("WARN reachout uid=%s fell back to canned nudge: %s" % (meta.user_id, e))
         text = i18n.t("nudge", locale)

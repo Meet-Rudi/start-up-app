@@ -48,7 +48,7 @@ plane), never in keys or logs.
 | R2 — Quiet-hours gate | tz/DST-aware `is_quiet` + social-hours helpers | none | ✅ done |
 | R3 — Anti-drift scheduler | `compute_next_proactive` wired into record_in/outbound | none | ✅ done |
 | Auth — Cognito + CloudFront | operator login, private hosting | Cognito | ⏳ next, before live PII |
-| R4 — Re-engage runner | `meetrudi-wa-reengage` Lambda + 5-min EventBridge + template config | Twilio templates | ⏳ |
+| R4 — Keep-warm runner | `meetrudi-wa-reengage` Lambda + EventBridge tick; nudge (in-window) / template fallback; per-number `keep_warm` toggle in the console | Twilio | ✅ done (test mode; template needs approved SID) |
 | R5 — Status callbacks | delivery ticks + failure/block detection | Twilio status | ⏳ |
 | 6 — Contact records + templates | edit fields, out-of-window template send | Twilio templates | ⏳ |
 | 8 — Media + scale | media→S3, DynamoDB roster index | Twilio | ⏳ |

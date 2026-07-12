@@ -27,7 +27,7 @@ s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 
 GUARDRAILS_KEY = "prompts/rudi_guardrails.md"
-LEARN_KEY = "prompts/rudi_learn_prompt.md"
+LEARN_KEY = os.environ.get("LEARN_KEY", "prompts/rudi_learn_prompt_wa.md")  # WhatsApp-aware learn
 GOAL_KEY = "prompts/rudi_goal_prompt.md"
 COMMIT_KEY = "prompts/rudi_commit_prompt.md"
 RUDI_CONTEXT_KEY = "contexts/rudi-context.md"
@@ -46,6 +46,15 @@ MAX_HISTORY = 20  # cap the session history sent to the model (cost + latency)
 LANG_NOTE = ("[Language: write your reply in the SAME language the user is using. In the JSON "
              "signals object also include \"lang\": the ISO 639-1 code of that language "
              "(e.g. \"en\", \"de\", \"fr\", \"nl\").]")
+
+# Channel briefing prepended to every turn (belt-and-braces beyond the WA learn prompt) so Rudi
+# never drifts into pretending it's a website or promising a different channel.
+CHANNEL = ("[Channel: You are Rudi talking with the person on WhatsApp — via text, voice notes, "
+           "and photos/videos they share (voice calls later). You are NOT a website chatbot. If "
+           "asked how you communicate or stay in touch, say it's here on WhatsApp; never claim "
+           "you'll switch to a website/app or that you can't continue here. If they send a photo "
+           "or voice note you can't process yet, acknowledge it warmly and say you'll be able to "
+           "look/listen properly soon.]")
 
 _asset_cache: dict = {}
 
@@ -84,9 +93,13 @@ def _runtime_note(phase: str, state: dict) -> str:
     return ""
 
 
-def _build_system(phase: str, state: dict) -> str:
+def _build_system(phase: str, state: dict, personality_block: str = "") -> str:
+    # Personality shapes tone/style only. It sits AFTER the guardrails (which lead and take
+    # precedence) and BEFORE the role/body, exactly as its header text promises.
+    pblock = ("\n\n" + personality_block) if personality_block else ""
     if phase == "learn":
-        return _get_s3_text(LEARN_KEY) + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY)
+        return (_get_s3_text(LEARN_KEY) + pblock
+                + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY))
 
     guardrails = _get_s3_text(GUARDRAILS_KEY)
     if phase == "goal":
@@ -102,7 +115,7 @@ def _build_system(phase: str, state: dict) -> str:
         raise ValueError("Unknown phase: %r" % phase)
 
     note = _runtime_note(phase, state)
-    return guardrails + "\n\n" + body + ("\n\n" + note if note else "")
+    return guardrails + pblock + "\n\n" + body + ("\n\n" + note if note else "")
 
 
 def _parse_envelope(text: str) -> dict:
@@ -171,13 +184,75 @@ def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> Non
             state["phase"] = "concluded"
 
 
-def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE) -> tuple:
+# Proactive keep-warm reach-out (Rudi initiates, no user turn). Guardrails still apply.
+REACHOUT = (
+    "You are Rudi, proactively reaching out on WhatsApp to gently keep this person engaged with "
+    "their goal — like a caring buddy checking in, unprompted. Write ONE short, warm message "
+    "(1–2 sentences): if you know their goal or last step, reference it naturally and ask how "
+    "it's going; otherwise ask an open, friendly question. Do NOT reintroduce yourself or greet "
+    "with your name. Invite a quick reply. Never give medical advice. Plain text only."
+)
+
+
+def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
+              goal: str = None, development: str = None, personality_block: str = "") -> tuple:
+    """Generate a proactive, context-aware keep-warm message → (text, new_state, info).
+
+    Uses the person's goal + most-recent-development (from their profile) plus recent history so
+    the reach-out continues the relationship rather than restarting it. Raises (gateway errors)
+    so the caller can fall back to a canned nudge; on success the message is appended to the
+    session history for continuity.
+    """
+    state = dict(state or {})
+    goal = goal or state.get("goal")
+    bits = []
+    if goal:
+        bits.append('their goal: "%s"' % goal)
+    if development:
+        bits.append('what was last going on: "%s"' % development)
+    ctx = ("What you know — " + "; ".join(bits) + ".") if bits else "You don't know their specific goal yet."
+    lang = "[Language: write your message in the user's language (code: %s).]" % (locale or "en")
+    pblock = ("\n\n" + personality_block) if personality_block else ""
+    system = (_get_s3_text(GUARDRAILS_KEY) + pblock + "\n\n" + REACHOUT + "\n\n[Context] " + ctx
+              + "\n\n" + CHANNEL + "\n\n" + lang)
+
+    history = list(state.get("history", []))
+    msgs = [{"role": "system", "content": system}] + history[-MAX_HISTORY:]
+    if not history:
+        msgs.append({"role": "user", "content": "(system: time for a gentle check-in)"})
+
+    result = gateway.generate(msgs, json_mode=False)
+    text = _to_whatsapp(_parse_envelope(result["text"])["reply"])
+    state["history"] = history + [{"role": "assistant", "content": text}]
+    return (text, state, {"model": result.get("model")})
+
+
+SUMMARIZE = ("In ONE short neutral sentence, summarize what this person's last topic, issue, or "
+             "progress was in the conversation. Third-person, factual, no advice, no greeting. "
+             "Plain text only.")
+
+
+def summarize(history: list) -> str:
+    """One-line 'most recent development' for the profile from a [{role,content}] history.
+    Raises on gateway error (caller falls back)."""
+    history = list(history or [])
+    if not history:
+        return ""
+    msgs = [{"role": "system", "content": _get_s3_text(GUARDRAILS_KEY) + "\n\n" + SUMMARIZE}] + history[-MAX_HISTORY:]
+    result = gateway.generate(msgs, json_mode=False)
+    return _parse_envelope(result["text"])["reply"].strip()[:280]
+
+
+def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
+            personality_block: str = "") -> tuple:
     """Advance one turn. Returns (reply_text, new_state, info).
 
     A fresh or concluded conversation is greeted (no model call); otherwise the phase-specific
     system prompt drives one generation and the signals advance the machine. `locale` is the
     contact's last-used language, used to localize the returning-user greeting; `info["lang"]`
     carries the language the model detected this turn (for the caller to persist).
+    `personality_block` is the rendered OCEAN persona block (from `personality.resolve_block`),
+    prepended to the reasoning prompt to shape tone/style; "" = no persona flavor.
     """
     state = dict(state or {})
     if not state:                                    # brand-new number → introduce Rudi (English default)
@@ -204,7 +279,7 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE) -> t
         note_state = {"attempts_left": max(1, MAX_COMMIT - state.get("commit_attempts", 0)),
                       "goal": state.get("goal"), "goal_domain": state.get("goal_domain")}
 
-    system = _build_system(phase, note_state) + "\n\n" + LANG_NOTE
+    system = _build_system(phase, note_state, personality_block) + "\n\n" + CHANNEL + "\n\n" + LANG_NOTE
     result = gateway.generate([{"role": "system", "content": system}] + history[-MAX_HISTORY:],
                               json_mode=True)
     env = _parse_envelope(result["text"])

@@ -48,6 +48,8 @@ COMPONENTS = {
         "stack": "meetrudi-whatsapp",
         "template": "services/whatsapp/template.yaml",
         "build": True,
+        "seed_dir": "services/whatsapp/seed",   # WhatsApp-aware prompt(s)
+        "seed_bucket_from": "meetrudi-base",
     },
 }
 

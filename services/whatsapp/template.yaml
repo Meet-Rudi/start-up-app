@@ -110,6 +110,8 @@ Resources:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
           PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
           AI_RESPONDER: "true"
+          # Persona: conversations with no operator-chosen persona (meta.persona == "") use this.
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2
           # Testing phase: external consent form precedes first contact → inbound implies consent.
           # Set to "unknown" once the consent-form export grants consent in the DB directly.
           DEFAULT_CONSENT_STATE: "granted"
@@ -150,6 +152,8 @@ Resources:
           CONSOLE_TOKEN_SECRET: meetrudi/whatsapp/console-token
           CONSOLE_REQUIRE_AUTH: "true"
           CONSOLE_ALLOW_ORIGIN: !Ref ConsoleAllowOrigin
+          # Persona: default shown in the console dropdown + used when a conversation has none.
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2
       FunctionUrlConfig:
         AuthType: NONE
         Cors:
@@ -177,6 +181,7 @@ Resources:
           TEMPLATE_CONTENT_SID: ""          # legacy single-template fallback (unused; see wa_templates.json)
           TEMPLATES_CONFIG_KEY: config/wa_templates.json   # locale -> [approved Content SID,...]
           REENGAGE_INSERT_GOAL: "true"      # insert the stored goal into {{1}}; else per-language generic
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2   # persona for proactive reach-outs (matches processor)
           PROACTIVE_TEST_MODE: "true"       # keep in sync with the processor
           PROACTIVE_TEST_LEAD_MIN: "2"
           # Gateway (for the contextual AI reach-out) — same providers as the processor.

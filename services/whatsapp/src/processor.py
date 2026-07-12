@@ -21,6 +21,7 @@ import i18n
 import provider
 import gateway
 import responder
+import personality
 
 _s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -45,7 +46,9 @@ def _to_message(msg: dict) -> store.Message:
 def _reply_and_persist(uid: str, phone: str, text: str, meta) -> None:
     """Run the AI responder for one turn, send the reply, persist outbound + AI state + locale."""
     locale = meta.locale or i18n.DEFAULT_LOCALE
-    reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale)
+    pblock = personality.resolve_block(meta.persona)   # operator-chosen persona (or default)
+    reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
+                                               personality_block=pblock)
     new_locale = info.get("lang") or locale   # "last used language" (falls back to current)
     provider.send_text(phone, reply)
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
@@ -53,6 +56,21 @@ def _reply_and_persist(uid: str, phone: str, text: str, meta) -> None:
     STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale)
     print("AI uid=%s phase=%s lang=%s model=%s"
           % (uid, info.get("phase"), new_locale, info.get("model")))
+
+    # End of a session → refresh the user profile (goal + a one-line 'recent development').
+    if info.get("phase") == "concluded":
+        _update_profile(uid, new_state)
+
+
+def _update_profile(uid: str, ai_state: dict) -> None:
+    try:
+        development = responder.summarize(ai_state.get("history", []))
+    except Exception as e:  # noqa: BLE001 - summary is best-effort
+        print("WARN summarize uid=%s: %s" % (uid, e))
+        development = None
+    prof = STORE.write_profile(uid, extracted_goal=ai_state.get("goal"), development=development)
+    print("PROFILE uid=%s goal=%s proactivity=%s" % (uid, bool(prof.get("extracted_goal_commitment")),
+                                                     prof.get("proactivity_index")))
 
 
 def handler(event, context):

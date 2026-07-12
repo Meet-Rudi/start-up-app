@@ -68,6 +68,8 @@ class ConsoleApiTests(unittest.TestCase):
         _FAKE_S3.__init__()          # reset store between tests
         _SENT.clear()
         console_api.CONSOLE_AUTH_TOKEN = ""
+        console_api.personality._s3 = _FAKE_S3   # rebind (another test file may have rebound it)
+        console_api.personality._cache.clear()
         self.uid = store.user_id("+32470000000", "test-salt")
 
     def _seed_inbound(self, at, text="hi", uid=None):
@@ -159,10 +161,59 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertFalse(json.loads(r["body"])["keep_warm"])
         self.assertFalse(console_api.STORE.get_meta(self.uid).keep_warm)
 
-    def test_cors_preflight(self):
+    # -- personality (operator-chosen persona per conversation) ----------
+    def _seed_personality(self, slug="seed-rudi-v2"):
+        doc = {"name": "Seed Rudi v2", "slug": slug, "version": 1,
+               "ocean": {"O": 59, "C": 71, "E": 57, "A": 60, "N": 19}, "briefing": None}
+        _FAKE_S3.put_object(Bucket="meetrudi-ai-data-test",
+                            Key="personalities/%s/personality.json" % slug,
+                            Body=json.dumps(doc).encode())
+        console_api.personality._cache.clear()
+
+    def test_list_personalities(self):
+        self._seed_personality()
+        r = console_api.handler(_event("GET", "/personalities"), None)
+        self.assertEqual(r["statusCode"], 200)
+        body = json.loads(r["body"])
+        self.assertEqual(body["default"], "seed-rudi-v2")
+        self.assertEqual([p["slug"] for p in body["personalities"]], ["seed-rudi-v2"])
+
+    def test_roster_row_includes_persona(self):
+        self._seed_inbound(_iso(2026, 7, 1, 10, 0))
+        row = json.loads(console_api.handler(_event("GET", "/conversations"), None)["body"])["conversations"][0]
+        self.assertEqual(row["persona"], "")                       # none chosen yet
+        self.assertEqual(row["persona_effective"], "seed-rudi-v2")  # falls back to default
+
+    def test_set_personality(self):
+        self._seed_personality()
+        self._seed_inbound(store.to_iso(store.now_dt()))
+        r = console_api.handler(
+            _event("POST", "/conversations/%s/personality" % self.uid, body={"slug": "seed-rudi-v2"}), None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(console_api.STORE.get_meta(self.uid).persona, "seed-rudi-v2")
+
+    def test_set_unknown_personality_rejected(self):
+        self._seed_personality()
+        self._seed_inbound(store.to_iso(store.now_dt()))
+        r = console_api.handler(
+            _event("POST", "/conversations/%s/personality" % self.uid, body={"slug": "ghost"}), None)
+        self.assertEqual(r["statusCode"], 400)
+        self.assertEqual(console_api.STORE.get_meta(self.uid).persona, "")  # unchanged
+
+    def test_reset_personality_to_default(self):
+        self._seed_personality()
+        self._seed_inbound(store.to_iso(store.now_dt()))
+        console_api.STORE.set_persona(self.uid, "seed-rudi-v2")
+        r = console_api.handler(
+            _event("POST", "/conversations/%s/personality" % self.uid, body={"slug": ""}), None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(console_api.STORE.get_meta(self.uid).persona, "")
+
+    def test_options_ok_and_no_manual_cors(self):
+        # CORS is emitted by the Function URL, not the handler (avoids duplicate ACAO headers).
         r = console_api.handler(_event("OPTIONS", "/conversations"), None)
         self.assertEqual(r["statusCode"], 200)
-        self.assertIn("Access-Control-Allow-Origin", r["headers"])
+        self.assertNotIn("Access-Control-Allow-Origin", r["headers"])
 
 
 if __name__ == "__main__":

@@ -543,6 +543,16 @@ class ConversationStore:
         self.put_meta(meta)
         return meta
 
+    def set_persona(self, uid: str, slug: str) -> Optional[ContactMeta]:
+        """Operator picks which Rudi persona answers this conversation. Stored on meta.persona and
+        kept until the operator changes it again; "" means 'use the configured default persona'."""
+        meta = self.get_meta(uid)
+        if meta is None:
+            return None
+        meta.persona = (slug or "").strip()
+        self.put_meta(meta)
+        return meta
+
 
 def new_message_id() -> str:
     return uuid.uuid4().hex

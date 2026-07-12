@@ -124,6 +124,46 @@ class StoreTests(unittest.TestCase):
         self.store.record_inbound(self.uid, PHONE, Message(id="A", direction="in", type="image", text="", at=_iso(2026, 7, 1, 10, 0), media=[{"url": "x"}]))
         self.assertIn("Photo", self.store.get_meta(self.uid).last_message_preview)
 
+    # -- profile ---------------------------------------------------------
+    def test_profile_counters_and_write(self):
+        self.store.record_inbound(self.uid, PHONE, Message(id="A", direction="in", text="hi", at=_iso(2026, 7, 1, 10, 0)))
+        self.store.record_inbound(self.uid, PHONE, Message(id="B", direction="in", type="image", text="", at=_iso(2026, 7, 1, 10, 1), media=[{"url": "x"}]))
+        self.store.record_outbound(self.uid, Message(id="C", direction="out", text="hey", at=_iso(2026, 7, 1, 10, 2)))
+        self.store.record_outbound(self.uid, Message(id="N", direction="out", text="nudge", at=_iso(2026, 7, 1, 10, 3)), proactive_kind="nudge")
+
+        m = self.store.get_meta(self.uid)
+        self.assertEqual((m.msg_total, m.msg_user, m.msg_image_user, m.proactive_sends), (4, 2, 1, 1))
+
+        prof = self.store.write_profile(self.uid, extracted_goal="walk daily", development="talked about walking",
+                                        now=datetime.datetime(2026, 7, 1, 10, 5, tzinfo=datetime.timezone.utc))
+        self.assertEqual(prof["messages_count_total"], 4)
+        self.assertEqual(prof["messages_count_user"], 2)
+        self.assertEqual(prof["messages_image_user"], 1)
+        self.assertEqual(prof["extracted_goal_commitment"], "walk daily")
+        self.assertEqual(prof["most_recent_development"], "talked about walking")
+        self.assertAlmostEqual(prof["proactivity_index"], (4 - 1) / 4)   # (all - reengagement)/all
+        self.assertIsNone(prof["attitude"])
+        self.assertEqual(prof["timestamp_last_user_turn"], m.last_inbound_at)
+        self.assertEqual(prof["last_profile_update_at"], _iso(2026, 7, 1, 10, 5))
+
+    def test_profile_staleness(self):
+        self.store.record_inbound(self.uid, PHONE, Message(id="A", direction="in", text="hi", at=_iso(2026, 7, 1, 10, 0)))
+        self.assertTrue(self.store.profile_is_stale(self.uid))                 # no profile yet
+        self.store.write_profile(self.uid, now=datetime.datetime(2026, 7, 1, 10, 1, tzinfo=datetime.timezone.utc))
+        self.assertFalse(self.store.profile_is_stale(self.uid))                # profile now newer
+        self.store.record_inbound(self.uid, PHONE, Message(id="B", direction="in", text="more", at=_iso(2026, 7, 1, 12, 0)))
+        self.assertTrue(self.store.profile_is_stale(self.uid))                 # newer message arrived
+
+    def test_write_profile_preserves_prior_goal_when_absent(self):
+        self.store.record_inbound(self.uid, PHONE, Message(id="A", direction="in", text="hi", at=_iso(2026, 7, 1, 10, 0)))
+        self.store.write_profile(self.uid, extracted_goal="sleep 8h")
+        self.store.write_profile(self.uid)   # no goal passed → keep it
+        self.assertEqual(self.store.get_profile(self.uid)["extracted_goal_commitment"], "sleep 8h")
+
+    def test_proactivity_default_when_no_messages(self):
+        self.store.put_meta(ContactMeta(user_id="wa_empty"))
+        self.assertEqual(self.store.write_profile("wa_empty")["proactivity_index"], 0.5)
+
     # -- round-trip serialization ----------------------------------------
     def test_message_roundtrip(self):
         m = Message(id="A", direction="out", text="hi", at=_iso(2026, 7, 1, 10, 0), operator_id="op1")
