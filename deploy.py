@@ -151,11 +151,15 @@ def main():
     elif name == "whatsapp":
         print("Webhook URL :", _stack_output("meetrudi-whatsapp", "WebhookUrl"))
         print("Console API :", _stack_output("meetrudi-whatsapp", "ConsoleApiUrl"))
+        print("Test console:", _stack_output("meetrudi-whatsapp", "TestConsoleApiUrl"))
         print("Send test   :", _stack_output("meetrudi-whatsapp", "SendTestUrl"))
         print(">> Set the Webhook URL as the Twilio Sandbox 'When a message comes in' webhook (HTTP POST).")
         print(">> Console API + Send test need secret meetrudi/whatsapp/console-token (both fail CLOSED without it).")
         print(">> Outbound test: open  <Send test URL>?token=<TOKEN>&to=+32470...&body=Hello")
         print(">> Put the Console API URL into console/config.js (API_BASE) once auth is set.")
+        print(">> Test console needs secret meetrudi/test-console/auth (fails CLOSED without it).")
+        print(">> Put the Test console URL into site/test-console/test-config.js (API_BASE), then")
+        print("   push to main -> GitHub Pages publishes https://meet-rudi.github.io/start-up-app/test-console/")
 
 
 if __name__ == "__main__":

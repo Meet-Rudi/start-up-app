@@ -543,6 +543,16 @@ class ConversationStore:
         self.put_meta(meta)
         return meta
 
+    def archive(self, uid: str) -> Optional[ContactMeta]:
+        """Soft-delete: mark a conversation archived so listings hide it, but keep all its data
+        (meta + messages) in S3. Used by the test console's card "X" (removes from view only)."""
+        meta = self.get_meta(uid)
+        if meta is None:
+            return None
+        meta.status = "archived"
+        self.put_meta(meta)
+        return meta
+
     def set_persona(self, uid: str, slug: str) -> Optional[ContactMeta]:
         """Operator picks which Rudi persona answers this conversation. Stored on meta.persona and
         kept until the operator changes it again; "" means 'use the configured default persona'."""

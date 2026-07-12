@@ -76,6 +76,12 @@ Resources:
       LogGroupName: /aws/lambda/meetrudi-wa-reengage
       RetentionInDays: 30
 
+  WaTestConsoleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-test-console
+      RetentionInDays: 30
+
   WaWebhookFunction:
     Type: AWS::Serverless::Function
     DependsOn: WaWebhookLogGroup
@@ -196,6 +202,41 @@ Resources:
           Properties:
             Schedule: rate(2 minutes)       # production keep-warm cadence is rate(5 minutes)
 
+  # Internal personality test harness: login-gated web console that drives the SAME responder
+  # engine (no Twilio). Test conversations live under their own S3 prefix (test-conversations/),
+  # so the operator console and the proactive runner never see them. Fixed email+password is held
+  # in the meetrudi/test-console/auth secret (created in the Console; fails CLOSED without it).
+  WaTestConsoleFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaTestConsoleLogGroup
+    Properties:
+      FunctionName: meetrudi-test-console
+      Handler: test_console.handler
+      CodeUri: src/
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          TEST_PREFIX: test-conversations
+          TEST_AUTH_SECRET: meetrudi/test-console/auth
+          TEST_REQUIRE_AUTH: "true"
+          CONSOLE_ALLOW_ORIGIN: !Ref ConsoleAllowOrigin
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2
+          # Gateway (same providers as the processor) — the test console runs the real engine.
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_SECRET: meetrudi-groq-firstkey
+          HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref ConsoleAllowOrigin]
+          AllowMethods: ["GET", "POST"]
+          AllowHeaders: ["content-type", "authorization", "x-console-token"]
+
   # Throwaway outbound tester (token-gated). Remove once WhatsApp sending is confirmed.
   WaSendTestFunction:
     Type: AWS::Serverless::Function
@@ -223,5 +264,8 @@ Outputs:
   ConsoleApiUrl:
     Description: Put this into console/config.js (API_BASE) once auth is in place
     Value: !GetAtt WaConsoleApiFunctionUrl.FunctionUrl
+  TestConsoleApiUrl:
+    Description: Put this into console/test-config.js (API_BASE) for the personality test console
+    Value: !GetAtt WaTestConsoleFunctionUrl.FunctionUrl
   InboundQueueName:
     Value: !GetAtt WaInboundQueue.QueueName
