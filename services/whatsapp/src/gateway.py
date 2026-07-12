@@ -10,6 +10,7 @@ self-contained per service for now; a shared Lambda Layer is a sensible future r
 
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 
@@ -21,6 +22,12 @@ _secret_cache = {}
 
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 ENDPOINTS_KEY = os.environ.get("ENDPOINTS_CONFIG_KEY", "config/ai_endpoints.json")
+# On HTTP 429 we retry the SAME provider a few times with exponential backoff before failing over
+# to the next one — smooths over short request-rate bursts (e.g. rapid manual testing). Kept small
+# so total added latency stays well under the Lambda timeout. Sustained token-per-minute limits
+# won't recover in this window; those still fall through the cascade to AllRateLimited.
+MAX_RETRIES = int(os.environ.get("GATEWAY_MAX_RETRIES", "2"))
+BACKOFF_BASE = float(os.environ.get("GATEWAY_BACKOFF_BASE", "0.5"))
 GROQ_FALLBACK = {
     "name": "groq-fallback",
     "kind": "groq",
@@ -136,14 +143,29 @@ def generate(messages, json_mode=False):
     rate_limited = 0
     for ep in cascade:
         attempts += 1
-        try:
-            text = _registry.call(ep, messages, json_mode=json_mode)
-            return {"text": text, "model": ep.get("name")}
-        except RateLimitError as e:
+        rl_error = None       # last 429 for this provider (after retries)
+        other_error = None    # a non-429 failure → don't retry, just fail over
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                text = _registry.call(ep, messages, json_mode=json_mode)
+                return {"text": text, "model": ep.get("name")}
+            except RateLimitError as e:
+                rl_error = e
+                if attempt < MAX_RETRIES:
+                    delay = BACKOFF_BASE * (2 ** attempt)
+                    print("INFO %s returned 429; retrying in %.1fs (attempt %d/%d)"
+                          % (ep.get("name"), delay, attempt + 1, MAX_RETRIES))
+                    time.sleep(delay)
+                    continue
+                break
+            except Exception as e:  # noqa: BLE001 - non-429: don't retry, fail over
+                other_error = e
+                break
+        if other_error is not None:
+            errors.append("%s: %s" % (ep.get("name"), other_error))
+        elif rl_error is not None:
             rate_limited += 1
-            errors.append("%s: %s" % (ep.get("name"), e))
-        except Exception as e:  # noqa: BLE001 - try next provider
-            errors.append("%s: %s" % (ep.get("name"), e))
+            errors.append("%s: %s" % (ep.get("name"), rl_error))
 
     if attempts > 0 and rate_limited == attempts:
         raise AllRateLimited("All models rate-limited -> " + " | ".join(errors))

@@ -24,6 +24,14 @@ PROFILE = "rudi-deployer"
 CAPABILITIES = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"]
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# Keep ALL SAM state inside the repo. By default SAM writes its global config (installation_id /
+# telemetry metadata.json) to %APPDATA%\AWS SAM — a protected Roaming dir that is permission-denied
+# in some shells and crashes the build. __SAM_CLI_APP_DIR relocates it here (under the already
+# .gitignored .aws-sam/). Telemetry off so no metric write is attempted at all.
+os.environ["__SAM_CLI_APP_DIR"] = os.path.join(ROOT, ".aws-sam", "samhome")
+os.environ.setdefault("SAM_CLI_TELEMETRY", "0")
+os.makedirs(os.environ["__SAM_CLI_APP_DIR"], exist_ok=True)
+
 COMPONENTS = {
     "base": {
         "stack": "meetrudi-base",

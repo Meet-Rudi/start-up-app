@@ -189,6 +189,21 @@ class TestConsoleTests(unittest.TestCase):
         self.assertTrue(any(m["direction"] == "in" and m["text"] == "hello" for m in msgs))
         self.assertTrue(any(m["direction"] == "out" and m["text"] == "Rudi says hi" for m in msgs))
 
+    def test_rate_limited_send_does_not_orphan_inbound(self):
+        _, body = self._create()
+        uid = body["conversation"]["user_id"]
+
+        def boom(messages, json_mode=False):
+            raise __import__("gateway").AllRateLimited("all limited")
+
+        responder.gateway.generate = boom
+        r = test_console.handler(_event("POST", "/conversations/%s/messages" % uid, body={"text": "hello"}), None)
+        self.assertEqual(r["statusCode"], 503)
+        thr = json.loads(test_console.handler(_event("GET", "/conversations/%s/messages" % uid), None)["body"])
+        # only the greeting remains — the failed user turn was NOT persisted (clean resend)
+        self.assertEqual(len(thr["messages"]), 1)
+        self.assertEqual(thr["messages"][0]["direction"], "out")
+
     # -- soft delete -----------------------------------------------------
     def test_soft_delete_hides_but_keeps_data(self):
         _, body = self._create()

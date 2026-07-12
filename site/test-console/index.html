@@ -74,6 +74,8 @@
   .chat .cfoot .actions .btn{flex:0 0 auto}
   .chat .cfoot .actions .spacer{flex:1}
   .typing{font-size:.75rem;color:var(--muted);padding:0 .2rem}
+  .sysnote{align-self:center;display:flex;align-items:center;gap:.6rem;background:#fdeaea;color:#b23b3b;font-size:.8rem;font-weight:600;padding:.4rem .8rem;border-radius:.6rem;margin:.3rem 0;max-width:90%}
+  .sysnote .retry{border:none;background:#b23b3b;color:#fff;font-weight:700;font-size:.72rem;padding:.25rem .7rem;border-radius:999px}
 
   .toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:.5rem 1rem;border-radius:.6rem;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:99}
   .toast.show{opacity:1}
@@ -332,24 +334,38 @@
       wrap.innerHTML='<div class="bubble">'+esc(text)+'<span class="stamp">'+fmtTime(m.at)+'</span></div>';
       feed.appendChild(wrap);
     });
+    if(state.sendError){
+      var e=document.createElement("div"); e.className="sysnote";
+      e.innerHTML='<span>⚠ '+esc(state.sendError.msg)+'</span> <button class="retry" type="button">Retry</button>';
+      e.querySelector(".retry").onclick=function(){ var t=state.sendError.text; state.sendError=null; sendMessage(t); };
+      feed.appendChild(e);
+    }
     feed.scrollTop=feed.scrollHeight;
   }
 
-  function sendMessage(){
-    var input=$("chatInput"); var text=input.value.trim(); if(!text||!state.activeUid) return;
-    input.value=""; autosize();
-    // optimistic echo of the user's turn
-    state.messages.push({direction:"in",text:text,at:new Date().toISOString()}); renderFeed();
+  function sendMessage(retryText){
+    var input=$("chatInput");
+    var text = retryText!=null ? retryText : input.value.trim();
+    if(!text || !state.activeUid) return;
+    state.sendError=null;
+    if(retryText==null){           // fresh send → clear the box + optimistically echo the turn
+      input.value=""; autosize();
+      state.messages.push({direction:"in",text:text,at:new Date().toISOString()});
+    }
+    renderFeed();
     $("sendBtn").disabled=true; $("typing").style.display="block";
     Promise.resolve(api.send(state.activeUid,text)).then(function(r){
       $("sendBtn").disabled=false; $("typing").style.display="none";
       var b=r.body||r;
       if(r.status===200 && b.reply){
         state.messages.push({direction:"out",text:b.reply,at:new Date().toISOString()}); renderFeed(); loadConversations();
-      } else if(r.status===503){ toast("Models busy — try again in a moment."); }
-      else { toast("Send failed ("+r.status+")"); }
-    }).catch(function(){ $("sendBtn").disabled=false; $("typing").style.display="none"; toast("Network error"); });
+      } else if(r.status===503){ showSendError(text,"Models are busy right now (rate-limited). Wait a moment and retry."); }
+      else { showSendError(text,"Send failed ("+r.status+")."); }
+    }).catch(function(){ $("sendBtn").disabled=false; $("typing").style.display="none"; showSendError(text,"Network error — the message wasn't sent."); });
   }
+
+  // On failure the turn was NOT saved server-side, so Retry re-sends the same text cleanly.
+  function showSendError(text,msg){ state.sendError={text:text,msg:msg}; renderFeed(); }
 
   function saveConversation(){
     if(!state.activeUid) return;

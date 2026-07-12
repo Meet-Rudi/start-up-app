@@ -249,9 +249,10 @@ def _send(uid, payload):
         return _resp(404, {"error": "unknown conversation"})
 
     locale = meta.locale or i18n.DEFAULT_LOCALE
+    # Build the inbound now (timestamp precedes the model call, so it sorts before the reply) but
+    # DON'T persist it until we actually have a reply — otherwise a rate-limited/failed turn leaves
+    # an orphaned user message with no answer, and a resend would duplicate it.
     in_msg = store.Message(id=store.new_message_id(), direction="in", type="text", text=text)
-    STORE.record_inbound(uid, meta.phone or "", in_msg)   # phone empty for tests (no PII)
-
     try:
         pblock = personality.resolve_block(meta.persona)
         reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
@@ -265,6 +266,7 @@ def _send(uid, payload):
     new_locale = info.get("lang") or locale
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
                         text=reply, operator_id="ai:rudi")
+    STORE.record_inbound(uid, meta.phone or "", in_msg)   # phone empty for tests (no PII)
     STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale)
     print("TEST send uid=%s phase=%s model=%s" % (uid, info.get("phase"), info.get("model")))
     return _resp(200, {"reply": reply,
