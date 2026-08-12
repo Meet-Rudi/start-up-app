@@ -155,8 +155,24 @@ SAMPLES = (
        {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · female",
         "variant": "15% slower", "length_scale": 1.15, "suffix": "ls115"},
        {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · female",
-        "variant": "30% slower", "length_scale": 1.30, "suffix": "ls130"}]
+        "variant": "30% slower", "length_scale": 1.30, "suffix": "ls130"},
+
+       # ryan-high renders buzzy: ~22-26 windows with a zero-crossing rate 2x its own median,
+       # against 8 for lessac-medium — and its NATURAL take is just as rough, so this is the
+       # model, not the beat markers. Three ways out, for comparison.
+       {"voice": "en_US-ryan-high", "lang": "en", "label": "US · male · high quality",
+        "variant": "beats · steadier sampling", "text": BEATS_EN, "suffix": "beats-steady",
+        "noise_scale": 0.4, "noise_w_scale": 0.4},
+       {"voice": "en_US-ryan-medium", "lang": "en", "label": "US · male · medium quality",
+        "variant": "natural"},
+       {"voice": "en_US-ryan-medium", "lang": "en", "label": "US · male · medium quality",
+        "variant": "beats", "text": BEATS_EN, "suffix": "beats"}]
 )
+
+# Render only what matches, e.g. --only=ryan
+_ONLY = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--only=")), None)
+if _ONLY:
+    SAMPLES = [s for s in SAMPLES if _ONLY in s["voice"] or _ONLY in s.get("suffix", "")]
 
 
 def _capture(cmd):
@@ -217,12 +233,17 @@ def _token():
         "       python services/tts/generate_samples.py --token=<the-token>" % SECRET_ID)
 
 
-def _synth(url, token, text, voice, speaker_id=None, length_scale=None, gap_ms=SENTENCE_GAP_MS):
+def _synth(url, token, text, voice, speaker_id=None, length_scale=None, gap_ms=SENTENCE_GAP_MS,
+           noise_scale=None, noise_w_scale=None):
     payload = {"token": token, "text": text, "voice": voice, "sentence_gap_ms": gap_ms}
     if speaker_id is not None:
         payload["speaker_id"] = speaker_id
     if length_scale is not None:
         payload["length_scale"] = length_scale
+    if noise_scale is not None:
+        payload["noise_scale"] = noise_scale
+    if noise_w_scale is not None:
+        payload["noise_w_scale"] = noise_w_scale
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
@@ -312,8 +333,10 @@ def main():
         sys.stdout.write("  %-28s %-10s " % (voice, suffix or ""))
         sys.stdout.flush()
         try:
-            body, wall_ms = _synth(url, token, text, voice,
-                                   spec.get("speaker_id"), spec.get("length_scale"))
+            body, wall_ms = _synth(url, token, text, voice, spec.get("speaker_id"),
+                                   spec.get("length_scale"),
+                                   noise_scale=spec.get("noise_scale"),
+                                   noise_w_scale=spec.get("noise_w_scale"))
         except Exception as e:  # noqa: BLE001
             print("FAILED — %s" % e)
             results.append(dict(base, ok=False))

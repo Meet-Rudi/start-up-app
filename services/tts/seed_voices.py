@@ -41,6 +41,7 @@ VOICES = [
     # English: 5 of 31, picked for a warm coaching register rather than breadth.
     ("en", "en_US", "amy", "medium"),
     ("en", "en_US", "ryan", "high"),
+    ("en", "en_US", "ryan", "medium"),   # same speaker, cleaner and ~5x faster than high
     ("en", "en_GB", "alan", "medium"),
     ("en", "en_GB", "jenny_dioco", "medium"),
 ]

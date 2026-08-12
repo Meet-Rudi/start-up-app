@@ -206,7 +206,8 @@ def _segment(text, base_gap_ms):
         yield sentence.strip(), int(base_gap_ms * scale)
 
 
-def _synthesize(voice, text, length_scale=None, speaker_id=None, sentence_gap_ms=None):
+def _synthesize(voice, text, length_scale=None, speaker_id=None, sentence_gap_ms=None,
+                noise_scale=None, noise_w_scale=None):
     """Render text to a RIFF WAV, with breathing room between sentences.
 
     Piper yields one audio chunk per sentence and `synthesize_wav()` concatenates them with no
@@ -228,6 +229,13 @@ def _synthesize(voice, text, length_scale=None, speaker_id=None, sentence_gap_ms
     # Multi-speaker models (nl_NL-mls has 52) need an index; single-speaker models ignore it.
     if speaker_id is not None:
         kwargs["speaker_id"] = int(speaker_id)
+    # VITS sampling knobs. Voices ship at noise_scale 0.667 / noise_w 0.8; lowering them trades
+    # expressiveness for steadiness and is the standard remedy when a voice sounds buzzy or
+    # warbly. Deterministic output needs both at 0.
+    if noise_scale is not None:
+        kwargs["noise_scale"] = float(noise_scale)
+    if noise_w_scale is not None:
+        kwargs["noise_w_scale"] = float(noise_w_scale)
     if kwargs:
         syn_config = SynthesisConfig(**kwargs)
 
@@ -310,7 +318,8 @@ def handler(event, context):
 
         synth_started = time.time()
         audio = _synthesize(voice, text, params.get("length_scale"), params.get("speaker_id"),
-                            params.get("sentence_gap_ms"))
+                            params.get("sentence_gap_ms"), params.get("noise_scale"),
+                            params.get("noise_w_scale"))
         synth_ms = int((time.time() - synth_started) * 1000)
 
         oversized = len(audio) > MAX_INLINE_AUDIO_BYTES
