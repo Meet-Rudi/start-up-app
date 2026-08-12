@@ -75,6 +75,30 @@ TEXT_NL = (
 
 # The same monologue with deliberate beats written in, to hear what [pause:N] buys. Placed at
 # the rhetorical turns — after the compliment lands, before the ask, around the medical caveat.
+# The Dutch beats mirror the English placement exactly, so the two are comparable.
+#
+# These sit ON TOP of the automatic punctuation prosody: an explicit [pause:N] replaces the
+# gap that sentence would otherwise have earned, and every unmarked sentence still gets one.
+BEATS_NL = (
+    "Filip, ik moet het je echt even zeggen —[pause:350] ik heb naar je laatste drie weken "
+    "gekeken, en ik ben oprecht onder de indruk.[pause:600] Vier keer lopen per week.[pause:300] "
+    "Elke week opnieuw.[pause:400] Weet je hoe zeldzaam dat is?[pause:800] "
+    "Maar er is iets dat me opvalt.[pause:400] Je loopt nog altijd dezelfde twintig minuten als "
+    "op dag één. Je lichaam is daar ondertussen aan gewend. Het voelt comfortabel.[pause:450] "
+    "En comfortabel is net waar vooruitgang stilletjes stopt.[pause:700] "
+    "Dus ik wil je iets kleins vragen.[pause:350] Niet het dubbele. Niets heldhaftigs.[pause:400] "
+    "Gewoon vijf minuten extra, bij twee van je loopjes deze week. Vijfentwintig in plaats van "
+    "twintig.[pause:400] Meer niet.[pause:700] "
+    "Als dat volgende week goed voelt, doen we er weer vijf bij. Traag.[pause:250] Saai."
+    "[pause:350] Zo werkt het nu eenmaal echt.[pause:700] "
+    "En luister —[pause:300] als er iets pijn begint te doen, als je knie protesteert, dan stop "
+    "je en praat je met je arts, nog voor je met mij praat.[pause:450] Ik ben er voor de "
+    "gewoonte, niet voor de geneeskunde.[pause:800] "
+    "Maar die gewoonte?[pause:400] Die heb je al opgebouwd.[pause:400] Nu geven we ze alleen wat "
+    "meer ruimte.[pause:800] "
+    "Dus —[pause:300] vijfentwintig minuten, twee keer deze week.[pause:500] Doe je mee?"
+)
+
 BEATS_EN = (
     "Filip, I have to tell you —[pause:350] I've been looking at your last three weeks, and I am "
     "genuinely impressed.[pause:600] Four runs a week.[pause:300] Every single week.[pause:400] "
@@ -95,37 +119,44 @@ BEATS_EN = (
     "So —[pause:300] twenty-five minutes, twice this week.[pause:500] Are you in?"
 )
 
-# The full voice comparison, all at the voice's natural pace.
-SAMPLES = [
-    {"voice": "nl_BE-nathalie-medium", "lang": "nl", "label": "Flemish · female"},
-    {"voice": "nl_BE-rdh-medium", "lang": "nl", "label": "Flemish · male"},
-    {"voice": "nl_NL-alex-medium", "lang": "nl", "label": "Netherlands · male"},
-    {"voice": "nl_NL-pim-medium", "lang": "nl", "label": "Netherlands · male"},
-    {"voice": "nl_NL-ronnie-medium", "lang": "nl", "label": "Netherlands · male"},
-    {"voice": "nl_NL-mls-medium", "lang": "nl", "label": "Netherlands · multi-speaker (0)",
-     "speaker_id": 0},
-    {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · female"},
-    {"voice": "en_US-amy-medium", "lang": "en", "label": "US · female"},
-    {"voice": "en_US-ryan-high", "lang": "en", "label": "US · male · high quality"},
-    {"voice": "en_GB-alan-medium", "lang": "en", "label": "UK · male"},
-    {"voice": "en_GB-jenny_dioco-medium", "lang": "en", "label": "UK · female"},
-
-    # Tempo ladder on the two likely finalists. length_scale > 1 slows the voice down; every
-    # Piper voice ships at 1.0, so pace differences between voices are baked into the model
-    # and this is the only lever that evens them out.
-    {"voice": "nl_BE-nathalie-medium", "lang": "nl", "label": "Flemish · 15% slower",
-     "length_scale": 1.15, "suffix": "ls115"},
-    {"voice": "nl_BE-nathalie-medium", "lang": "nl", "label": "Flemish · 30% slower",
-     "length_scale": 1.30, "suffix": "ls130"},
-    {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · 15% slower",
-     "length_scale": 1.15, "suffix": "ls115"},
-    {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · 30% slower",
-     "length_scale": 1.30, "suffix": "ls130"},
-
-    # Same voice, same pace, deliberate beats written into the text.
-    {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · with deliberate beats",
-     "text": BEATS_EN, "suffix": "beats"},
+# (voice, language, label, speaker_id)
+VOICE_LIST = [
+    ("nl_BE-nathalie-medium", "nl", "Flemish · female", None),
+    ("nl_BE-rdh-medium", "nl", "Flemish · male", None),
+    ("nl_NL-alex-medium", "nl", "Netherlands · male", None),
+    ("nl_NL-pim-medium", "nl", "Netherlands · male", None),
+    ("nl_NL-ronnie-medium", "nl", "Netherlands · male", None),
+    ("nl_NL-mls-medium", "nl", "Netherlands · multi-speaker (0)", 0),
+    ("en_US-lessac-medium", "en", "US · female", None),
+    ("en_US-amy-medium", "en", "US · female", None),
+    ("en_US-ryan-high", "en", "US · male · high quality", None),
+    ("en_GB-alan-medium", "en", "UK · male", None),
+    ("en_GB-jenny_dioco-medium", "en", "UK · female", None),
 ]
+
+BEATS = {"nl": BEATS_NL, "en": BEATS_EN}
+
+# Every voice twice: natural punctuation prosody, then the same script with deliberate beats.
+# Rendering both keeps the pair A/B-able on one page — the only variable between them is where
+# the silence sits.
+SAMPLES = (
+    [{"voice": v, "lang": lang, "label": label, "speaker_id": sid, "variant": "natural"}
+     for v, lang, label, sid in VOICE_LIST]
+    + [{"voice": v, "lang": lang, "label": label, "speaker_id": sid, "variant": "beats",
+        "text": BEATS[lang], "suffix": "beats"}
+       for v, lang, label, sid in VOICE_LIST]
+    # Tempo ladder on the two likely finalists, kept on the unbeated script so it isolates pace.
+    # Every Piper voice ships length_scale=1.0, so pace differences between voices are baked
+    # into the model and this is the only lever that evens them out.
+    + [{"voice": "nl_BE-nathalie-medium", "lang": "nl", "label": "Flemish · female",
+        "variant": "15% slower", "length_scale": 1.15, "suffix": "ls115"},
+       {"voice": "nl_BE-nathalie-medium", "lang": "nl", "label": "Flemish · female",
+        "variant": "30% slower", "length_scale": 1.30, "suffix": "ls130"},
+       {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · female",
+        "variant": "15% slower", "length_scale": 1.15, "suffix": "ls115"},
+       {"voice": "en_US-lessac-medium", "lang": "en", "label": "US · female",
+        "variant": "30% slower", "length_scale": 1.30, "suffix": "ls130"}]
+)
 
 
 def _capture(cmd):
@@ -213,35 +244,51 @@ body{background:var(--bg);color:var(--ink);margin:0;padding:2rem 1.25rem 5rem;
 h1{font-size:1.7rem;font-weight:800;text-transform:uppercase;letter-spacing:-.01em;margin:0 0 .3rem}
 h2{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:2.2rem 0 .8rem}
 p.sub{color:var(--muted);margin:0 0 1.5rem}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:.75rem;padding:.9rem 1.1rem;margin-bottom:.7rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:.75rem;padding:.9rem 1.1rem;margin-bottom:.9rem}
 .card.flem{border-left:3px solid var(--pink)}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
 .name{font-family:ui-monospace,Consolas,monospace;font-size:.88rem;font-weight:700}
 .meta{font-size:.78rem;color:var(--muted)}
-audio{width:100%;margin-top:.6rem}
-blockquote{border-left:3px solid var(--bd);margin:0 0 1.5rem;padding:.2rem 0 .2rem 1rem;
- color:var(--muted);font-size:.9rem}
+.take{margin-top:.7rem;padding-top:.7rem;border-top:1px solid var(--bd)}
+.variant{font-size:.78rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--pink)}
+audio{width:100%;margin-top:.4rem}
 </style></head><body><div class="w">
 <h1>Rudi voice samples</h1>
-<p class="sub">Piper on CPU Lambda. Flemish voices are marked with the pink rail &mdash; that is the pilot cohort's accent.</p>
+<p class="sub">Piper on CPU Lambda. Every voice speaks the monologue twice &mdash; once on automatic
+punctuation prosody, once with deliberate beats written into the script. Same voice, same speed:
+the only variable is where the silence sits. Flemish voices carry the pink rail.</p>
 """
 
 
 def _index(results):
+    """One card per voice, every take stacked inside it, so plain vs beats is one glance apart."""
     parts = [INDEX_HEAD]
-    for lang, title, text in (("nl", "Dutch — Flemish first", TEXT_NL),
-                              ("en", "English", TEXT_EN)):
+    for lang, title in (("nl", "Dutch &mdash; Flemish first"), ("en", "English")):
         parts.append('<h2>%s</h2>' % title)
-        parts.append('<blockquote>%s</blockquote>' % text[:180].replace("&", "&amp;") + "&hellip;</blockquote>")
-        for r in results:
-            if r["lang"] != lang or not r["ok"]:
+        for voice, _l, label, _sid in VOICE_LIST:
+            if _l != lang:
                 continue
-            flem = " flem" if r["voice"].startswith("nl_BE") else ""
-            parts.append(
-                '<div class="card%s"><div class="row"><span class="name">%s</span>'
-                '<span class="meta">%s &middot; %s &middot; %.1fs audio &middot; synth %sms</span></div>'
-                '<audio controls preload="none" src="%s"></audio></div>'
-                % (flem, r["voice"], r["label"], r["lang"], r["seconds"], r["synth_ms"], r["file"]))
+            takes = [r for r in results if r["ok"] and r["voice"] == voice and r["lang"] == lang]
+            if not takes:
+                continue
+            flem = " flem" if voice.startswith("nl_BE") else ""
+            parts.append('<div class="card%s"><div class="row"><span class="name">%s</span>'
+                         '<span class="meta">%s</span></div>' % (flem, voice, label))
+            for take in takes:
+                parts.append(
+                    '<div class="take"><div class="row"><span class="variant">%s</span>'
+                    '<span class="meta">%.1fs &middot; synth %sms</span></div>'
+                    '<audio controls preload="none" src="%s"></audio></div>'
+                    % (take.get("variant", "natural"), take["seconds"],
+                       take["synth_ms"], take["file"]))
+            parts.append('</div>')
+    failed = [r for r in results if not r["ok"]]
+    if failed:
+        parts.append('<h2>Failed</h2>')
+        for r in failed:
+            parts.append('<div class="card"><span class="name">%s</span> '
+                         '<span class="meta">%s</span></div>'
+                         % (r["voice"], r.get("variant", "")))
     parts.append("</div></body></html>")
     return "\n".join(parts)
 
