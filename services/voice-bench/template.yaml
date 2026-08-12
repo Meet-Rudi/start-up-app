@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI meetrudi-voice-bench — Phase-0 voice call bench. One Lambda behind a Function URL
+  does transcribe -> understand -> generate -> speak for a browser-based "call" with Rudi, and
+  writes every turn to S3 for analysis. Requires the meetrudi-base stack (data bucket) and the
+  console-created meetrudi-lambda-runner role. No new IAM objects are needed: that role already
+  grants Logs, read/write on the data bucket, and GetSecretValue on meetrudi* secrets.
+
+Resources:
+
+  VoiceBenchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-voice-bench
+      RetentionInDays: 30
+
+  VoiceBenchFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: VoiceBenchLogGroup
+    Properties:
+      FunctionName: meetrudi-voice-bench
+      Description: Phase-0 voice bench — ASR + learn/goal/commit brain + TTS, logged to S3.
+      Handler: app.handler
+      Runtime: python3.12
+      CodeUri: src/
+      # A turn is ASR + LLM + TTS in series; 60s leaves headroom for a slow provider hop.
+      Timeout: 60
+      # Audio buffers are held in memory; more memory also buys proportionally more CPU,
+      # which shortens base64 and multipart handling on every turn.
+      MemorySize: 1024
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          VOICE_BENCH_PREFIX: voice-bench
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_SECRET: meetrudi-groq-firstkey
+          GROQ_ASR_ENDPOINT: https://api.groq.com/openai/v1/audio/transcriptions
+          GROQ_ASR_MODEL: whisper-large-v3-turbo
+          GROQ_TTS_ENDPOINT: https://api.groq.com/openai/v1/audio/speech
+          GROQ_TTS_MODEL: canopylabs/orpheus-v1-english
+          GROQ_TTS_VOICE: troy
+          GROQ_TTS_FORMAT: wav
+          ALLOW_ORIGIN: https://meet-rudi.github.io
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - https://meet-rudi.github.io
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - content-type
+          MaxAge: 3600
+
+Outputs:
+  FunctionUrl:
+    Description: Public Function URL for meetrudi-voice-bench
+    Value: !GetAtt VoiceBenchFunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref VoiceBenchFunction
