@@ -41,9 +41,10 @@ Resources:
       # time versus 1 GB for the same per-request cost, since billing is memory x duration.
       MemorySize: 2048
       Timeout: 60
-      # Voice models are 60-73 MB each and cached in /tmp; 1 GB holds all five with headroom.
+      # Voice models are 60-110 MB each and cached per container in /tmp. 2.5 GB covers the
+      # full comparison set (11 voices) without a container ever having to evict one.
       EphemeralStorage:
-        Size: 1024
+        Size: 2560
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
       Environment:
         Variables:

@@ -23,11 +23,14 @@ Netherlands-Dutch voice reads as audibly foreign to them.
 
 import os
 import io
+import re
 import json
 import time
+import uuid
 import wave
 import base64
 import threading
+import collections
 
 import boto3
 
@@ -52,9 +55,49 @@ VOICES = {
 }
 DEFAULT_VOICE = os.environ.get("DEFAULT_VOICE", "en")
 
-_voice_cache = {}          # voice name -> PiperVoice
+# Any well-formed Piper voice name is accepted too, so seeding a new voice into S3 is enough to
+# use it — no redeploy. Short keys above stay as convenience aliases for callers.
+VOICE_NAME_RE = re.compile(r"^[a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)$")
+
+# Prosody. Piper concatenates its per-sentence chunks with no gap, so without this every voice
+# runs full stops together. 300ms reads as a normal spoken beat.
+SENTENCE_GAP_MS = int(os.environ.get("SENTENCE_GAP_MS", "300"))
+MAX_PAUSE_MS = 5000
+
+# Tolerant on purpose. If an LLM ever emits these it will eventually write "[pause: 400]" or
+# "[ pause:400 ]", and a near-miss must not end up spoken aloud as the words "pause four
+# hundred". STRAY_PAUSE_RE sweeps up anything that still looks like a marker afterwards.
+PAUSE_RE = re.compile(r"\[\s*pause\s*[:=]\s*(\d{1,5})\s*(?:ms)?\s*\]", re.IGNORECASE)
+STRAY_PAUSE_RE = re.compile(r"\[\s*pause[^\]]{0,20}\]", re.IGNORECASE)
+
+# Automatic prosody: how long to rest after each sentence terminator, as a multiple of the base
+# gap. A question needs longer than a statement — Rudi ends most turns on one, and the pause is
+# what tells the listener it is their turn to speak.
+#
+# Only sentence boundaries are timed automatically. Splitting mid-sentence (at an em dash, say)
+# would make Piper render each fragment with falling terminal intonation, which sounds MORE
+# clipped, not less — so mid-sentence beats stay manual via [pause:N].
+TERMINAL_SCALE = {".": 1.0, "!": 1.35, "?": 1.5, "…": 1.5, ":": 0.8, ";": 0.8}
+PARAGRAPH_SCALE = 2.2
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…:;])(\s+)")
+
+# Each loaded PiperVoice holds an ONNX session worth ~300 MB of RSS, so this cache MUST be
+# bounded: an unbounded one climbed 515 MB -> 2048 MB over seven voices and killed the container
+# with Runtime.OutOfMemory. Least-recently-used is evicted; re-loading costs ~2s from /tmp,
+# which is the right trade against dying. Rudi speaks four languages, so a live container can
+# legitimately want several voices — this is not a synthetic limit.
+MAX_CACHED_VOICES = int(os.environ.get("MAX_CACHED_VOICES", "3"))
+
+_voice_cache = collections.OrderedDict()   # voice name -> PiperVoice (LRU order)
 _voice_lock = threading.Lock()
 _token_cache = {}
+
+# A Lambda Function URL response is capped at 6 MB and audio ships base64 (+33%), so anything
+# past ~4.2 MB cannot be returned inline. Rather than fail, hand back a short-lived presigned
+# S3 URL — the caller downloads it instead. Real Rudi turns are a few seconds and never come
+# near this; long-form renders (whole monologues, samples) routinely do.
+MAX_INLINE_AUDIO_BYTES = int(os.environ.get("MAX_INLINE_AUDIO_BYTES", "4200000"))
+PRESIGN_TTL_S = int(os.environ.get("PRESIGN_TTL_S", "3600"))
 
 
 class TtsError(Exception):
@@ -112,34 +155,114 @@ def _ensure_local(voice_name):
 
 
 def _get_voice(voice_name):
-    """Load once per container; every later call in this container is free."""
-    voice = _voice_cache.get(voice_name)
-    if voice is not None:
-        return voice, 0
-
+    """Load once per container, keeping at most MAX_CACHED_VOICES resident."""
     with _voice_lock:
         voice = _voice_cache.get(voice_name)
         if voice is not None:
+            _voice_cache.move_to_end(voice_name)     # mark as most recently used
             return voice, 0
+
         started = time.time()
         model_path, config_path = _ensure_local(voice_name)
         from piper import PiperVoice          # imported late so cold-start cost is measurable
         voice = PiperVoice.load(model_path, config_path=config_path, use_cuda=False)
+
         _voice_cache[voice_name] = voice
+        while len(_voice_cache) > MAX_CACHED_VOICES:
+            evicted, _ = _voice_cache.popitem(last=False)
+            print("INFO: evicted voice %s to stay within %d cached"
+                  % (evicted, MAX_CACHED_VOICES))
         return voice, int((time.time() - started) * 1000)
 
 
-def _synthesize(voice, text, length_scale=None):
-    """Piper writes a RIFF WAV straight into the buffer, so no re-encoding is needed."""
+def _silence(sample_rate, ms):
+    """16-bit mono silence."""
+    return b"\x00\x00" * int(sample_rate * max(0, ms) / 1000)
+
+
+def _segment(text, base_gap_ms):
+    """Split into sentences and decide how long to rest after each one.
+
+    Yields (sentence, trailing_gap_ms). The gap scales with the terminator — a question earns
+    half again as long as a statement — and a paragraph break earns more than either. The last
+    sentence yields a gap of 0 so a clip never ends in padding.
+
+    This is the industrialised form of hand-placed beats: no markup in the text, no cooperation
+    needed from whatever produced it.
+    """
+    parts = [p for p in SENTENCE_SPLIT_RE.split(text) if p]
+    sentences = [p for p in parts if p.strip()]
+    separators = [p for p in parts if not p.strip()]
+
+    for i, sentence in enumerate(sentences):
+        if i == len(sentences) - 1:
+            yield sentence.strip(), 0
+            continue
+        terminator = sentence.strip()[-1:]
+        scale = TERMINAL_SCALE.get(terminator, 1.0)
+        # A blank line between sentences is a deliberate structural break; rest longer.
+        if i < len(separators) and separators[i].count("\n") >= 2:
+            scale = max(scale, PARAGRAPH_SCALE)
+        yield sentence.strip(), int(base_gap_ms * scale)
+
+
+def _synthesize(voice, text, length_scale=None, speaker_id=None, sentence_gap_ms=None):
+    """Render text to a RIFF WAV, with breathing room between sentences.
+
+    Piper yields one audio chunk per sentence and `synthesize_wav()` concatenates them with no
+    gap at all, which is why unpunctuated-sounding run-ons happen: the voice lands on a full
+    stop and starts the next sentence in the same breath. We iterate the chunks ourselves and
+    insert real silence between them.
+
+    Two controls:
+      sentence_gap_ms  — silence after every sentence (default SENTENCE_GAP_MS)
+      [pause:800]      — an inline marker for a deliberate beat, in milliseconds. Single
+                         brackets on purpose: Piper reserves [[ ... ]] for raw phoneme blocks.
+    """
     from piper import SynthesisConfig
 
     syn_config = None
+    kwargs = {}
     if length_scale is not None:
-        syn_config = SynthesisConfig(length_scale=float(length_scale))
+        kwargs["length_scale"] = float(length_scale)
+    # Multi-speaker models (nl_NL-mls has 52) need an index; single-speaker models ignore it.
+    if speaker_id is not None:
+        kwargs["speaker_id"] = int(speaker_id)
+    if kwargs:
+        syn_config = SynthesisConfig(**kwargs)
+
+    gap_ms = SENTENCE_GAP_MS if sentence_gap_ms is None else max(0, int(sentence_gap_ms))
+    rate = voice.config.sample_rate
+    pieces = []
+    after_explicit_pause = False
+
+    # re.split with a capturing group interleaves text and pause values: [txt, ms, txt, ms, txt]
+    for index, part in enumerate(PAUSE_RE.split(text)):
+        if index % 2:                                   # captured milliseconds
+            pieces.append(_silence(rate, min(int(part), MAX_PAUSE_MS)))
+            after_explicit_pause = True
+            continue
+        part = STRAY_PAUSE_RE.sub(" ", part)            # never let a malformed marker be spoken
+        if not part.strip():
+            continue
+
+        for sentence, trailing_gap in _segment(part, gap_ms):
+            for chunk in voice.synthesize(sentence, syn_config=syn_config):
+                rate = chunk.sample_rate
+                if pieces and not after_explicit_pause:
+                    pieces.append(_silence(rate, gap_ms))
+                after_explicit_pause = False
+                pieces.append(chunk.audio_int16_bytes)
+            if trailing_gap:
+                pieces.append(_silence(rate, trailing_gap))
+                after_explicit_pause = True             # don't stack the base gap on top
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav_file:
-        voice.synthesize_wav(text, wav_file, syn_config=syn_config)
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(rate)
+        wav_file.writeframes(b"".join(pieces))
     return buf.getvalue()
 
 
@@ -177,20 +300,37 @@ def handler(event, context):
         text = text[:MAX_TEXT_CHARS]
 
         key = str(params.get("voice") or DEFAULT_VOICE).strip()
-        voice_name = VOICES.get(key) or (key if key in VOICES.values() else None)
+        voice_name = VOICES.get(key) or (key if VOICE_NAME_RE.match(key) else None)
         if not voice_name:
-            return _response({"ok": False, "error": "unknown voice %r; have %s"
+            return _response({"ok": False, "error": "unknown voice %r; aliases are %s, or pass a "
+                              "full Piper name like en_US-amy-medium"
                               % (key, sorted(VOICES))}, 400)
 
         voice, load_ms = _get_voice(voice_name)
 
         synth_started = time.time()
-        audio = _synthesize(voice, text, params.get("length_scale"))
+        audio = _synthesize(voice, text, params.get("length_scale"), params.get("speaker_id"),
+                            params.get("sentence_gap_ms"))
         synth_ms = int((time.time() - synth_started) * 1000)
+
+        oversized = len(audio) > MAX_INLINE_AUDIO_BYTES
+        audio_b64, audio_url = None, None
+        if oversized:
+            key = "%s/tts-out/%s-%s.wav" % (VOICE_PREFIX, voice_name, uuid.uuid4().hex[:10])
+            s3.put_object(Bucket=DATA_BUCKET, Key=key, Body=audio, ContentType="audio/wav")
+            audio_url = s3.generate_presigned_url(
+                "get_object", Params={"Bucket": DATA_BUCKET, "Key": key},
+                ExpiresIn=PRESIGN_TTL_S)
+            print("INFO: %d bytes exceeds the inline limit; served via presigned URL %s"
+                  % (len(audio), key))
+        else:
+            audio_b64 = base64.b64encode(audio).decode("ascii")
 
         return _response({
             "ok": True,
-            "audio_b64": base64.b64encode(audio).decode("ascii"),
+            "audio_b64": audio_b64,
+            "audio_url": audio_url,
+            "bytes": len(audio),
             "mime": "audio/wav",
             "voice": voice_name,
             "sample_rate": voice.config.sample_rate,

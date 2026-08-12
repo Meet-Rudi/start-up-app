@@ -26,11 +26,23 @@ URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/main/"
        "{family}/{code}/{name}/{quality}/{code}-{name}-{quality}{ext}")
 
 VOICES = [
+    # --- production defaults -------------------------------------------------
     ("en", "en_US", "lessac", "medium"),
     ("nl", "nl_BE", "nathalie", "medium"),   # Belgian Flemish — the pilot voice
     ("nl", "nl_NL", "mls", "medium"),
     ("fr", "fr_FR", "siwis", "medium"),
     ("de", "de_DE", "thorsten", "medium"),
+    # --- comparison set, for choosing Rudi's voice ---------------------------
+    # Dutch: this is the entire realistic space. Piper has exactly two Flemish voices.
+    ("nl", "nl_BE", "rdh", "medium"),
+    ("nl", "nl_NL", "alex", "medium"),
+    ("nl", "nl_NL", "pim", "medium"),
+    ("nl", "nl_NL", "ronnie", "medium"),
+    # English: 5 of 31, picked for a warm coaching register rather than breadth.
+    ("en", "en_US", "amy", "medium"),
+    ("en", "en_US", "ryan", "high"),
+    ("en", "en_GB", "alan", "medium"),
+    ("en", "en_GB", "jenny_dioco", "medium"),
 ]
 
 
