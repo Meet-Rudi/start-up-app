@@ -178,7 +178,7 @@
           </select>
         </label>
         <label>Voice
-          <input type="text" id="cfgVoice" placeholder="troy" autocomplete="off">
+          <select id="cfgVoice"></select>
         </label>
       </div>
       <div class="row">
@@ -193,6 +193,10 @@
           <input type="number" id="cfgMax" min="1" max="30" value="12">
         </label>
       </div>
+      <label>Pause after each sentence
+        <input type="range" id="cfgGap" min="0" max="800" step="50" value="300">
+        <span class="note" id="cfgGapOut">300ms &middot; questions rest 1.5&times; longer</span>
+      </label>
       <label>Extra context for Rudi
         <textarea id="cfgNotes" placeholder="Anything Rudi should know before dialling"></textarea>
       </label>

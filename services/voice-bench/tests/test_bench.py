@@ -67,15 +67,23 @@ brain.gateway.generate = _fake_generate
 app.gateway.generate = _fake_generate
 
 speech.transcribe = lambda audio, mime="audio/webm", language="en", hint="": ("i want to walk more", 120)
-speech.synthesize = lambda text, voice=None, fmt=None, model=None: (b"RIFFfake", "audio/wav", 200)
+
+
+def _fake_synthesize(text, voice=None, fmt=None, model=None, sentence_gap_ms=None):
+    _SYNTH_CALLS.append({"text": text, "voice": voice, "sentence_gap_ms": sentence_gap_ms})
+    return b"RIFFfake", "audio/wav", 200
+
+
+_SYNTH_CALLS: list = []
+speech.synthesize = _fake_synthesize
 app.speech.transcribe = speech.transcribe
 app.speech.synthesize = speech.synthesize
 
 
 def _config(**over):
     cfg = {"language": "en", "user_name": "Test", "topic": "walking daily",
-           "voice": "troy", "start_phase": "goal", "max_minutes": 12,
-           "store_audio": True, "notes": ""}
+           "voice": "en_US-ryan-medium", "start_phase": "goal", "max_minutes": 12,
+           "store_audio": True, "sentence_gap_ms": 300, "notes": ""}
     cfg.update(over)
     return cfg
 
@@ -209,6 +217,24 @@ class ConfigHandling(unittest.TestCase):
         hint = app._asr_hint(_config(user_name="Ada", topic="swimming"))
         self.assertIn("Ada", hint)
         self.assertIn("swimming", hint)
+
+    def test_default_voice_is_not_a_stale_provider_name(self):
+        """Switching TTS_PROVIDER must not leave the old provider's voice name in the config."""
+        voice = app._clean_config({})["voice"]
+        self.assertNotEqual(voice, "troy", "Groq voice leaked into the Piper default")
+        self.assertTrue(voice)
+
+    def test_sentence_gap_is_clamped(self):
+        self.assertEqual(app._clean_config({"sentence_gap_ms": 99999})["sentence_gap_ms"], 2000)
+        self.assertEqual(app._clean_config({"sentence_gap_ms": -5})["sentence_gap_ms"], 0)
+        self.assertEqual(app._clean_config({"sentence_gap_ms": "x"})["sentence_gap_ms"], 300)
+
+    def test_sentence_gap_reaches_the_synthesiser(self):
+        _REPLIES[:] = [("Hello, this is Rudi, an AI assistant.", {})]
+        _SYNTH_CALLS[:] = []
+        _post({"action": "start", "config": _config(sentence_gap_ms=450)})
+        self.assertEqual(_SYNTH_CALLS[-1]["sentence_gap_ms"], 450)
+        self.assertEqual(_SYNTH_CALLS[-1]["voice"], "en_US-ryan-medium")
 
 
 class CallRecord(unittest.TestCase):

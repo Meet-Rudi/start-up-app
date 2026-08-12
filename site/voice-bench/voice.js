@@ -31,6 +31,7 @@
     name: $("cfgName"), topic: $("cfgTopic"), lang: $("cfgLang"), voice: $("cfgVoice"),
     phase: $("cfgPhase"), max: $("cfgMax"), notes: $("cfgNotes"),
     store: $("cfgStore"), barge: $("cfgBarge"),
+    gap: $("cfgGap"), gapOut: $("cfgGapOut"),
     avgGap: $("avgGap"), avgAsr: $("avgAsr"), avgLlm: $("avgLlm"),
     avgTts: $("avgTts"), avgNet: $("avgNet"), nTurns: $("nTurns")
   };
@@ -53,19 +54,35 @@
       language: els.lang.value,
       user_name: els.name.value.trim(),
       topic: els.topic.value.trim(),
-      voice: els.voice.value.trim() || "troy",
+      voice: els.voice.value.trim() || (DEFAULTS.voice || "en"),
       start_phase: els.phase.value,
       max_minutes: parseInt(els.max.value, 10) || 12,
       store_audio: els.store.checked,
+      sentence_gap_ms: parseInt(els.gap.value, 10),
       notes: els.notes.value.trim()
     };
   }
 
   function paintConfig() {
+    var gap = parseInt(els.gap.value, 10);
+    els.gapOut.innerHTML = gap === 0
+      ? "0ms &middot; sentences run together, as Piper leaves them"
+      : gap + "ms &middot; questions rest " + Math.round(gap * 1.5) + "ms";
     els.cfgJson.textContent = JSON.stringify(readConfig(), null, 2);
   }
 
+  function fillVoices() {
+    var list = window.VOICE_BENCH_VOICES || [["en", "default"]];
+    list.forEach(function (v) {
+      var o = document.createElement("option");
+      o.value = v[0];
+      o.textContent = v[1] + " — " + v[0];
+      els.voice.appendChild(o);
+    });
+  }
+
   function applyDefaults() {
+    fillVoices();
     if (DEFAULTS.user_name) els.name.value = DEFAULTS.user_name;
     if (DEFAULTS.topic) els.topic.value = DEFAULTS.topic;
     if (DEFAULTS.language) els.lang.value = DEFAULTS.language;
@@ -74,11 +91,12 @@
     if (DEFAULTS.max_minutes) els.max.value = DEFAULTS.max_minutes;
     if (DEFAULTS.notes) els.notes.value = DEFAULTS.notes;
     if (typeof DEFAULTS.store_audio === "boolean") els.store.checked = DEFAULTS.store_audio;
+    if (DEFAULTS.sentence_gap_ms !== undefined) els.gap.value = DEFAULTS.sentence_gap_ms;
     paintConfig();
   }
 
   ["input", "change"].forEach(function (ev) {
-    [els.name, els.topic, els.lang, els.voice, els.phase, els.max, els.notes, els.store]
+    [els.name, els.topic, els.lang, els.voice, els.phase, els.max, els.notes, els.store, els.gap]
       .forEach(function (el) { el.addEventListener(ev, paintConfig); });
   });
 

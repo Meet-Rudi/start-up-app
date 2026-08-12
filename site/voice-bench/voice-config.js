@@ -11,12 +11,25 @@ window.VOICE_BENCH_DEFAULTS = {
   language: "en",
   user_name: "",
   topic: "",
-  voice: "troy",
+  voice: "en_US-ryan-medium",
   start_phase: "goal",
   max_minutes: 12,
   store_audio: true,
+  sentence_gap_ms: 300,
   notes: ""
 };
+
+/* Voices seeded in meetrudi-tts. Short keys also work: en, nl (Flemish), nl_NL, fr, de.
+ * Flemish is parked pending native-speaker testing; English runs on ryan-medium. */
+window.VOICE_BENCH_VOICES = [
+  ["en_US-ryan-medium", "English · US · male (chosen)"],
+  ["en_US-lessac-medium", "English · US · female"],
+  ["en_US-amy-medium", "English · US · female"],
+  ["en_GB-alan-medium", "English · UK · male"],
+  ["en_GB-jenny_dioco-medium", "English · UK · female"],
+  ["nl_BE-nathalie-medium", "Flemish · female"],
+  ["nl_BE-rdh-medium", "Flemish · male"]
+];
 
 /* Endpointing. Tune these if the bench cuts people off or waits too long.
  *   silenceMs   — how long a pause must last before we treat the turn as finished

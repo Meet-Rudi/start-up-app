@@ -43,10 +43,15 @@ DEFAULT_CONFIG = {
     "language": "en",
     "user_name": "",
     "topic": "",
-    "voice": os.environ.get("GROQ_TTS_VOICE", "troy"),
+    # Provider-neutral: DEFAULT_VOICE is set per environment, so switching TTS_PROVIDER does not
+    # leave a voice name from the previous provider baked into every call config.
+    "voice": os.environ.get("DEFAULT_VOICE", "en_US-ryan-medium"),
     "start_phase": "goal",
     "max_minutes": 12,
     "store_audio": True,
+    # Silence after each sentence. Piper leaves none, and the terminator scales this: a question
+    # rests 1.5x as long, which is what hands the turn back to the patient.
+    "sentence_gap_ms": int(os.environ.get("SENTENCE_GAP_MS", "300")),
     "notes": "",
 }
 
@@ -101,6 +106,10 @@ def _clean_config(supplied):
     cfg["store_audio"] = bool(cfg.get("store_audio"))
     if str(cfg.get("start_phase")) not in ("learn", "goal", "commit"):
         cfg["start_phase"] = "goal"
+    try:
+        cfg["sentence_gap_ms"] = max(0, min(2000, int(cfg.get("sentence_gap_ms"))))
+    except (TypeError, ValueError):
+        cfg["sentence_gap_ms"] = DEFAULT_CONFIG["sentence_gap_ms"]
     # `or 12` would swallow an explicit 0, so test for None rather than falsiness.
     raw_minutes = cfg.get("max_minutes")
     try:
@@ -124,7 +133,8 @@ def _speak(text, config):
     (audio, mime, ms, error).
     """
     try:
-        audio, mime, ms = speech.synthesize(text, voice=config.get("voice"))
+        audio, mime, ms = speech.synthesize(text, voice=config.get("voice"),
+                                            sentence_gap_ms=config.get("sentence_gap_ms"))
         return audio, mime, ms, None
     except speech.SpeechError as e:
         print("TTS FAILED (continuing without audio): %s" % e)

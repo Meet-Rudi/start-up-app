@@ -40,9 +40,16 @@ Resources:
           GROQ_SECRET: meetrudi-groq-firstkey
           GROQ_ASR_ENDPOINT: https://api.groq.com/openai/v1/audio/transcriptions
           GROQ_ASR_MODEL: whisper-large-v3-turbo
+          # Speech synthesis goes to our own Piper service: EU-resident, ~65x cheaper than
+          # hosted Orpheus, and the only route that will also speak Dutch when the pilot needs
+          # it. Flip TTS_PROVIDER back to "groq" to A/B against the hosted voice.
+          TTS_PROVIDER: piper
+          PIPER_TTS_URL: https://okwzbbk4m5s62zmomnboyufakm0zkwnr.lambda-url.eu-central-1.on.aws/
+          PIPER_TTS_SECRET: meetrudi/tts/token
+          DEFAULT_VOICE: en_US-ryan-medium
+          SENTENCE_GAP_MS: 300
           GROQ_TTS_ENDPOINT: https://api.groq.com/openai/v1/audio/speech
           GROQ_TTS_MODEL: canopylabs/orpheus-v1-english
-          GROQ_TTS_VOICE: troy
           GROQ_TTS_FORMAT: wav
           ALLOW_ORIGIN: https://meet-rudi.github.io
       FunctionUrlConfig:
