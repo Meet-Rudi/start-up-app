@@ -54,3 +54,27 @@ A successful login also resets the counter; only the configured email is ever tr
 ## When the account/region/bucket changes
 These JSONs hard-code the account id, region, and bucket name (IAM has no CloudFormation
 substitution). Update them if any of those change.
+
+## 4. Secret: `meetrudi/tts/token` (Piper TTS Function URL guard)
+
+`meetrudi-tts` exposes a public Function URL, so every synthesis request must carry a shared
+token. **No IAM change needed** — the runner role's `ExternalApiSecrets` statement already
+allows `GetSecretValue` on `meetrudi*`. But `rudi-deployer` is **not** permitted to *create*
+secrets, so this is a console step.
+
+Console → Secrets Manager → **Store a new secret** → *Other type of secret* → **Plaintext** →
+paste JSON matching [`meetrudi-tts-token.example.json`](meetrudi-tts-token.example.json) with
+your own value → name it exactly **`meetrudi/tts/token`** (region `eu-central-1`).
+
+Generate the token with:
+
+```cmd
+python -c "import secrets;print(secrets.token_hex(24))"
+```
+
+The function **fails closed**: `503` on every synthesis request until this secret exists. The
+unauthenticated `{"ping": true}` health check keeps working either way and reports
+`auth_configured: false`, which is the quickest way to confirm the secret landed.
+
+The same value goes into `meetrudi-voice-bench` only indirectly — that function reads the
+secret itself via `PIPER_TTS_SECRET`, so the token is never copied into an environment variable.

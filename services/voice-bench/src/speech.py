@@ -18,6 +18,7 @@ import os
 import json
 import time
 import uuid
+import base64
 import urllib.request
 import urllib.error
 
@@ -34,6 +35,12 @@ TTS_ENDPOINT = os.environ.get(
 TTS_MODEL = os.environ.get("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
 TTS_VOICE = os.environ.get("GROQ_TTS_VOICE", "troy")
 TTS_FORMAT = os.environ.get("GROQ_TTS_FORMAT", "wav")
+
+# "piper" routes synthesis to meetrudi-tts (self-hosted, EU, speaks Dutch incl. Flemish);
+# "groq" uses the hosted Orpheus voice. Everything else in the service is unaffected.
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "groq").strip().lower()
+PIPER_URL = os.environ.get("PIPER_TTS_URL", "")
+PIPER_SECRET = os.environ.get("PIPER_TTS_SECRET", "meetrudi/tts/token")
 
 # Groq blocks urllib's default User-Agent (Cloudflare), same as the chat gateway.
 _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -126,10 +133,32 @@ def transcribe(audio_bytes, mime="audio/webm", language="en", hint=""):
     return (text or "").strip(), elapsed
 
 
+def _synthesize_piper(text, voice, started):
+    """Route to meetrudi-tts. Short voice keys — en, nl (Flemish), nl_NL, fr, de."""
+    if not PIPER_URL:
+        raise SpeechError("TTS_PROVIDER=piper but PIPER_TTS_URL is unset.")
+    token = gateway.get_secret(PIPER_SECRET)
+    payload = json.dumps({"token": token, "text": text, "voice": voice}).encode("utf-8")
+
+    raw, _ = _post(PIPER_URL, {"Content-Type": "application/json"}, payload, timeout=60)
+    elapsed = int((time.time() - started) * 1000)
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError) as e:
+        raise SpeechError("Unparseable TTS response: %s" % e)
+    if not body.get("ok"):
+        raise SpeechError("piper: %s" % body.get("error", "unknown"))
+    return base64.b64decode(body["audio_b64"]), body.get("mime", "audio/wav"), elapsed
+
+
 def synthesize(text, voice=None, fmt=None, model=None):
     """Text -> speech. Returns (audio_bytes, mime, elapsed_ms)."""
     if not (text or "").strip():
         raise SpeechError("No text supplied to synthesize().")
+
+    if TTS_PROVIDER == "piper":
+        return _synthesize_piper(text, voice or os.environ.get("DEFAULT_VOICE", "en"),
+                                 time.time())
 
     voice = voice or TTS_VOICE
     fmt = (fmt or TTS_FORMAT).lower()

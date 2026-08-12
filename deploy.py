@@ -65,6 +65,15 @@ COMPONENTS = {
         "template": "services/registration/template.yaml",
         "build": True,   # consent intake endpoint (CM pilot form)
     },
+    "tts": {
+        "stack": "meetrudi-tts",
+        "template": "services/tts/template.yaml",
+        "build": True,
+        # Piper needs native wheels for Lambda's platform, so the layer is assembled with
+        # pip --platform before SAM packages it. Without this the layer would carry Windows
+        # binaries and the function would fail at import.
+        "prebuild": "services/tts/build_layer.py",
+    },
     "voice-bench": {
         "stack": "meetrudi-voice-bench",
         "template": "services/voice-bench/template.yaml",
@@ -181,6 +190,10 @@ def main():
 
     _preflight()
 
+    if comp.get("prebuild"):
+        print("Prebuild: %s\n" % comp["prebuild"])
+        _run([sys.executable, comp["prebuild"]])
+
     template_file = _build(comp) if comp.get("build", True) else comp["template"]
     _deploy(comp, template_file)
     bucket = _seed(comp)
@@ -211,6 +224,14 @@ def main():
         print(">> Test console needs secret meetrudi/test-console/auth (fails CLOSED without it).")
         print(">> Put the Test console URL into site/test-console/test-config.js (API_BASE), then")
         print("   push to main -> GitHub Pages publishes https://meet-rudi.github.io/start-up-app/test-console/")
+    elif name == "tts":
+        print("Function URL:", _stack_output("meetrudi-tts", "FunctionUrl"))
+        print("Layer       :", _stack_output("meetrudi-tts", "LayerArn"))
+        print(">> One-time: python services/tts/seed_voices.py   (uploads ~313MB of voices)")
+        print(">> One-time: create secret meetrudi/tts/token (plaintext JSON {\"token\":\"...\"})")
+        print("   Generate one with:  python -c \"import secrets;print(secrets.token_hex(24))\"")
+        print("   The function returns 503 on every call until that secret exists.")
+        print(">> Then redeploy voice-bench with TTS_PROVIDER=piper and the URL + token set.")
     elif name == "voice-bench":
         print("Function URL:", _stack_output("meetrudi-voice-bench", "FunctionUrl"))
         print("Data bucket :", _stack_output("meetrudi-base", "DataBucketName"))

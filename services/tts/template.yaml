@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI meetrudi-tts — Piper text-to-speech on CPU Lambda. Voice models live in the shared
+  data bucket and are cached in /tmp per container; the native runtime ships as a layer built
+  by build_layer.py. Requires the meetrudi-base stack and the console-created
+  meetrudi-lambda-runner role — no new IAM objects. Fails closed until the secret
+  meetrudi/tts/token exists.
+
+Resources:
+
+  PiperLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: meetrudi-piper
+      Description: Piper TTS runtime — onnxruntime, espeak bridge, numpy (linux x86_64).
+      # Prepared by build_layer.py with manylinux wheels; SAM ships the directory as-is.
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  TtsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-tts
+      RetentionInDays: 30
+
+  TtsFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TtsLogGroup
+    Properties:
+      FunctionName: meetrudi-tts
+      Description: Piper TTS on CPU — en, nl (Flemish), nl_NL, fr, de.
+      Handler: app.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Layers:
+        - !Ref PiperLayer
+      # Lambda scales CPU with memory, and Piper is CPU-bound: 2 GB roughly halves synthesis
+      # time versus 1 GB for the same per-request cost, since billing is memory x duration.
+      MemorySize: 2048
+      Timeout: 60
+      # Voice models are 60-73 MB each and cached in /tmp; 1 GB holds all five with headroom.
+      EphemeralStorage:
+        Size: 1024
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          VOICE_PREFIX: voices/piper
+          VOICE_CACHE_DIR: /tmp/voices
+          AUTH_SECRET: meetrudi/tts/token
+          DEFAULT_VOICE: en
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - https://meet-rudi.github.io
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - content-type
+
+Outputs:
+  FunctionUrl:
+    Description: Public Function URL for meetrudi-tts (guarded by the shared token)
+    Value: !GetAtt TtsFunctionUrl.FunctionUrl
+  LayerArn:
+    Value: !Ref PiperLayer
