@@ -19,7 +19,9 @@
   var MAX_TURN_MS = VAD.maxTurnMs || 30000;
   var THRESHOLD_X = VAD.threshold || 2.6;
   var FLOOR_MIN = VAD.floorMin || 0.006;
-  var BARGE_MS = 400;
+  var BARGE_MS = VAD.bargeMs || 380;              // sustained speech before we accept a barge-in
+  var BARGE_THRESHOLD_X = VAD.bargeThreshold || 1.9;   // multiplier ON TOP of the normal threshold
+  var BARGE_GRACE_MS = VAD.bargeGraceMs || 700;   // ignore the first moment of Rudi's audio
 
   // ------------------------------------------------------------------ element handles
   var $ = function (id) { return document.getElementById(id); };
@@ -46,6 +48,7 @@
   var lastVoiceAt = 0, turnStartedAt = 0, bargeMs = 0;
   var stoppedSpeakingAt = 0, pushToTalk = false;
   var busy = false, live = false, pendingEnd = false;
+  var audioQueue = [], waitingForRest = false, playingSince = 0, playbackStartedAt = 0;
   var stats = { gap: [], asr: [], llm: [], tts: [], net: [] };
 
   // ------------------------------------------------------------------ config panel
@@ -219,21 +222,29 @@
       var level = rms();
       els.micBar.style.width = Math.min(100, Math.round((level / (threshold * 2.2)) * 100)) + "%";
 
-      // barge-in while Rudi is speaking
-      if (player && !player.paused && els.barge.checked) {
-        bargeMs = level > threshold ? bargeMs + 60 : 0;
+      var now = Date.now();
+
+      // While Rudi speaks we are still recording, so an interruption is already on tape by the
+      // time we detect it. The bar is set higher here because echo cancellation is imperfect
+      // and Rudi's own voice must not trigger this; the grace period ignores the first moment
+      // of playback, where leakage is worst.
+      if (isPlaying() && els.barge.checked) {
+        var grace = (now - playingSince) < BARGE_GRACE_MS;
+        bargeMs = (!grace && level > threshold * BARGE_THRESHOLD_X) ? bargeMs + 60 : 0;
         if (bargeMs >= BARGE_MS) {
           bargeMs = 0;
-          try { player.pause(); } catch (e) { /* already gone */ }
-          addTurn("sys", "You interrupted — Rudi stopped talking.");
-          onPlaybackDone();
+          stopPlayback();
+          addTurn("sys", "You interrupted — Rudi stopped and is listening.");
+          setState("listening", "Listening", "Go ahead");
+          hadSpeech = true;           // keep the audio already captured; it is your turn now
+          speechMs = Math.max(speechMs, MIN_SPEECH_MS);
+          lastVoiceAt = now;
         }
         return;
       }
 
       if (!listening || pushToTalk) return;
 
-      var now = Date.now();
       if (level > threshold) {
         if (!hadSpeech) hadSpeech = true;
         speechMs += 60;
@@ -298,20 +309,50 @@
     });
   }
 
-  function play(b64, mime) {
-    return new Promise(function (resolve) {
-      if (!b64) { resolve(0); return; }
-      var bin = atob(b64), bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      var url = URL.createObjectURL(new Blob([bytes], { type: mime || "audio/wav" }));
+  function toUrl(b64, mime) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime || "audio/wav" }));
+  }
 
-      player = new Audio(url);
-      var started = 0;
-      player.onplaying = function () { if (!started) { started = Date.now(); resolve(started); } };
-      player.onended = function () { URL.revokeObjectURL(url); onPlaybackDone(); };
-      player.onerror = function () { URL.revokeObjectURL(url); resolve(0); onPlaybackDone(); };
-      player.play().catch(function () { resolve(0); onPlaybackDone(); });
-    });
+  /* Rudi's reply arrives in two pieces: the lead, synthesised immediately, and the rest,
+   * fetched while the lead is already playing. Queueing them keeps that seam inaudible. */
+  function enqueue(b64, mime) {
+    if (!b64) return;
+    audioQueue.push(toUrl(b64, mime));
+    if (!player || player.ended || player.paused) playNext();
+  }
+
+  function playNext() {
+    if (!live || !audioQueue.length) {
+      if (!audioQueue.length && !waitingForRest) onPlaybackDone();
+      return;
+    }
+    var url = audioQueue.shift();
+    player = new Audio(url);
+    player.onplaying = function () {
+      if (!playbackStartedAt) playbackStartedAt = Date.now();
+      playingSince = Date.now();
+      // Listen THROUGH Rudi's turn, so an interruption is captured from the moment it starts
+      // rather than from the moment we notice it 400ms later.
+      if (!listening) startListening();
+    };
+    player.onended = function () { URL.revokeObjectURL(url); playNext(); };
+    player.onerror = function () { URL.revokeObjectURL(url); playNext(); };
+    player.play().catch(function () { playNext(); });
+  }
+
+  function stopPlayback() {
+    try { if (player) player.pause(); } catch (e) { /* already gone */ }
+    audioQueue.forEach(function (u) { URL.revokeObjectURL(u); });
+    audioQueue = [];
+    waitingForRest = false;
+    player = null;
+    playingSince = 0;
+  }
+
+  function isPlaying() {
+    return !!(player && !player.paused && !player.ended);
   }
 
   function onPlaybackDone() {
@@ -319,11 +360,39 @@
     // The engine decided the call is over — let Rudi finish his goodbye, THEN hang up.
     if (pendingEnd) { pendingEnd = false; hangUp("engine-ended"); return; }
     busy = false;
+    playingSince = 0;
     setState("listening", "Listening", "Your turn");
-    startListening();
+    if (!listening) startListening();
   }
 
   // ------------------------------------------------------------------ transport
+  /* Resolves with the measured reply gap once Rudi's first sound actually reaches the speaker. */
+  function firstSound() {
+    return new Promise(function (resolve) {
+      var t0 = Date.now();
+      (function poll() {
+        if (playbackStartedAt) return resolve(playbackStartedAt - stoppedSpeakingAt);
+        if (!live || Date.now() - t0 > 15000) return resolve(0);
+        setTimeout(poll, 25);
+      })();
+    });
+  }
+
+  /* The remainder of the reply, fetched while the lead is already playing. If the listener
+   * interrupts before it arrives we simply drop it — they have moved on. */
+  async function fetchRest(text) {
+    if (!text) { waitingForRest = false; return; }
+    try {
+      var data = await post({ action: "speak", call_id: callId, text: text });
+      if (!live || !isPlaying() && !audioQueue.length && !busy) { waitingForRest = false; return; }
+      waitingForRest = false;
+      if (data && data.ok) enqueue(data.audio_b64, data.audio_mime);
+      else onPlaybackDone();
+    } catch (e) {
+      waitingForRest = false;
+    }
+  }
+
   async function post(payload) {
     var res = await fetch(API, {
       method: "POST",
@@ -395,9 +464,12 @@
     if (data.ended) pendingEnd = true;
 
     setState("speaking", "Speaking", "Rudi is talking");
-    var startedAt = await play(data.audio_b64, data.audio_mime);
-    var gap = startedAt ? (startedAt - stoppedSpeakingAt) : 0;
+    playbackStartedAt = 0;
+    waitingForRest = !!data.rest_text;
+    enqueue(data.audio_b64, data.audio_mime);
+    fetchRest(data.rest_text);
 
+    var gap = await firstSound();
     addTurn("rudi", data.reply || "(no reply)", chipsFor(data, gap, netMs));
     noteTtsFailure(data);
     if (data.ended) addTurn("sys", "Rudi wrapped the call up (phase: " + data.phase + ").");
@@ -466,7 +538,10 @@
 
     var netMs = Math.max(0, roundtrip - (data.timings ? data.timings.server_ms : 0));
     setState("speaking", "Speaking", "Rudi's opening");
-    await play(data.audio_b64, data.audio_mime);
+    playbackStartedAt = 0;
+    waitingForRest = !!data.rest_text;
+    enqueue(data.audio_b64, data.audio_mime);
+    fetchRest(data.rest_text);
     addTurn("rudi", data.reply, chipsFor(data, 0, netMs));
     noteTtsFailure(data);
     // No audio means no `onended` will ever fire — start listening ourselves.
@@ -477,7 +552,7 @@
     if (!live) return;
     live = false;
     listening = false;
-    try { if (player) player.pause(); } catch (e) { /* noop */ }
+    stopPlayback();
     try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) { /* noop */ }
     if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; }
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); });

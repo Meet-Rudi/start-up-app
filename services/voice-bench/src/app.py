@@ -26,6 +26,7 @@ Call config (all optional except where noted; defaults applied in _clean_config)
 """
 
 import os
+import re
 import json
 import time
 import base64
@@ -38,6 +39,7 @@ import gateway
 
 ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "https://meet-rudi.github.io")
 MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", "8000000"))
+MAX_TEXT_CHARS = int(os.environ.get("MAX_TEXT_CHARS", "3000"))
 
 DEFAULT_CONFIG = {
     "language": "en",
@@ -61,13 +63,16 @@ TIRED_MESSAGE = ("I'm a little overloaded right now and can't think straight. "
 
 
 def _response(payload, status=200):
+    """Note what is NOT here: Access-Control-Allow-Origin.
+
+    The Function URL's own Cors config already emits it. Setting it here too made the response
+    carry the header twice, and a browser rejects a duplicated Access-Control-Allow-Origin
+    outright — which surfaces as a bare "Failed to fetch" with no useful detail. Server-side
+    callers never saw it because they send no Origin and trigger no CORS check.
+    """
     return {
         "statusCode": status,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": ALLOW_ORIGIN,
-            "Cache-Control": "no-store",
-        },
+        "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
         "body": json.dumps(payload, ensure_ascii=False),
     }
 
@@ -119,6 +124,33 @@ def _clean_config(supplied):
     return cfg
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+# ~14 characters per second of speech, so 16 buys roughly 1.2s of lead — comfortably longer
+# than the round trip that fetches the remainder.
+LEAD_MIN_CHARS = int(os.environ.get("LEAD_MIN_CHARS", "16"))
+
+
+def _split_lead(text):
+    """Split a reply into (lead, rest) so the lead can start playing while `rest` renders.
+
+    Synthesising a whole reply costs ~2s; the first sentence costs ~0.4s. Speaking the lead
+    immediately and fetching the remainder during playback is what turns a 2s silence into a
+    sub-second one — the seam lands inside audio the listener is already hearing.
+
+    Very short openers ("Hi Filip.") are merged forward, because a 0.6s clip followed by a
+    fetch is more audible as a stutter than it is useful as a head start.
+    """
+    parts = _SENTENCE_END.split((text or "").strip())
+    if len(parts) < 2:
+        return text, ""
+    lead = parts[0]
+    index = 1
+    while index < len(parts) and len(lead) < LEAD_MIN_CHARS:
+        lead += " " + parts[index]
+        index += 1
+    return lead, " ".join(parts[index:]).strip()
+
+
 def _asr_hint(config):
     """Seed Whisper with the proper nouns it is most likely to mangle."""
     bits = [b for b in (config.get("user_name"), config.get("topic")) if b]
@@ -160,7 +192,8 @@ def _do_start(params, event):
     reply, state, info = brain.open_call(config)
     llm_ms = int((time.time() - t0) * 1000)
 
-    audio, audio_mime, tts_ms, tts_error = _speak(reply, config)
+    lead, rest = _split_lead(reply)
+    audio, audio_mime, tts_ms, tts_error = _speak(lead, config)
 
     manifest = calllog.start(call_id, config, state, _meta(event))
     audio_ref = None
@@ -187,7 +220,7 @@ def _do_start(params, event):
     return _response({
         "ok": True, "call_id": call_id, "reply": reply,
         "audio_b64": base64.b64encode(audio).decode("ascii") if audio else None,
-        "audio_mime": audio_mime, "tts_error": tts_error,
+        "audio_mime": audio_mime, "tts_error": tts_error, "rest_text": rest,
         "phase": state["phase"], "signals": {}, "ended": False,
         "config": config, "timings": timings,
     })
@@ -244,8 +277,9 @@ def _do_turn(params, event):
 
     audio_out, audio_mime, tts_ms, tts_error = (b"", "audio/wav", 0, None)
     rudi_audio_ref = None
+    lead, rest = _split_lead(reply)
     if reply:
-        audio_out, audio_mime, tts_ms, tts_error = _speak(reply, config)
+        audio_out, audio_mime, tts_ms, tts_error = _speak(lead, config)
         if config["store_audio"] and audio_out:
             rudi_audio_ref = calllog.put_audio(call_id, seq, "rudi", audio_out,
                                                speech.ext_for_mime(audio_mime), audio_mime)
@@ -262,9 +296,35 @@ def _do_turn(params, event):
     return _response({
         "ok": True, "call_id": call_id, "transcript": transcript, "reply": reply,
         "audio_b64": base64.b64encode(audio_out).decode("ascii") if audio_out else None,
-        "audio_mime": audio_mime, "tts_error": tts_error, "phase": state["phase"],
+        "audio_mime": audio_mime, "tts_error": tts_error, "rest_text": rest,
+        "phase": state["phase"],
         "signals": info.get("signals", {}), "ended": bool(info.get("ended")),
         "timings": timings,
+    })
+
+
+def _do_speak(params, _event):
+    """Synthesise the remainder of a reply while its lead is already playing.
+
+    Kept as its own action rather than folded into `turn` so the client controls when it is
+    fetched — it fires the moment playback starts, not after it finishes.
+    """
+    t0 = time.time()
+    manifest = calllog.load((params.get("call_id") or "").strip())
+    if not manifest:
+        return _response({"ok": False, "error": "unknown call_id"}, 404)
+
+    text = str(params.get("text") or "").strip()
+    if not text:
+        return _response({"ok": False, "error": "text is required"}, 400)
+
+    config = _clean_config(manifest.get("config"))
+    audio, mime, tts_ms, tts_error = _speak(text[:MAX_TEXT_CHARS], config)
+    return _response({
+        "ok": True,
+        "audio_b64": base64.b64encode(audio).decode("ascii") if audio else None,
+        "audio_mime": mime, "tts_error": tts_error,
+        "timings": {"tts_ms": tts_ms, "server_ms": int((time.time() - t0) * 1000)},
     })
 
 
@@ -278,7 +338,7 @@ def _do_end(params, _event):
     return _response({"ok": True, "manifest": manifest})
 
 
-ACTIONS = {"start": _do_start, "turn": _do_turn, "end": _do_end}
+ACTIONS = {"start": _do_start, "turn": _do_turn, "end": _do_end, "speak": _do_speak}
 
 
 def handler(event, context):

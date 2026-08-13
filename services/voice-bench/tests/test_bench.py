@@ -347,6 +347,65 @@ class CallRecord(unittest.TestCase):
         self.assertEqual(calllog.load(call_id)["state"]["clarifiers_used"], 0)
 
 
+class LeadSplit(unittest.TestCase):
+    """Speaking the first sentence while the rest still renders is what turns a ~2s silence
+    into a sub-second one."""
+
+    def test_first_sentence_is_the_lead(self):
+        lead, rest = app._split_lead(
+            "That is really good going. How did the last one feel?")
+        self.assertEqual(lead, "That is really good going.")
+        self.assertEqual(rest, "How did the last one feel?")
+
+    def test_tiny_opener_is_merged_forward(self):
+        """A 0.6s clip followed by a fetch stutters more than it helps."""
+        lead, rest = app._split_lead("Hi Filip. I am Rudi, an AI assistant. How are you?")
+        self.assertEqual(lead, "Hi Filip. I am Rudi, an AI assistant.")
+        self.assertEqual(rest, "How are you?")
+
+    def test_single_sentence_has_no_remainder(self):
+        lead, rest = app._split_lead("Twenty-five minutes, twice this week?")
+        self.assertEqual(lead, "Twenty-five minutes, twice this week?")
+        self.assertEqual(rest, "")
+
+    def test_turn_returns_lead_audio_and_rest_text(self):
+        _REPLIES[:] = [
+            ("Hello there, this is Rudi speaking.", {}),
+            ("That is good going. How did it feel?", {}),
+        ]
+        started = _post({"action": "start", "config": _config()})
+        call_id = started["call_id"]
+        audio = base64.b64encode(b"pretend-opus-audio-long-enough").decode()
+        turn = _post({"action": "turn", "call_id": call_id,
+                      "audio_b64": audio, "audio_mime": "audio/webm"})
+        self.assertEqual(turn["rest_text"], "How did it feel?")
+        self.assertEqual(_SYNTH_CALLS[-1]["text"], "That is good going.",
+                         "only the lead should be synthesised on the turn")
+
+    def test_speak_action_renders_the_remainder(self):
+        _REPLIES[:] = [("Hello there, this is Rudi speaking.", {})]
+        call_id = _post({"action": "start", "config": _config()})["call_id"]
+        out = _post({"action": "speak", "call_id": call_id, "text": "How did it feel?"})
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["audio_b64"])
+        self.assertEqual(_SYNTH_CALLS[-1]["text"], "How did it feel?")
+
+    def test_speak_rejects_unknown_call(self):
+        self.assertFalse(_post({"action": "speak", "call_id": "nope", "text": "hi"})["ok"])
+
+
+class CorsHeaders(unittest.TestCase):
+    """The Function URL emits CORS headers itself. Emitting them from the handler as well made
+    the browser see a duplicated Access-Control-Allow-Origin and refuse the response with a
+    bare 'Failed to fetch'. Server-side callers never noticed, so only a browser caught it."""
+
+    def test_handler_does_not_set_cors_headers(self):
+        ev = {"body": json.dumps({"action": "end", "call_id": "nope"})}
+        headers = {k.lower() for k in app.handler(ev, None)["headers"]}
+        self.assertNotIn("access-control-allow-origin", headers)
+        self.assertIn("content-type", headers)
+
+
 class SpeechHelpers(unittest.TestCase):
 
     def test_mime_to_extension(self):
