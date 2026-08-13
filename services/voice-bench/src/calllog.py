@@ -133,6 +133,38 @@ def record_turn(manifest, seq, record):
     return manifest
 
 
+def _feedback_key(call_id, seq):
+    return "%s/calls/%s/feedback/%02d.json" % (PREFIX, call_id, seq)
+
+
+def add_feedback(manifest, note):
+    """Append a tester's note to the call.
+
+    Notes are written as their own objects AND mirrored into the manifest, so `manifest.json`
+    still holds the whole call — the page promises exactly that, and a reviewer reading one
+    file should not have to know to go looking for a second.
+
+    Allowed after the call is completed: the sharpest observations tend to arrive once the
+    tester has hung up and thought about it.
+    """
+    call_id = manifest["call_id"]
+    notes = manifest.setdefault("feedback", [])
+    seq = len(notes) + 1
+    record = dict(note, seq=seq, at=iso(), call_id=call_id)
+
+    _put_json(_feedback_key(call_id, seq), record)
+    notes.append(record)
+    _put_json(_manifest_key(call_id), manifest)
+
+    # Keep the day index in step so calls carrying notes can be found without opening each one.
+    row = _get_json(_index_key(call_id, manifest.get("started_at"))) or {}
+    row["feedback_count"] = len(notes)
+    row.setdefault("call_id", call_id)
+    row.setdefault("started_at", manifest.get("started_at"))
+    _put_json(_index_key(call_id, manifest.get("started_at")), row)
+    return record
+
+
 def finish(manifest, reason="hangup"):
     call_id = manifest["call_id"]
     manifest["status"] = "completed"
@@ -169,5 +201,6 @@ def finish(manifest, reason="hangup"):
         "topic": manifest.get("config", {}).get("topic"),
         "language": manifest.get("config", {}).get("language"),
         "outcome": manifest.get("outcome"),
+        "feedback_count": len(manifest.get("feedback") or []),
     })
     return manifest

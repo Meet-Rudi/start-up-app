@@ -35,6 +35,8 @@
     store: $("cfgStore"), barge: $("cfgBarge"),
     gap: $("cfgGap"), gapOut: $("cfgGapOut"),
     adapt: $("cfgAdapt"), adaptOut: $("cfgAdaptOut"),
+    fbTester: $("fbTester"), fbText: $("fbText"),
+    btnFeedback: $("btnFeedback"), fbStatus: $("fbStatus"),
     avgGap: $("avgGap"), avgAsr: $("avgAsr"), avgLlm: $("avgLlm"),
     avgTts: $("avgTts"), avgNet: $("avgNet"), nTurns: $("nTurns")
   };
@@ -745,6 +747,56 @@
     pushToTalk = false;
     stopListening("push-to-talk");
   }
+
+  /* ---- human feedback ---------------------------------------------------------------------
+   * Free-text notes from whoever is testing, attached to the call so they can be read next to
+   * the transcript, the timings and the pace measurements rather than in a separate document.
+   * Deliberately available after hang-up: the sharpest observation usually arrives once the
+   * tester has stopped concentrating on talking.
+   */
+  var TESTER_KEY = "meetrudi.voicebench.tester";
+
+  async function sendFeedback() {
+    var text = els.fbText.value.trim();
+    if (!text) { els.fbText.focus(); return; }
+    if (!callId) {
+      els.fbStatus.className = "note";
+      els.fbStatus.textContent = "start a call first — notes attach to one";
+      return;
+    }
+    var tester = els.fbTester.value.trim();
+    try { if (tester) localStorage.setItem(TESTER_KEY, tester); } catch (e) { /* private mode */ }
+
+    els.btnFeedback.disabled = true;
+    els.fbStatus.className = "note";
+    els.fbStatus.textContent = "saving…";
+    try {
+      var data = await post({
+        action: "feedback", call_id: callId, text: text, tester: tester || null,
+        after_turn: stats.gap.length
+      });
+      if (data && data.ok) {
+        els.fbText.value = "";
+        els.fbStatus.className = "note ok";
+        els.fbStatus.textContent = "saved — " + data.count + " note" + (data.count === 1 ? "" : "s");
+        addTurn("sys", "Note " + data.seq + " saved: " + text);
+      } else {
+        els.fbStatus.textContent = "failed: " + ((data && data.error) || "unknown");
+      }
+    } catch (e) {
+      els.fbStatus.textContent = "failed: " + e.message;
+    }
+    els.btnFeedback.disabled = false;
+  }
+
+  els.btnFeedback.addEventListener("click", sendFeedback);
+  els.fbText.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); sendFeedback(); }
+  });
+  try {
+    var savedTester = localStorage.getItem(TESTER_KEY);
+    if (savedTester) els.fbTester.value = savedTester;
+  } catch (e) { /* private mode */ }
 
   els.btnStart.addEventListener("click", startCall);
   els.btnHang.addEventListener("click", function () { hangUp("hangup"); });

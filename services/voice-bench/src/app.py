@@ -40,6 +40,7 @@ import gateway
 ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "https://meet-rudi.github.io")
 MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", "8000000"))
 MAX_TEXT_CHARS = int(os.environ.get("MAX_TEXT_CHARS", "3000"))
+MAX_FEEDBACK_CHARS = int(os.environ.get("MAX_FEEDBACK_CHARS", "4000"))
 
 DEFAULT_CONFIG = {
     "language": "en",
@@ -366,7 +367,36 @@ def _do_end(params, _event):
     return _response({"ok": True, "manifest": manifest})
 
 
-ACTIONS = {"start": _do_start, "turn": _do_turn, "end": _do_end, "speak": _do_speak}
+def _do_feedback(params, event):
+    """Record a tester's free-text note against the call.
+
+    Deliberately permissive: it accepts notes on a finished call, needs nothing but text, and
+    never fails the caller for a missing field. During a testing session the cost of losing an
+    observation is far higher than the cost of a slightly ragged record.
+    """
+    manifest = calllog.load((params.get("call_id") or "").strip())
+    if not manifest:
+        return _response({"ok": False, "error": "unknown call_id"}, 404)
+
+    text = str(params.get("text") or "").strip()
+    if not text:
+        return _response({"ok": False, "error": "text is required"}, 400)
+
+    record = calllog.add_feedback(manifest, {
+        "text": text[:MAX_FEEDBACK_CHARS],
+        "tester": str(params.get("tester") or "").strip()[:60] or None,
+        # Which turn was on screen when they wrote it — "turn 3 was too fast" is worth far more
+        # than a note floating free of the moment it describes.
+        "after_turn": params.get("after_turn"),
+        "call_status": manifest.get("status"),
+        "meta": _meta(event),
+    })
+    return _response({"ok": True, "seq": record["seq"],
+                      "count": len(manifest.get("feedback") or [])})
+
+
+ACTIONS = {"start": _do_start, "turn": _do_turn, "end": _do_end, "speak": _do_speak,
+           "feedback": _do_feedback}
 
 
 def handler(event, context):

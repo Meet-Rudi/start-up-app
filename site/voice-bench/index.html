@@ -137,6 +137,10 @@
   .banner.err { background:var(--stop-bg); color:var(--stop); border-color:var(--stop); }
   .banner.ok  { background:var(--ok-bg); color:var(--ok); border-color:var(--ok); }
   .hidden { display:none !important; }
+  .feedback { border-top:1px solid var(--border); padding-top:.9rem; margin-top:.2rem;
+              display:flex; flex-direction:column; gap:.6rem; }
+  .feedback h2 { color:var(--ink-faint); }
+  #fbStatus.ok { color:var(--ok); font-weight:700; }
 </style>
 </head>
 <body>
@@ -223,6 +227,23 @@
       </div>
       <div id="banner" class="banner err hidden"></div>
       <p class="note" id="callIdNote"></p>
+
+      <div class="feedback">
+        <h2 style="margin-bottom:.1rem">Human feedback</h2>
+        <p class="note">What went wrong, what felt off, what to try next. Notes attach to this
+          call and can be added after you hang up.</p>
+        <label>Your name
+          <input type="text" id="fbTester" placeholder="who is testing" autocomplete="off">
+        </label>
+        <label>Note
+          <textarea id="fbText" rows="3"
+            placeholder="e.g. cut me off mid-sentence on turn 3; voice too fast for an older patient"></textarea>
+        </label>
+        <div class="controls">
+          <button id="btnFeedback" class="ghost">Add note</button>
+          <span class="note" id="fbStatus"></span>
+        </div>
+      </div>
     </section>
 
     <section class="panel">

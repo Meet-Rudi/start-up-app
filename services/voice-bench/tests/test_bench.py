@@ -429,6 +429,74 @@ class PaceControl(unittest.TestCase):
         self.assertEqual(_SYNTH_CALLS[-1]["length_scale"], 1.25)
 
 
+class HumanFeedback(unittest.TestCase):
+    """Team testing notes. Losing an observation costs more than a ragged record, so this is
+    permissive by design — but it must never lose one it accepted."""
+
+    def setUp(self):
+        _REPLIES[:] = [("Hello there, this is Rudi.", {})]
+        self.call_id = _post({"action": "start", "config": _config()})["call_id"]
+
+    def test_note_is_stored_and_counted(self):
+        out = _post({"action": "feedback", "call_id": self.call_id,
+                     "text": "cut me off mid-sentence", "tester": "Filip", "after_turn": 3})
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["seq"], 1)
+        self.assertEqual(out["count"], 1)
+
+        note = calllog.load(self.call_id)["feedback"][0]
+        self.assertEqual(note["text"], "cut me off mid-sentence")
+        self.assertEqual(note["tester"], "Filip")
+        self.assertEqual(note["after_turn"], 3)
+        self.assertIn("voice-bench/calls/%s/feedback/01.json" % self.call_id,
+                      _FAKE_S3._store[BUCKET])
+
+    def test_notes_accumulate_without_overwriting(self):
+        for i in range(3):
+            _post({"action": "feedback", "call_id": self.call_id, "text": "note %d" % i})
+        notes = calllog.load(self.call_id)["feedback"]
+        self.assertEqual([n["text"] for n in notes], ["note 0", "note 1", "note 2"])
+        for seq in (1, 2, 3):
+            self.assertIn("voice-bench/calls/%s/feedback/%02d.json" % (self.call_id, seq),
+                          _FAKE_S3._store[BUCKET])
+
+    def test_note_accepted_after_the_call_ended(self):
+        """The sharpest observation usually arrives after hanging up."""
+        _post({"action": "end", "call_id": self.call_id, "reason": "hangup"})
+        out = _post({"action": "feedback", "call_id": self.call_id,
+                     "text": "thinking about it, the voice was too brisk"})
+        self.assertTrue(out["ok"])
+        manifest = calllog.load(self.call_id)
+        self.assertEqual(manifest["status"], "completed")
+        self.assertEqual(len(manifest["feedback"]), 1)
+        self.assertEqual(manifest["feedback"][0]["call_status"], "completed")
+
+    def test_manifest_still_holds_the_whole_call(self):
+        _post({"action": "feedback", "call_id": self.call_id, "text": "a note"})
+        self.assertTrue(calllog.load(self.call_id).get("feedback"))
+
+    def test_index_row_carries_the_count(self):
+        _post({"action": "feedback", "call_id": self.call_id, "text": "a note"})
+        key = [k for k in _FAKE_S3._store[BUCKET]
+               if k.startswith("voice-bench/index/") and self.call_id in k][0]
+        row = json.loads(_FAKE_S3._store[BUCKET][key].decode("utf-8"))
+        self.assertEqual(row["feedback_count"], 1)
+
+    def test_empty_note_rejected(self):
+        self.assertFalse(_post({"action": "feedback", "call_id": self.call_id,
+                                "text": "   "})["ok"])
+
+    def test_unknown_call_rejected(self):
+        self.assertFalse(_post({"action": "feedback", "call_id": "nope",
+                                "text": "hi"})["ok"])
+
+    def test_long_note_is_truncated_not_refused(self):
+        out = _post({"action": "feedback", "call_id": self.call_id, "text": "x" * 99999})
+        self.assertTrue(out["ok"])
+        self.assertEqual(len(calllog.load(self.call_id)["feedback"][0]["text"]),
+                         app.MAX_FEEDBACK_CHARS)
+
+
 class CorsHeaders(unittest.TestCase):
     """The Function URL emits CORS headers itself. Emitting them from the handler as well made
     the browser see a duplicated Access-Control-Allow-Origin and refuse the response with a
