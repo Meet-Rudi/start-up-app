@@ -69,8 +69,10 @@ app.gateway.generate = _fake_generate
 speech.transcribe = lambda audio, mime="audio/webm", language="en", hint="": ("i want to walk more", 120)
 
 
-def _fake_synthesize(text, voice=None, fmt=None, model=None, sentence_gap_ms=None):
-    _SYNTH_CALLS.append({"text": text, "voice": voice, "sentence_gap_ms": sentence_gap_ms})
+def _fake_synthesize(text, voice=None, fmt=None, model=None, sentence_gap_ms=None,
+                     length_scale=None):
+    _SYNTH_CALLS.append({"text": text, "voice": voice, "sentence_gap_ms": sentence_gap_ms,
+                         "length_scale": length_scale})
     return b"RIFFfake", "audio/wav", 200
 
 
@@ -392,6 +394,39 @@ class LeadSplit(unittest.TestCase):
 
     def test_speak_rejects_unknown_call(self):
         self.assertFalse(_post({"action": "speak", "call_id": "nope", "text": "hi"})["ok"])
+
+
+class PaceControl(unittest.TestCase):
+    """The client measures the patient's cadence and asks for a matching pace. Bounds are tight
+    because Piper degrades outside them and exact mirroring is uncanny rather than warm."""
+
+    def test_pace_is_clamped_to_a_safe_band(self):
+        self.assertEqual(app._pace({"length_scale": 9.0}), 1.45)
+        self.assertEqual(app._pace({"length_scale": 0.1}), 0.85)
+        self.assertEqual(app._pace({"length_scale": 1.2}), 1.2)
+
+    def test_absent_pace_leaves_the_voice_default(self):
+        self.assertIsNone(app._pace({}))
+        self.assertIsNone(app._pace({"length_scale": None}))
+        self.assertIsNone(app._pace({"length_scale": "fast"}))
+
+    def test_pace_reaches_the_synthesiser_on_a_turn(self):
+        _REPLIES[:] = [("Hello there, this is Rudi.", {}), ("Good going. How did it feel?", {})]
+        call_id = _post({"action": "start", "config": _config()})["call_id"]
+        audio = base64.b64encode(b"pretend-opus-audio-long-enough").decode()
+        _SYNTH_CALLS[:] = []
+        _post({"action": "turn", "call_id": call_id, "audio_b64": audio,
+               "audio_mime": "audio/webm", "length_scale": 1.25})
+        self.assertEqual(_SYNTH_CALLS[-1]["length_scale"], 1.25)
+
+    def test_remainder_keeps_the_same_pace(self):
+        """The reply must not change speed halfway through, at the lead/rest seam."""
+        _REPLIES[:] = [("Hello there, this is Rudi.", {})]
+        call_id = _post({"action": "start", "config": _config()})["call_id"]
+        _SYNTH_CALLS[:] = []
+        _post({"action": "speak", "call_id": call_id, "text": "How did it feel?",
+               "length_scale": 1.25})
+        self.assertEqual(_SYNTH_CALLS[-1]["length_scale"], 1.25)
 
 
 class CorsHeaders(unittest.TestCase):

@@ -133,7 +133,7 @@ def transcribe(audio_bytes, mime="audio/webm", language="en", hint=""):
     return (text or "").strip(), elapsed
 
 
-def _synthesize_piper(text, voice, started, sentence_gap_ms=None):
+def _synthesize_piper(text, voice, started, sentence_gap_ms=None, length_scale=None):
     """Route to meetrudi-tts. Accepts short keys (en, nl, fr, de) or full Piper voice names."""
     if not PIPER_URL:
         raise SpeechError("TTS_PROVIDER=piper but PIPER_TTS_URL is unset.")
@@ -141,6 +141,8 @@ def _synthesize_piper(text, voice, started, sentence_gap_ms=None):
     body = {"token": token, "text": text, "voice": voice}
     if sentence_gap_ms is not None:
         body["sentence_gap_ms"] = sentence_gap_ms
+    if length_scale is not None:
+        body["length_scale"] = length_scale
     payload = json.dumps(body).encode("utf-8")
 
     raw, _ = _post(PIPER_URL, {"Content-Type": "application/json"}, payload, timeout=60)
@@ -154,14 +156,14 @@ def _synthesize_piper(text, voice, started, sentence_gap_ms=None):
     return base64.b64decode(body["audio_b64"]), body.get("mime", "audio/wav"), elapsed
 
 
-def synthesize(text, voice=None, fmt=None, model=None, sentence_gap_ms=None):
+def synthesize(text, voice=None, fmt=None, model=None, sentence_gap_ms=None, length_scale=None):
     """Text -> speech. Returns (audio_bytes, mime, elapsed_ms)."""
     if not (text or "").strip():
         raise SpeechError("No text supplied to synthesize().")
 
     if TTS_PROVIDER == "piper":
         return _synthesize_piper(text, voice or os.environ.get("DEFAULT_VOICE", "en"),
-                                 time.time(), sentence_gap_ms)
+                                 time.time(), sentence_gap_ms, length_scale)
 
     voice = voice or TTS_VOICE
     fmt = (fmt or TTS_FORMAT).lower()

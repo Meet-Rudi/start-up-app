@@ -34,6 +34,7 @@
     phase: $("cfgPhase"), max: $("cfgMax"), notes: $("cfgNotes"),
     store: $("cfgStore"), barge: $("cfgBarge"),
     gap: $("cfgGap"), gapOut: $("cfgGapOut"),
+    adapt: $("cfgAdapt"), adaptOut: $("cfgAdaptOut"),
     avgGap: $("avgGap"), avgAsr: $("avgAsr"), avgLlm: $("avgLlm"),
     avgTts: $("avgTts"), avgNet: $("avgNet"), nTurns: $("nTurns")
   };
@@ -45,11 +46,112 @@
   var noiseFloor = 0.01, threshold = 0.03;
   var monitorTimer = null, player = null;
   var listening = false, hadSpeech = false, speechMs = 0;
-  var lastVoiceAt = 0, turnStartedAt = 0, bargeMs = 0;
+  var lastVoiceAt = 0, turnStartedAt = 0, bargeMs = 0, firstVoiceAt = 0;
   var stoppedSpeakingAt = 0, pushToTalk = false;
   var busy = false, live = false, pendingEnd = false;
   var audioQueue = [], waitingForRest = false, playingSince = 0, playbackStartedAt = 0;
   var stats = { gap: [], asr: [], llm: [], tts: [], net: [] };
+
+  /* ---- pace adaptation -------------------------------------------------------------------
+   * The primary signal is CADENCE — characters per second of the transcript, over the time the
+   * speaker was actually voicing.
+   *
+   * Characters rather than words, because word length is not constant across languages: Dutch
+   * and German compound words are far longer than English ones, so a words-per-second measure
+   * would read an ordinary Flemish speaker as slow. Characters track syllable rate closely
+   * enough to be a fair proxy in every language we will serve.
+   *
+   * Cadence rather than pause behaviour, because it is measurable on EVERY turn. Many people
+   * speak in one continuous run on a phone call, so an adaptation that only learned from
+   * mid-turn pauses would sit inert for exactly the fluent-but-slow speaker it exists to help.
+   *
+   * Cadence drives two things: how long we wait before deciding they have finished, and how
+   * fast Rudi answers. Someone at 10 characters per second leaves longer gaps between words
+   * too, so a fixed 900ms endpoint clips them mid-sentence.
+   *
+   * Mid-turn pauses are kept as a secondary refinement. When one does occur it is hard evidence
+   * of how long this person is willing to leave a gap, so we take whichever signal asks for
+   * more room — but nothing depends on them existing.
+   *
+   * Everything is clamped and drifts slowly. Over-adapting is worse than not adapting: an
+   * endpoint that creeps long makes every reply feel sluggish, and a voice that mirrors someone
+   * exactly reads as uncanny rather than warm.
+   */
+  // Unhurried conversational speech, ~155 wpm. This is the anchor: a speaker AT this cadence
+  // gets the default wait and Rudi's natural pace. Everything is a deviation from here, so
+  // adaptation is a no-op for an average speaker rather than a constant nudge.
+  var REF_CPS = 15;
+  var adapt = {
+    rates: [],             // patient characters/sec, per turn — the primary signal
+    pauses: [],            // longest mid-turn pause, when one happens at all
+    silenceMs: SILENCE_MS,
+    lengthScale: 1.0,
+    longestPauseThisTurn: 0,
+    silentSince: 0,
+    lastRate: null
+  };
+
+  function median(a) {
+    if (!a.length) return null;
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    return s[Math.floor(s.length / 2)];
+  }
+
+  function updateAdaptation(transcript, speechSeconds) {
+    if (!els.adapt.checked) return;
+
+    // Letters only: Whisper's punctuation and digit formatting are its stylistic choices, not
+    // something the speaker voiced, and counting them would skew the cadence.
+    var chars = (transcript || "").replace(/[^\p{L}\p{N}]/gu, "").length;
+    if (chars >= 12 && speechSeconds >= 1.0) {
+      adapt.lastRate = chars / speechSeconds;
+      adapt.rates.push(adapt.lastRate);
+    }
+    if (adapt.longestPauseThisTurn > 0) adapt.pauses.push(adapt.longestPauseThisTurn);
+    adapt.rates = adapt.rates.slice(-3);
+    adapt.pauses = adapt.pauses.slice(-3);
+
+    if (adapt.rates.length < 2) return;          // one turn is not evidence
+
+    var rate = median(adapt.rates);
+
+    // Slower cadence, longer wait — proportionally, then bounded.
+    var want = Math.round(SILENCE_MS * (REF_CPS / Math.max(5, rate)));
+
+    // If they have actually demonstrated a long pause, respect it: it beats any inference.
+    if (adapt.pauses.length >= 2) {
+      want = Math.max(want, Math.round(median(adapt.pauses) * 1.35 + 150));
+    }
+    want = Math.max(700, Math.min(1800, want));
+
+    // Drift rather than jump, so one odd turn cannot swing the rest of the call.
+    adapt.silenceMs += Math.max(-150, Math.min(150, want - adapt.silenceMs));
+
+    // Meet them halfway on pace rather than matching exactly. Relative to REF_CPS, so a
+    // speaker at the reference cadence leaves Rudi at exactly 1.00x.
+    var full = REF_CPS / Math.max(6, rate);
+    adapt.lengthScale = Math.max(0.9, Math.min(1.35,
+      Math.round((1 + (full - 1) * 0.5) * 100) / 100));
+
+    paintAdapt();
+  }
+
+  function paintAdapt() {
+    if (!els.adaptOut) return;
+    if (!els.adapt.checked) { els.adaptOut.textContent = "off — fixed " + SILENCE_MS + "ms"; return; }
+    var cadence = adapt.rates.length ? median(adapt.rates).toFixed(1) + " ch/s · " : "";
+    els.adaptOut.textContent = adapt.rates.length < 2
+      ? "learning your cadence… " + cadence + "wait " + adapt.silenceMs + "ms"
+      : cadence + "wait " + adapt.silenceMs + "ms · Rudi " + adapt.lengthScale.toFixed(2) + "×";
+  }
+
+  function currentSilenceMs() {
+    return els.adapt.checked ? adapt.silenceMs : SILENCE_MS;
+  }
+
+  function currentLengthScale() {
+    return els.adapt.checked ? adapt.lengthScale : null;
+  }
 
   // ------------------------------------------------------------------ config panel
   function readConfig() {
@@ -96,10 +198,11 @@
     if (typeof DEFAULTS.store_audio === "boolean") els.store.checked = DEFAULTS.store_audio;
     if (DEFAULTS.sentence_gap_ms !== undefined) els.gap.value = DEFAULTS.sentence_gap_ms;
     paintConfig();
+    paintAdapt();
   }
 
   ["input", "change"].forEach(function (ev) {
-    [els.name, els.topic, els.lang, els.voice, els.phase, els.max, els.notes, els.store, els.gap]
+    [els.name, els.topic, els.lang, els.voice, els.phase, els.max, els.notes, els.store, els.gap, els.adapt]
       .forEach(function (el) { el.addEventListener(ev, paintConfig); });
   });
 
@@ -246,11 +349,21 @@
       if (!listening || pushToTalk) return;
 
       if (level > threshold) {
-        if (!hadSpeech) hadSpeech = true;
+        // They carried on speaking, so whatever silence just elapsed was a mid-thought pause,
+        // not the end of their turn. That is exactly the number worth learning from.
+        if (hadSpeech && adapt.silentSince) {
+          var wasQuiet = now - adapt.silentSince;
+          if (wasQuiet > adapt.longestPauseThisTurn) adapt.longestPauseThisTurn = wasQuiet;
+        }
+        adapt.silentSince = 0;
+        if (!hadSpeech) { hadSpeech = true; firstVoiceAt = now; }
         speechMs += 60;
         lastVoiceAt = now;
+      } else if (hadSpeech && !adapt.silentSince) {
+        adapt.silentSince = now;
       }
-      if (hadSpeech && speechMs >= MIN_SPEECH_MS && (now - lastVoiceAt) >= SILENCE_MS) {
+
+      if (hadSpeech && speechMs >= MIN_SPEECH_MS && (now - lastVoiceAt) >= currentSilenceMs()) {
         stopListening("silence");
       } else if (hadSpeech && (now - turnStartedAt) >= MAX_TURN_MS) {
         stopListening("max-length");
@@ -265,6 +378,9 @@
     speechMs = 0;
     lastVoiceAt = Date.now();
     turnStartedAt = Date.now();
+    adapt.longestPauseThisTurn = 0;
+    adapt.silentSince = 0;
+    firstVoiceAt = 0;
 
     try {
       recorder = recMime ? new MediaRecorder(stream, { mimeType: recMime })
@@ -383,7 +499,8 @@
   async function fetchRest(text) {
     if (!text) { waitingForRest = false; return; }
     try {
-      var data = await post({ action: "speak", call_id: callId, text: text });
+      var data = await post({ action: "speak", call_id: callId, text: text,
+                             length_scale: currentLengthScale() });
       if (!live || !isPlaying() && !audioQueue.length && !busy) { waitingForRest = false; return; }
       waitingForRest = false;
       if (data && data.ok) enqueue(data.audio_b64, data.audio_mime);
@@ -427,7 +544,8 @@
 
     var t0 = Date.now(), data;
     try {
-      data = await post({ action: "turn", call_id: callId, audio_b64: b64, audio_mime: blob.type });
+      data = await post({ action: "turn", call_id: callId, audio_b64: b64,
+                          audio_mime: blob.type, length_scale: currentLengthScale() });
     } catch (e) {
       banner("Network error: " + e.message);
       setState("error", "Network error", "Check the Function URL and CORS origin");
@@ -456,7 +574,15 @@
 
     var t = data.timings || {};
     var netMs = Math.max(0, roundtrip - (t.server_ms || 0));
-    addTurn("user", data.transcript, [{ text: "asr " + (t.asr_ms || 0) + "ms" }]);
+
+    var voicedSeconds = (firstVoiceAt && lastVoiceAt > firstVoiceAt)
+      ? (lastVoiceAt - firstVoiceAt) / 1000 : 0;
+    updateAdaptation(data.transcript, voicedSeconds);
+    var userChips = [{ text: "asr " + (t.asr_ms || 0) + "ms" }];
+    if (els.adapt.checked && adapt.pauses.length >= 2) {
+      userChips.push({ text: "wait " + adapt.silenceMs + "ms" });
+    }
+    addTurn("user", data.transcript, userChips);
 
     // The round trip is finished, so release the lock before playback: a very short reply can
     // fire `onended` before this function returns, and a still-set `busy` would strand the call.
@@ -530,7 +656,9 @@
     callId = data.call_id;
     live = true;
     stats = { gap: [], asr: [], llm: [], tts: [], net: [] };
-    paintStats();
+    adapt.pauses = []; adapt.rates = [];
+    adapt.silenceMs = SILENCE_MS; adapt.lengthScale = 1.0;
+    paintStats(); paintAdapt();
     els.log.innerHTML = "";
     els.btnHang.classList.remove("hidden");
     els.btnPush.classList.remove("hidden");

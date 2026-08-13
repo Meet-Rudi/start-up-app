@@ -151,13 +151,30 @@ def _split_lead(text):
     return lead, " ".join(parts[index:]).strip()
 
 
+def _pace(params):
+    """Clamp a client-supplied speaking pace.
+
+    The bench measures how fast the patient talks and asks for a matching length_scale. Bounds
+    are deliberately tight: Piper degrades audibly outside them, and mirroring someone exactly
+    is uncanny rather than warm — the aim is to meet a slow speaker part of the way, not to
+    impersonate their pace.
+    """
+    raw = params.get("length_scale")
+    if raw is None:
+        return None
+    try:
+        return max(0.85, min(1.45, float(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
 def _asr_hint(config):
     """Seed Whisper with the proper nouns it is most likely to mangle."""
     bits = [b for b in (config.get("user_name"), config.get("topic")) if b]
     return ("This is a call with Rudi, a health coaching assistant. " + " ".join(bits)).strip()
 
 
-def _speak(text, config):
+def _speak(text, config, length_scale=None):
     """Synthesise, but never let a TTS outage destroy the call.
 
     A failed voice still leaves a usable turn: the text reply, the phase transition and the S3
@@ -166,7 +183,8 @@ def _speak(text, config):
     """
     try:
         audio, mime, ms = speech.synthesize(text, voice=config.get("voice"),
-                                            sentence_gap_ms=config.get("sentence_gap_ms"))
+                                            sentence_gap_ms=config.get("sentence_gap_ms"),
+                                            length_scale=length_scale)
         return audio, mime, ms, None
     except speech.SpeechError as e:
         print("TTS FAILED (continuing without audio): %s" % e)
@@ -279,7 +297,7 @@ def _do_turn(params, event):
     rudi_audio_ref = None
     lead, rest = _split_lead(reply)
     if reply:
-        audio_out, audio_mime, tts_ms, tts_error = _speak(lead, config)
+        audio_out, audio_mime, tts_ms, tts_error = _speak(lead, config, _pace(params))
         if config["store_audio"] and audio_out:
             rudi_audio_ref = calllog.put_audio(call_id, seq, "rudi", audio_out,
                                                speech.ext_for_mime(audio_mime), audio_mime)
@@ -319,7 +337,7 @@ def _do_speak(params, _event):
         return _response({"ok": False, "error": "text is required"}, 400)
 
     config = _clean_config(manifest.get("config"))
-    audio, mime, tts_ms, tts_error = _speak(text[:MAX_TEXT_CHARS], config)
+    audio, mime, tts_ms, tts_error = _speak(text[:MAX_TEXT_CHARS], config, _pace(params))
     return _response({
         "ok": True,
         "audio_b64": base64.b64encode(audio).decode("ascii") if audio else None,
