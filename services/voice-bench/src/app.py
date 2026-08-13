@@ -308,6 +308,16 @@ def _do_turn(params, event):
         "at": calllog.iso(), "kind": "turn", "transcript": transcript, "reply": reply,
         "signals": info.get("signals", {}), "phase": state["phase"], "state": state,
         "model": info.get("model"), "timings": timings, "tts_error": tts_error,
+        # How the client heard this turn. Without it a call cannot be audited after the fact:
+        # a cadence adaptation that silently never fires looks identical to one that fired and
+        # chose not to move.
+        "pace": {
+            "voiced_s": params.get("voiced_s"),
+            "cadence_cps": params.get("cadence_cps"),
+            "silence_ms": params.get("silence_ms"),
+            "length_scale": _pace(params),
+            "barged": bool(params.get("barged")),
+        },
         "audio": {"user": user_audio_ref, "rudi": rudi_audio_ref},
     })
 

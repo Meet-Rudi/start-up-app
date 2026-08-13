@@ -50,6 +50,7 @@
   var stoppedSpeakingAt = 0, pushToTalk = false;
   var busy = false, live = false, pendingEnd = false;
   var audioQueue = [], waitingForRest = false, playingSince = 0, playbackStartedAt = 0;
+  var pendingVoiced = 0, pendingBarged = false;
   var stats = { gap: [], asr: [], llm: [], tts: [], net: [] };
 
   /* ---- pace adaptation -------------------------------------------------------------------
@@ -111,7 +112,7 @@
     adapt.rates = adapt.rates.slice(-3);
     adapt.pauses = adapt.pauses.slice(-3);
 
-    if (adapt.rates.length < 2) return;          // one turn is not evidence
+    if (!adapt.rates.length) return;
 
     var rate = median(adapt.rates);
 
@@ -119,13 +120,17 @@
     var want = Math.round(SILENCE_MS * (REF_CPS / Math.max(5, rate)));
 
     // If they have actually demonstrated a long pause, respect it: it beats any inference.
-    if (adapt.pauses.length >= 2) {
-      want = Math.max(want, Math.round(median(adapt.pauses) * 1.35 + 150));
+    if (adapt.pauses.length) {
+      want = Math.max(want, Math.round(Math.max.apply(null, adapt.pauses) * 1.35 + 150));
     }
     want = Math.max(700, Math.min(1800, want));
 
-    // Drift rather than jump, so one odd turn cannot swing the rest of the call.
-    adapt.silenceMs += Math.max(-150, Math.min(150, want - adapt.silenceMs));
+    // Asymmetric on purpose. Giving someone MORE room is the safe direction — the cost is a
+    // slightly later reply — while taking room away risks cutting them off again, so it is
+    // done cautiously. A markedly slow speaker should not have to wait five turns to be heard;
+    // the old symmetric 150ms crawl needed six turns to reach 1800ms.
+    var step = want - adapt.silenceMs;
+    adapt.silenceMs += step > 0 ? Math.min(350, step) : Math.max(-120, step);
 
     // Meet them halfway on pace rather than matching exactly. Relative to REF_CPS, so a
     // speaker at the reference cadence leaves Rudi at exactly 1.00x.
@@ -140,8 +145,8 @@
     if (!els.adaptOut) return;
     if (!els.adapt.checked) { els.adaptOut.textContent = "off — fixed " + SILENCE_MS + "ms"; return; }
     var cadence = adapt.rates.length ? median(adapt.rates).toFixed(1) + " ch/s · " : "";
-    els.adaptOut.textContent = adapt.rates.length < 2
-      ? "learning your cadence… " + cadence + "wait " + adapt.silenceMs + "ms"
+    els.adaptOut.textContent = !adapt.rates.length
+      ? "learning your cadence… wait " + adapt.silenceMs + "ms"
       : cadence + "wait " + adapt.silenceMs + "ms · Rudi " + adapt.lengthScale.toFixed(2) + "×";
   }
 
@@ -340,6 +345,12 @@
           addTurn("sys", "You interrupted — Rudi stopped and is listening.");
           setState("listening", "Listening", "Go ahead");
           hadSpeech = true;           // keep the audio already captured; it is your turn now
+          // Their speech began roughly when we started counting towards the barge, not now.
+          // Without this the turn measures zero voiced time and is dropped from the cadence
+          // sample — which silently excluded every interrupted turn, i.e. exactly the turns of
+          // someone being cut off, who is the person the adaptation exists to help.
+          if (!firstVoiceAt) firstVoiceAt = now - BARGE_MS;
+          pendingBarged = true;
           speechMs = Math.max(speechMs, MIN_SPEECH_MS);
           lastVoiceAt = now;
         }
@@ -381,6 +392,7 @@
     adapt.longestPauseThisTurn = 0;
     adapt.silentSince = 0;
     firstVoiceAt = 0;
+    pendingBarged = false;
 
     try {
       recorder = recMime ? new MediaRecorder(stream, { mimeType: recMime })
@@ -533,6 +545,8 @@
 
   async function sendTurn(blob) {
     busy = true;
+    pendingVoiced = (firstVoiceAt && lastVoiceAt > firstVoiceAt)
+      ? (lastVoiceAt - firstVoiceAt) / 1000 : 0;
     setState("thinking", "Thinking", "Transcribing and composing a reply");
     var b64;
     try {
@@ -545,7 +559,12 @@
     var t0 = Date.now(), data;
     try {
       data = await post({ action: "turn", call_id: callId, audio_b64: b64,
-                          audio_mime: blob.type, length_scale: currentLengthScale() });
+                          audio_mime: blob.type, length_scale: currentLengthScale(),
+                          voiced_s: Math.round(pendingVoiced * 100) / 100,
+                          cadence_cps: adapt.rates.length
+                            ? Math.round(median(adapt.rates) * 10) / 10 : null,
+                          silence_ms: currentSilenceMs(),
+                          barged: pendingBarged });
     } catch (e) {
       banner("Network error: " + e.message);
       setState("error", "Network error", "Check the Function URL and CORS origin");
@@ -575,11 +594,13 @@
     var t = data.timings || {};
     var netMs = Math.max(0, roundtrip - (t.server_ms || 0));
 
-    var voicedSeconds = (firstVoiceAt && lastVoiceAt > firstVoiceAt)
-      ? (lastVoiceAt - firstVoiceAt) / 1000 : 0;
-    updateAdaptation(data.transcript, voicedSeconds);
+    updateAdaptation(data.transcript, pendingVoiced);
     var userChips = [{ text: "asr " + (t.asr_ms || 0) + "ms" }];
-    if (els.adapt.checked && adapt.pauses.length >= 2) {
+    if (pendingVoiced) {
+      userChips.push({ text: "spoke " + pendingVoiced.toFixed(1) + "s" });
+    }
+    if (els.adapt.checked && adapt.rates.length) {
+      userChips.push({ text: median(adapt.rates).toFixed(1) + " ch/s" });
       userChips.push({ text: "wait " + adapt.silenceMs + "ms" });
     }
     addTurn("user", data.transcript, userChips);
