@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:huggingface.co)",
+      "WebFetch(domain:www.twilio.com)",
+      "Bash(python -m unittest discover -s services/voice-bench/tests -v)",
+      "Bash(python -m unittest discover -s services/voice-bench/tests)",
+      "PowerShell($sam = \\(Get-Command sam -ErrorAction SilentlyContinue\\); if \\($sam\\) { Write-Output \"sam: $\\($sam.Source\\)\"; sam validate --template services/voice-bench/template.yaml --region eu-central-1 --lint } else { Write-Output \"sam CLI not on PATH in this shell\" })",
+      "PowerShell(python deploy.py voice-bench)",
+      "PowerShell(aws s3 ls s3://meetrudi-ai-data-949753869755/prompts/ --profile rudi-deployer --region eu-central-1)",
+      "PowerShell(aws s3 ls s3://meetrudi-ai-data-949753869755/contexts/ --profile rudi-deployer --region eu-central-1)",
+      "Bash(docker --version)",
+      "Bash(pip --version)",
+      "Bash(pip index *)",
+      "Bash(python -m py_compile services/tts/src/app.py services/tts/build_layer.py services/tts/seed_voices.py services/voice-bench/src/speech.py deploy.py)",
+      "Bash(python services/tts/build_layer.py)",
+      "Bash(python -m unittest discover -s services/tts/tests)",
+      "Bash(python -m py_compile services/tts/generate_samples.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

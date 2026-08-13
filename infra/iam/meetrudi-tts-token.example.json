@@ -1,0 +1,4 @@
+{
+  "_comment": "Shared token guarding the public meetrudi-tts Function URL. Create in the console as a plaintext secret named exactly 'meetrudi/tts/token' (region eu-central-1). The rudi-deployer user cannot create secrets, so this is a console step. meetrudi-tts returns 503 on every synthesis request until it exists. Generate the value with: python -c \"import secrets;print(secrets.token_hex(24))\"",
+  "token": "CHANGE-ME-long-random-hex-token"
+}

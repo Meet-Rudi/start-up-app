@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Rudi — Voice Bench</title>
+<link rel="icon" href="../favicon.ico">
+<style>
+  :root {
+    --navy:#263d7d; --navy-deep:#121621; --blue:#3b75a5;
+    --magenta:#e925c9; --cyan:#00a3a3; --cyan-rail:#00e5e5;
+    --bg:#f0f0f0; --surface:#ffffff; --surface-2:#f7f8fa;
+    --border:#d9d9d9; --border-soft:#e7e8ec;
+    --ink:#263d7d; --ink-body:#2b3040; --ink-muted:#6f7688; --ink-faint:#9da2af;
+    --ok:#1f7a5e; --ok-bg:#e4f4ee;
+    --warn:#97600a; --warn-bg:#fbf0dc;
+    --stop:#a9304a; --stop-bg:#fae6ea;
+    --radius:.75rem;
+    --shadow:0 1px 2px rgba(18,22,33,.05), 0 8px 24px -12px rgba(18,22,33,.18);
+    --font:"Nunito", ui-rounded, "SF Pro Rounded", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --mono:ui-monospace,"Cascadia Code","Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --navy:#8fa6e0; --blue:#7fb0d8; --cyan:#00e5e5;
+      --bg:#121621; --surface:#1a1f2e; --surface-2:#202636;
+      --border:#2e3547; --border-soft:#262c3c;
+      --ink:#c3cfef; --ink-body:#d6dbe8; --ink-muted:#98a0b6; --ink-faint:#767d92;
+      --ok:#4cc79c; --ok-bg:#14332a;
+      --warn:#dda43c; --warn-bg:#33280f;
+      --stop:#e8798f; --stop-bg:#331a20;
+      --magenta:#f558d6;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink-body); font-family:var(--font);
+    font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3 { color:var(--ink); margin:0; line-height:1.2; }
+  h1 { font-size:1.5rem; font-weight:800; letter-spacing:-.01em; text-transform:uppercase; }
+  h2 { font-size:.72rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); }
+  a { color:var(--blue); }
+
+  header {
+    display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
+    padding:1.1rem 1.5rem; border-bottom:1px solid var(--border); background:var(--surface);
+  }
+  .bubbles { display:flex; gap:.35rem; }
+  .bubbles i { width:.6rem; height:.6rem; border-radius:999px; border:2px solid var(--magenta); }
+  .bubbles i:nth-child(2){ border-color:var(--cyan-rail); }
+  .bubbles i:nth-child(3){ border-color:var(--navy); }
+  header .sub { font-size:.8rem; color:var(--ink-muted); }
+  header .spacer { flex:1; }
+
+  main { display:grid; grid-template-columns:minmax(0,22rem) minmax(0,1fr); gap:1.25rem; padding:1.25rem 1.5rem 4rem; align-items:start; }
+  @media (max-width:52rem){ main { grid-template-columns:1fr; } }
+
+  .panel {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:1.1rem 1.2rem; box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:.9rem;
+  }
+  .col { display:flex; flex-direction:column; gap:1.25rem; min-width:0; }
+
+  label { display:flex; flex-direction:column; gap:.25rem; font-size:.78rem; font-weight:700; color:var(--ink-muted); }
+  input[type=text], input[type=number], select, textarea {
+    font:inherit; font-size:.88rem; color:var(--ink-body); background:var(--surface-2);
+    border:1px solid var(--border); border-radius:.5rem; padding:.42rem .55rem; width:100%;
+  }
+  textarea { resize:vertical; min-height:3.5rem; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible {
+    outline:2px solid var(--magenta); outline-offset:2px;
+  }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:.6rem; }
+  .check { flex-direction:row; align-items:center; gap:.45rem; font-size:.8rem; }
+  .check input { width:auto; }
+
+  button {
+    font:inherit; font-weight:700; font-size:.9rem; cursor:pointer;
+    border-radius:999px; padding:.55rem 1.15rem; border:1px solid transparent;
+    background:var(--magenta); color:#fff; transition:filter .15s;
+  }
+  button:hover:not(:disabled) { filter:brightness(1.08); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--ink); border-color:var(--border); }
+  button.danger { background:var(--stop); }
+  .controls { display:flex; gap:.6rem; flex-wrap:wrap; }
+
+  /* live state */
+  .state { display:flex; align-items:center; gap:.6rem; }
+  .dot { width:.7rem; height:.7rem; border-radius:999px; background:var(--ink-faint); flex:none; }
+  .dot.listening { background:var(--ok); animation:pulse 1.2s ease-in-out infinite; }
+  .dot.thinking  { background:var(--warn); animation:pulse .8s ease-in-out infinite; }
+  .dot.speaking  { background:var(--magenta); animation:pulse 1s ease-in-out infinite; }
+  .dot.error     { background:var(--stop); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  @media (prefers-reduced-motion: reduce){ .dot { animation:none !important; } }
+  .state .lbl { font-size:.85rem; font-weight:700; color:var(--ink); }
+  .state .hint { font-size:.78rem; color:var(--ink-muted); }
+
+  .meter { height:.5rem; background:var(--surface-2); border:1px solid var(--border-soft); border-radius:999px; overflow:hidden; }
+  .meter > i { display:block; height:100%; width:0%; background:var(--cyan-rail); transition:width .06s linear; }
+
+  /* transcript */
+  #log { display:flex; flex-direction:column; gap:.8rem; }
+  .turn { display:flex; flex-direction:column; gap:.35rem; }
+  .bubble {
+    border-radius:var(--radius); padding:.6rem .85rem; max-width:44rem;
+    border:1px solid var(--border); background:var(--surface); white-space:pre-wrap;
+  }
+  .turn.user .bubble { background:var(--surface-2); border-style:dashed; }
+  .turn.rudi .bubble { border-left:3px solid var(--magenta); }
+  .turn.sys .bubble { border-left:3px solid var(--cyan-rail); color:var(--ink-muted); font-size:.85rem; }
+  .who { font-size:.66rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .times { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .t {
+    font-family:var(--mono); font-size:.68rem; font-variant-numeric:tabular-nums;
+    background:var(--surface-2); border:1px solid var(--border-soft); color:var(--ink-muted);
+    border-radius:999px; padding:.05rem .45rem;
+  }
+  .t.hero { background:var(--magenta); border-color:var(--magenta); color:#fff; font-weight:700; }
+  .t.warn { background:var(--warn-bg); border-color:var(--warn); color:var(--warn); }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(6rem,1fr)); gap:.6rem; }
+  .stat { background:var(--surface-2); border:1px solid var(--border-soft); border-radius:.5rem; padding:.5rem .6rem; }
+  .stat .n { font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:1.15rem; font-weight:800; color:var(--ink); }
+  .stat .l { font-size:.62rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); }
+
+  details summary { cursor:pointer; font-size:.78rem; font-weight:700; color:var(--ink-muted); }
+  pre { font-family:var(--mono); font-size:.72rem; background:var(--surface-2); border:1px solid var(--border-soft);
+        border-radius:.5rem; padding:.6rem; overflow-x:auto; margin:.5rem 0 0; color:var(--ink-body); }
+  .note { font-size:.76rem; color:var(--ink-muted); }
+  .banner { border-radius:var(--radius); padding:.6rem .85rem; font-size:.82rem; border:1px solid; }
+  .banner.err { background:var(--stop-bg); color:var(--stop); border-color:var(--stop); }
+  .banner.ok  { background:var(--ok-bg); color:var(--ok); border-color:var(--ok); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bubbles" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div>
+    <h1>Voice bench</h1>
+    <div class="sub">Phase 0 &middot; speak to the real <code>learn / goal / commit</code> engine</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="state">
+    <span class="dot" id="dot"></span>
+    <div>
+      <div class="lbl" id="stateLabel">Idle</div>
+      <div class="hint" id="stateHint">Set the call config, then start</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ─────────────────────────────── left: config + controls -->
+  <div class="col">
+    <section class="panel">
+      <h2>Call config</h2>
+      <label>Their name
+        <input type="text" id="cfgName" placeholder="Filip" autocomplete="off">
+      </label>
+      <label>Topic of the call
+        <textarea id="cfgTopic" placeholder="Getting back to daily walking after knee surgery"></textarea>
+      </label>
+      <div class="row">
+        <label>Language
+          <select id="cfgLang">
+            <option value="en">English (en)</option>
+            <option value="nl">Nederlands (nl)</option>
+            <option value="fr">Français (fr)</option>
+            <option value="de">Deutsch (de)</option>
+          </select>
+        </label>
+        <label>Voice
+          <select id="cfgVoice"></select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Start phase
+          <select id="cfgPhase">
+            <option value="goal">goal</option>
+            <option value="commit">commit</option>
+            <option value="learn">learn</option>
+          </select>
+        </label>
+        <label>Max minutes
+          <input type="number" id="cfgMax" min="1" max="30" value="12">
+        </label>
+      </div>
+      <label>Pause after each sentence
+        <input type="range" id="cfgGap" min="0" max="800" step="50" value="300">
+        <span class="note" id="cfgGapOut">300ms &middot; questions rest 1.5&times; longer</span>
+      </label>
+      <label>Extra context for Rudi
+        <textarea id="cfgNotes" placeholder="Anything Rudi should know before dialling"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" id="cfgStore" checked> Keep call audio in S3</label>
+      <label class="check"><input type="checkbox" id="cfgBarge"> Barge-in (experimental)</label>
+      <details>
+        <summary>Config JSON</summary>
+        <pre id="cfgJson">{}</pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button id="btnStart">Start call</button>
+        <button id="btnHang" class="danger hidden">Hang up</button>
+        <button id="btnPush" class="ghost hidden">Hold to talk</button>
+      </div>
+      <div>
+        <div class="note" style="margin-bottom:.3rem">Microphone</div>
+        <div class="meter"><i id="micBar"></i></div>
+      </div>
+      <div id="banner" class="banner err hidden"></div>
+      <p class="note" id="callIdNote"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Averages this call</h2>
+      <div class="stats">
+        <div class="stat"><div class="n" id="avgGap">–</div><div class="l">Reply gap</div></div>
+        <div class="stat"><div class="n" id="avgAsr">–</div><div class="l">ASR</div></div>
+        <div class="stat"><div class="n" id="avgLlm">–</div><div class="l">LLM</div></div>
+        <div class="stat"><div class="n" id="avgTts">–</div><div class="l">TTS</div></div>
+        <div class="stat"><div class="n" id="avgNet">–</div><div class="l">Network</div></div>
+        <div class="stat"><div class="n" id="nTurns">0</div><div class="l">Turns</div></div>
+      </div>
+      <p class="note"><strong>Reply gap</strong> is what the person actually feels: from the
+        moment they stop speaking to the moment Rudi starts. Everything else is a component of it.</p>
+    </section>
+  </div>
+
+  <!-- ─────────────────────────────── right: transcript -->
+  <div class="col">
+    <section class="panel">
+      <h2>Transcript</h2>
+      <div id="log">
+        <div class="turn sys"><div class="bubble">No call yet. Fill in the config on the left and press <strong>Start call</strong> — Rudi speaks first, as he would on a real outbound call.</div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="voice-config.js"></script>
+<script src="voice.js"></script>
+</body>
+</html>
