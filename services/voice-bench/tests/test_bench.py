@@ -439,7 +439,7 @@ class HumanFeedback(unittest.TestCase):
 
     def test_note_is_stored_and_counted(self):
         out = _post({"action": "feedback", "call_id": self.call_id,
-                     "text": "cut me off mid-sentence", "tester": "Filip", "after_turn": 3})
+                     "text": "cut me off mid-sentence", "tester": "Filip"})
         self.assertTrue(out["ok"])
         self.assertEqual(out["seq"], 1)
         self.assertEqual(out["count"], 1)
@@ -447,7 +447,6 @@ class HumanFeedback(unittest.TestCase):
         note = calllog.load(self.call_id)["feedback"][0]
         self.assertEqual(note["text"], "cut me off mid-sentence")
         self.assertEqual(note["tester"], "Filip")
-        self.assertEqual(note["after_turn"], 3)
         self.assertIn("voice-bench/calls/%s/feedback/01.json" % self.call_id,
                       _FAKE_S3._store[BUCKET])
 

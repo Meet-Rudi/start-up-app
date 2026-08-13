@@ -726,7 +726,10 @@
       banner("Saved to voice-bench/calls/" + callId + "/ — manifest.json holds the whole call.", true);
     }
 
-    setState("", "Idle", "Call finished");
+    setState("", "Idle", "Call finished — add a note below");
+    els.fbStatus.className = "note";
+    els.fbStatus.textContent = "";
+    try { els.fbText.focus(); } catch (e) { /* not focusable yet */ }
     els.btnStart.disabled = false;
     els.btnHang.classList.add("hidden");
     els.btnPush.classList.add("hidden");
@@ -751,8 +754,10 @@
   /* ---- human feedback ---------------------------------------------------------------------
    * Free-text notes from whoever is testing, attached to the call so they can be read next to
    * the transcript, the timings and the pace measurements rather than in a separate document.
-   * Deliberately available after hang-up: the sharpest observation usually arrives once the
-   * tester has stopped concentrating on talking.
+   *
+   * Written AFTER the call. Whoever is leading the conversation has no attention spare for
+   * annotating it as it happens, so nothing here asks them to record where something occurred —
+   * the transcript and the per-turn timings already carry that.
    */
   var TESTER_KEY = "meetrudi.voicebench.tester";
 
@@ -772,8 +777,7 @@
     els.fbStatus.textContent = "saving…";
     try {
       var data = await post({
-        action: "feedback", call_id: callId, text: text, tester: tester || null,
-        after_turn: stats.gap.length
+        action: "feedback", call_id: callId, text: text, tester: tester || null
       });
       if (data && data.ok) {
         els.fbText.value = "";

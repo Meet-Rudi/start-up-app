@@ -370,9 +370,12 @@ def _do_end(params, _event):
 def _do_feedback(params, event):
     """Record a tester's free-text note against the call.
 
-    Deliberately permissive: it accepts notes on a finished call, needs nothing but text, and
-    never fails the caller for a missing field. During a testing session the cost of losing an
-    observation is far higher than the cost of a slightly ragged record.
+    Written after the call, not during it: whoever is leading the conversation has no attention
+    spare for annotating it, so nothing here asks them to mark where something happened.
+
+    Deliberately permissive — needs nothing but text and never fails the caller for a missing
+    field. During a testing session the cost of losing an observation is far higher than the
+    cost of a slightly ragged record.
     """
     manifest = calllog.load((params.get("call_id") or "").strip())
     if not manifest:
@@ -385,9 +388,6 @@ def _do_feedback(params, event):
     record = calllog.add_feedback(manifest, {
         "text": text[:MAX_FEEDBACK_CHARS],
         "tester": str(params.get("tester") or "").strip()[:60] or None,
-        # Which turn was on screen when they wrote it — "turn 3 was too fast" is worth far more
-        # than a note floating free of the moment it describes.
-        "after_turn": params.get("after_turn"),
         "call_status": manifest.get("status"),
         "meta": _meta(event),
     })
