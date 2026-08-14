@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI meetrudi-call — Plan A outbound calling. Twilio ConversationRelay holds the call and
+  owns speech in both directions; an API Gateway WebSocket carries JSON text to a per-message
+  Lambda running the same learn/goal/commit brain as the bench and WhatsApp. No Fargate, no
+  always-on process: the socket is held by API Gateway, and call state lives in S3.
+
+  Requires the meetrudi-base stack and the console-created meetrudi-lambda-runner role, WITH the
+  execute-api:ManageConnections statement added (see infra/iam/). Fails closed until the secrets
+  meetrudi/twilio/voice and meetrudi/call/dispatch-token exist.
+
+Resources:
+
+  # ------------------------------------------------------------------ WebSocket API
+  VoiceSocket:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: meetrudi-voice-ws
+      ProtocolType: WEBSOCKET
+      # ConversationRelay puts the message kind in `type`; routing on it would need a route per
+      # kind. One $default handler keeps the protocol in one readable place instead.
+      RouteSelectionExpression: "$request.body.action"
+
+  WsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref VoiceSocket
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsFunction.Arn}/invocations"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VoiceSocket
+      RouteKey: $connect
+      Target: !Sub "integrations/${WsIntegration}"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VoiceSocket
+      RouteKey: $disconnect
+      Target: !Sub "integrations/${WsIntegration}"
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VoiceSocket
+      RouteKey: $default
+      Target: !Sub "integrations/${WsIntegration}"
+
+  WsStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn: [ConnectRoute, DisconnectRoute, DefaultRoute]
+    Properties:
+      ApiId: !Ref VoiceSocket
+      StageName: live
+      AutoDeploy: true
+
+  WsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VoiceSocket}/*"
+
+  # ------------------------------------------------------------------ functions
+  WsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-call-ws
+      RetentionInDays: 30
+
+  WsFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WsLogGroup
+    Properties:
+      FunctionName: meetrudi-call-ws
+      Description: ConversationRelay socket handler — one invocation per message.
+      Handler: ws.handler
+      Runtime: python3.12
+      CodeUri: src/
+      # A turn is one LLM call; Twilio drops the session if we stall, so fail fast rather than
+      # leave the patient in silence.
+      Timeout: 25
+      MemorySize: 512
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          CALL_PREFIX: calls
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_SECRET: meetrudi-groq-firstkey
+          WS_MANAGEMENT_ENDPOINT: !Sub "https://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
+
+  DispatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-call-dispatcher
+      RetentionInDays: 30
+
+  DispatcherFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DispatcherLogGroup
+    Properties:
+      FunctionName: meetrudi-call-dispatcher
+      Description: Places outbound calls — consent, quiet hours and cap gates live here.
+      Handler: dispatcher.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 30
+      MemorySize: 512
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          CALL_PREFIX: calls
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_SECRET: meetrudi-groq-firstkey
+          TWILIO_SECRET: meetrudi/twilio/voice
+          DISPATCH_SECRET: meetrudi/call/dispatch-token
+          TWILIO_REGION: ie1
+          WS_URL: !Sub "wss://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
+          QUIET_START: "21:30"
+          QUIET_END: "06:30"
+          DEFAULT_TZ: Europe/Brussels
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: ["https://meet-rudi.github.io"]
+          AllowMethods: [POST]
+          AllowHeaders: [content-type]
+
+Outputs:
+  WebSocketUrl:
+    Description: ConversationRelay endpoint (goes into the TwiML)
+    Value: !Sub "wss://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
+  DispatchUrl:
+    Description: Function URL for placing a call
+    Value: !GetAtt DispatcherFunctionUrl.FunctionUrl

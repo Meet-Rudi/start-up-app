@@ -1,0 +1,12 @@
+{
+  "_comment": "ADD this statement to the inline policy on the meetrudi-lambda-runner role (IAM -> Roles -> meetrudi-lambda-runner -> its inline policy -> Edit -> JSON -> paste as an extra statement). Required by meetrudi-call-ws: an API Gateway WebSocket handler is invoked per message and has no open socket of its own, so replying to Twilio goes through the management API rather than the response body. Without this the call connects and Rudi stays silent. Nothing else in the stack needs a new permission - call state is in the existing data bucket and there is no DynamoDB or SQS.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "VoiceWebSocketReply",
+      "Effect": "Allow",
+      "Action": "execute-api:ManageConnections",
+      "Resource": "arn:aws:execute-api:eu-central-1:949753869755:*/live/POST/@connections/*"
+    }
+  ]
+}

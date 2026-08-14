@@ -74,6 +74,11 @@ COMPONENTS = {
         # binaries and the function would fail at import.
         "prebuild": "services/tts/build_layer.py",
     },
+    "call": {
+        "stack": "meetrudi-call",
+        "template": "services/call/template.yaml",
+        "build": True,   # Plan A: Twilio ConversationRelay + API GW WebSocket, no Fargate
+    },
     "voice-bench": {
         "stack": "meetrudi-voice-bench",
         "template": "services/voice-bench/template.yaml",
@@ -232,6 +237,18 @@ def main():
         print("   Generate one with:  python -c \"import secrets;print(secrets.token_hex(24))\"")
         print("   The function returns 503 on every call until that secret exists.")
         print(">> Then redeploy voice-bench with TTS_PROVIDER=piper and the URL + token set.")
+    elif name == "call":
+        print("WebSocket   :", _stack_output("meetrudi-call", "WebSocketUrl"))
+        print("Dispatch URL:", _stack_output("meetrudi-call", "DispatchUrl"))
+        print(">> IAM (once): add infra/iam/meetrudi-lambda-runner.call-add.json to the")
+        print("   meetrudi-lambda-runner inline policy. Rudi is SILENT on calls without it.")
+        print(">> Secrets (once), console -> Secrets Manager, plaintext JSON:")
+        print("     meetrudi/twilio/voice          {\"account_sid\":..,\"auth_token\":..,\"from_number\":\"+32...\"}")
+        print("     meetrudi/call/dispatch-token   {\"token\":\"<random hex>\"}")
+        print(">> Dry run (builds the record + TwiML, dials nobody):")
+        print("     curl -X POST <Dispatch URL> -H \"Content-Type: application/json\" ^")
+        print("       -d \"{\\\"token\\\":\\\"<TOKEN>\\\",\\\"dry_run\\\":true,\\\"config\\\":{...}}\"")
+        print(">> Calls land in s3://<data-bucket>/calls/<call-id>/ .")
     elif name == "voice-bench":
         print("Function URL:", _stack_output("meetrudi-voice-bench", "FunctionUrl"))
         print("Data bucket :", _stack_output("meetrudi-base", "DataBucketName"))
