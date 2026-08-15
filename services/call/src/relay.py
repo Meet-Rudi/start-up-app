@@ -23,23 +23,58 @@ import json
 # reproducing in the browser; here they are configuration.
 #
 #   speechTimeout   how long a silence must run before the turn is considered finished.
-#                   The bench's silenceMs, in Twilio's hands. 600-5000ms.
+#                   The bench's silenceMs, in Twilio's hands. Range 600-5000ms.
+#
+#                   This sits in FRONT of everything else, so it is the largest single term in
+#                   the pause a caller actually feels — larger than the model, which measures
+#                   300-580ms. It started at 1200ms, carried over from the browser bench where
+#                   endpointing too early was unrecoverable. Here it is not: interruptible="any"
+#                   means an early reply can simply be talked over. Being slightly too eager is
+#                   recoverable; being slow is always slow. Tuned down by ear on live
+#                   calls: 1200 -> 800 -> 700ms.
+#   eotThreshold    how confident Twilio must be that the turn ended. Lower commits sooner.
 #   interruptible   barge-in. "any" lets the patient cut Rudi off mid-sentence.
 #   reportInputDuringAgentSpeech
 #                   deliver what they said while Rudi was still talking, rather than dropping it.
 #   hints           transcription hints — the patient's name and topic, exactly as the bench
 #                   feeds them to Whisper, because those are the words ASR most often mangles.
 DEFAULT_VOICE_ATTRS = {
-    "ttsProvider": "Google",
-    "voice": "en-US-Journey-D",
-    "language": "en-US",
     "transcriptionProvider": "Deepgram",
-    "speechTimeout": "1200",
+    "speechTimeout": "700",
     "interruptible": "any",
     "reportInputDuringAgentSpeech": "speech",
     "ignoreBackchannel": "true",
-    "eotThreshold": "0.75",
+    "eotThreshold": "0.6",
 }
+
+# Per-language locale and voice. Twilio picks a sensible default voice for whatever locale it
+# is given, so only `en` names one explicitly — that is the voice already heard on a real call
+# and known good. The rest deliberately leave `voice` unset rather than guessing a provider's
+# voice ID, which fails at dial time rather than at deploy time.
+#
+# `nl` resolves to FLEMISH, matching meetrudi-tts's short keys: the pilot cohort is Belgian and
+# a Netherlands-Dutch voice reads as audibly foreign to them. Unlike Piper — which offered two
+# mediocre Flemish voices — Twilio has proper nl-BE from Amazon (Polly "Lisa", the first
+# synthetic Flemish voice), Google (up to Chirp 3) and ElevenLabs.
+VOICE_PROFILES = {
+    "en": {"language": "en-US", "ttsProvider": "Google", "voice": "en-US-Journey-D"},
+    "nl": {"language": "nl-BE"},        # Flemish
+    "nl-be": {"language": "nl-BE"},
+    "nl-nl": {"language": "nl-NL"},     # Netherlands Dutch, if ever needed
+    "fr": {"language": "fr-BE"},        # Wallonia, not fr-FR
+    "de": {"language": "de-DE"},
+}
+
+
+def voice_attrs_for(language, overrides=None):
+    """Merge the shared dials with the locale profile, then any per-call override."""
+    key = str(language or "en").strip().lower()
+    profile = VOICE_PROFILES.get(key) or VOICE_PROFILES.get(key.split("-")[0]) \
+        or VOICE_PROFILES["en"]
+    merged = dict(DEFAULT_VOICE_ATTRS)
+    merged.update(profile)
+    merged.update(overrides or {})
+    return merged
 
 
 def _attr(value):
@@ -48,7 +83,7 @@ def _attr(value):
             .replace('"', "&quot;").replace("'", "&apos;"))
 
 
-def build_twiml(ws_url, call_id, attrs=None, hints=""):
+def build_twiml(ws_url, call_id, attrs=None, hints="", language="en"):
     """TwiML returned when the patient answers.
 
     `call_id` rides through as a customParameter and comes back in the setup message. It is the
@@ -58,8 +93,7 @@ def build_twiml(ws_url, call_id, attrs=None, hints=""):
     Note there is no welcomeGreeting: Rudi's opening is generated, not canned, because it has to
     name the person, summarise their topic and carry the AI disclosure.
     """
-    merged = dict(DEFAULT_VOICE_ATTRS)
-    merged.update(attrs or {})
+    merged = voice_attrs_for(language, attrs)
     if hints:
         merged["hints"] = hints[:1000]
 

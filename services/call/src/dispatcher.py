@@ -257,7 +257,8 @@ def place_call(config, dry_run=False, now=None):
         manifest.setdefault("compliance", {})["quiet_hours_overridden"] = True
         print("AUDIT: quiet-hours overridden for call %s to %s" % (call_id, config.get("to")))
 
-    twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config))
+    twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config),
+                              language=config.get("language", "en"))
     manifest.setdefault("telephony", {}).update({"twiml": twiml, "to": config["to"]})
     calllog._put_json(calllog._manifest_key(call_id), manifest)
 

@@ -166,7 +166,7 @@ class Twiml(unittest.TestCase):
     def test_barge_in_and_endpointing_are_configured(self):
         twiml = relay.build_twiml("wss://x/live", "c1")
         self.assertIn('interruptible="any"', twiml)
-        self.assertIn('speechTimeout="1200"', twiml)
+        self.assertIn('speechTimeout="700"', twiml)
         self.assertIn('reportInputDuringAgentSpeech="speech"', twiml)
 
     def test_no_canned_greeting(self):
@@ -177,6 +177,59 @@ class Twiml(unittest.TestCase):
         twiml = relay.build_twiml("wss://x/live", "c1", hints='Filip, "knee" surgery & walking')
         self.assertNotIn('"knee"', twiml)
         self.assertIn("&amp;", twiml)
+
+
+class Languages(unittest.TestCase):
+    """Rudi has to speak the patient's language, and for the pilot that means Flemish."""
+
+    def test_default_is_english(self):
+        self.assertIn('language="en-US"', relay.build_twiml("wss://x/live", "c1"))
+
+    def test_nl_resolves_to_flemish_not_netherlands_dutch(self):
+        """Same rule as meetrudi-tts: the cohort is Belgian and the difference is audible."""
+        twiml = relay.build_twiml("wss://x/live", "c1", language="nl")
+        self.assertIn('language="nl-BE"', twiml)
+        self.assertNotIn("nl-NL", twiml)
+
+    def test_netherlands_dutch_still_reachable(self):
+        self.assertIn('language="nl-NL"',
+                      relay.build_twiml("wss://x/live", "c1", language="nl-NL"))
+
+    def test_french_defaults_to_belgium(self):
+        """Wallonia, not Paris."""
+        self.assertIn('language="fr-BE"',
+                      relay.build_twiml("wss://x/live", "c1", language="fr"))
+
+    def test_unknown_language_falls_back_rather_than_failing(self):
+        self.assertIn('language="en-US"',
+                      relay.build_twiml("wss://x/live", "c1", language="klingon"))
+
+    def test_non_english_leaves_the_voice_to_twilio(self):
+        """Guessing a provider voice ID fails at dial time; an unset voice does not."""
+        self.assertNotIn("voice=", relay.build_twiml("wss://x/live", "c1", language="nl"))
+
+    def test_endpointing_is_eager_because_barge_in_covers_it(self):
+        """The pause a caller feels is mostly this. It can be aggressive precisely because
+        interruptible="any" makes an early reply recoverable — they just talk over it."""
+        twiml = relay.build_twiml("wss://x/live", "c1")
+        self.assertIn('speechTimeout="700"', twiml)
+        self.assertIn('interruptible="any"', twiml)
+
+    def test_shared_dials_survive_a_language_switch(self):
+        twiml = relay.build_twiml("wss://x/live", "c1", language="nl")
+        self.assertIn('interruptible="any"', twiml)
+        self.assertIn('speechTimeout="700"', twiml)
+
+    def test_per_call_override_wins(self):
+        twiml = relay.build_twiml("wss://x/live", "c1", {"speechTimeout": "2500"}, language="nl")
+        self.assertIn('speechTimeout="2500"', twiml)
+        self.assertIn('language="nl-BE"', twiml)
+
+    def test_dispatcher_passes_the_config_language_through(self):
+        payload = _new_call(language="nl", topic="elke dag een half uur wandelen")
+        twiml = json.loads(_FAKE_S3._store[BUCKET][
+            "calls/%s/manifest.json" % payload["call_id"]].decode("utf-8"))["telephony"]["twiml"]
+        self.assertIn('language="nl-BE"', twiml)
 
 
 class Gates(unittest.TestCase):
@@ -273,6 +326,7 @@ class LiveCall(unittest.TestCase):
         self.assertEqual(manifest["totals"]["turns"], 2)
         self.assertTrue(_ended(), "the engine concluding must hang the call up")
         self.assertEqual(_ended()[0]["type"], "end")
+        self.assertEqual(calllog.load(self.payload["call_id"])["end_reason"], "engine-ended")
 
         keys = _FAKE_S3._store[BUCKET].keys()
         self.assertIn("calls/%s/turns/0001.json" % self.payload["call_id"], keys)
@@ -404,6 +458,20 @@ class Voicemail(unittest.TestCase):
         self.assertTrue(_ended())
         self.assertEqual(_spoken(), [], "never start coaching an answerphone")
         self.assertTrue(calllog.load(payload["call_id"])["telephony"]["voicemail_suspected"])
+
+    def test_outcome_reason_survives_the_socket_closing(self):
+        """$disconnect fires straight after our `end` and used to stamp "disconnected" over the
+        real reason, which made voicemails uncountable from the index."""
+        _REPLIES[:] = [("Hallo.", {})]
+        payload = _new_call()
+        r = Relay(payload["call_id"], "conn-vm3")
+        r.setup()
+        r.prompt("Hi, you've reached Filip, I'm not available, please leave a message "
+                 "after the tone and I'll get back to you.")
+        r.disconnect()
+        manifest = calllog.load(payload["call_id"])
+        self.assertEqual(manifest["end_reason"], "voicemail")
+        self.assertEqual(manifest["status"], "completed")
 
     def test_only_the_first_utterance_is_screened(self):
         """Mid-call mention of voicemail is conversation, not an answerphone."""

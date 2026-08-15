@@ -134,6 +134,10 @@ def _on_prompt(connection_id, message, manifest):
             "timings": {},
         })
         _send(connection_id, relay.hang_up("voicemail"))
+        # Finalise here rather than letting $disconnect do it. Twilio closes the socket a moment
+        # later and would otherwise stamp "disconnected" over the real reason, making voicemails
+        # uncountable from the index without opening every manifest.
+        calllog.finish(manifest, "voicemail")
         return _ok()
 
     elapsed = _elapsed_s(manifest)
@@ -162,6 +166,7 @@ def _on_prompt(connection_id, message, manifest):
     if info.get("ended"):
         # Twilio speaks the queued token before acting on `end`, so the goodbye is not cut off.
         _send(connection_id, relay.hang_up("engine-ended"))
+        calllog.finish(manifest, "engine-ended")
     return _ok()
 
 
