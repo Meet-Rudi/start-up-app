@@ -95,7 +95,12 @@ def gate(config, now=None):
     if str(config.get("status", "active")) != "active":
         return "contact-not-active"
     if is_quiet(now, config.get("timezone")):
-        return "quiet-hours"
+        # An override exists because the team tests outside working hours, and faking the
+        # timezone to get past the gate would be both dishonest and invisible afterwards.
+        # This way the gate still runs, the decision is deliberate, and place_call() stamps it
+        # on the manifest so any call placed at night is auditable.
+        if not config.get("override_quiet_hours"):
+            return "quiet-hours"
     if not config.get("to"):
         return "no-destination-number"
     return None
@@ -119,20 +124,138 @@ def _twilio_post(path, form, creds):
         raise RuntimeError("Twilio %s: %s" % (e.code, e.read().decode("utf-8", "replace")[:400]))
 
 
+def _twilio_request(url, creds, form=None, method="GET"):
+    """Authenticated call to any Twilio host. Dialing Permissions live on voice.twilio.com,
+    not the Accounts REST base, so this cannot reuse _twilio_post."""
+    data = urllib.parse.urlencode(form).encode("utf-8") if form else None
+    token = base64.b64encode(
+        ("%s:%s" % (creds["account_sid"], creds["auth_token"])).encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Authorization": "Basic " + token,
+        "Content-Type": "application/x-www-form-urlencoded",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("Twilio %s: %s" % (e.code, e.read().decode("utf-8", "replace")[:400]))
+
+
+GEO_BASE = "https://voice.twilio.com/v1/DialingPermissions/Countries"
+
+
+def geo_permissions(codes, enable=None, creds=None):
+    """Read, and optionally set, which countries this account may dial.
+
+    Nothing outside your own country is dialable by default — an unenabled destination fails
+    with 21215 before it rings, which is a safe failure but an opaque one.
+
+    Only the LOW-RISK ranges are ever touched. The high-risk and toll-fraud ranges stay off
+    permanently and are not exposed as a parameter: enabling those is the standard way an
+    account gets drained by premium-rate fraud, and no MEET_RUDI patient will ever be on one.
+    """
+    creds = creds or _secret(TWILIO_SECRET) or {}
+    if not creds.get("account_sid"):
+        return {"ok": False, "error": "twilio credentials not configured"}
+
+    results = {}
+    if enable is not None:
+        update = [{"iso_code": c,
+                   "low_risk_numbers_enabled": bool(enable),
+                   "high_risk_special_numbers_enabled": False,
+                   "high_risk_tollfraud_numbers_enabled": False} for c in codes]
+        written = _twilio_request(
+            "https://voice.twilio.com/v1/DialingPermissions/BulkCountryUpdates", creds,
+            {"UpdateRequest": json.dumps(update)}, method="POST")
+        results["update_count"] = written.get("update_count")
+        print("AUDIT: dialing permissions set low_risk=%s for %s" % (bool(enable), codes))
+
+    # Always read back rather than trusting the write — the whole point is to know the state.
+    results["countries"] = {}
+    for code in codes:
+        try:
+            country = _twilio_request("%s/%s" % (GEO_BASE, code), creds)
+            results["countries"][code] = {
+                "name": country.get("name"),
+                "low_risk_numbers_enabled": country.get("low_risk_numbers_enabled"),
+                "high_risk_special_numbers_enabled": country.get(
+                    "high_risk_special_numbers_enabled"),
+                "high_risk_tollfraud_numbers_enabled": country.get(
+                    "high_risk_tollfraud_numbers_enabled"),
+            }
+        except Exception as e:  # noqa: BLE001
+            results["countries"][code] = {"error": str(e)}
+    results["ok"] = True
+    return results
+
+
+def caller_ids(numbers=None, call_delay=0, creds=None):
+    """Verify a number so a TRIAL account may dial it.
+
+    Twilio places a verification call to the number and the person who answers must key in the
+    six-digit code returned here — so the code has to reach a human before the phone rings,
+    which is what `call_delay` buys.
+
+    Only needed while the account is on trial. Upgrading removes the restriction entirely, and
+    also removes the spoken "you have a trial account" announcement that Twilio prepends to
+    every call — which matters more than it sounds, because that announcement lands in front of
+    Rudi's opening and makes an experience test meaningless.
+    """
+    creds = creds or _secret(TWILIO_SECRET) or {}
+    if not creds.get("account_sid"):
+        return {"ok": False, "error": "twilio credentials not configured"}
+
+    out = {"ok": True, "requested": {}}
+    for number in (numbers or []):
+        try:
+            created = _twilio_post("OutgoingCallerIds.json", {
+                "PhoneNumber": number,
+                "FriendlyName": ("MEET_RUDI test %s" % number)[:64],
+                "CallDelay": str(max(0, min(60, int(call_delay)))),
+            }, creds)
+            out["requested"][number] = {
+                "validation_code": created.get("validation_code"),
+                "call_sid": created.get("call_sid"),
+            }
+            print("AUDIT: caller-id verification requested for %s" % number)
+        except Exception as e:  # noqa: BLE001
+            out["requested"][number] = {"error": str(e)}
+
+    # Read back what is already verified, so the result is the state and not just the attempt.
+    try:
+        listed = _twilio_request(
+            "https://api.%s.twilio.com/2010-04-01/Accounts/%s/OutgoingCallerIds.json"
+            % (TWILIO_REGION, creds["account_sid"]), creds)
+        out["verified"] = [{"phone_number": c.get("phone_number"),
+                            "friendly_name": c.get("friendly_name")}
+                           for c in (listed.get("outgoing_caller_ids") or [])]
+    except Exception as e:  # noqa: BLE001
+        out["verified"] = {"error": str(e)}
+    return out
+
+
 def _hints(config):
     """Words Deepgram is most likely to mangle — the same seed the bench gives Whisper."""
     return ", ".join([b for b in (config.get("user_name"), config.get("topic")) if b])[:1000]
 
 
-def place_call(config, dry_run=False):
-    """Create the call record, then ask Twilio to dial. Returns (payload, status)."""
-    reason = gate(config)
+def place_call(config, dry_run=False, now=None):
+    """Create the call record, then ask Twilio to dial. Returns (payload, status).
+
+    `now` exists so the quiet-hours gate can be pinned in tests. Without it the suite passes or
+    fails depending on what time of day it is run, which is not a test at all.
+    """
+    reason = gate(config, now)
     if reason:
         return {"ok": False, "skipped": reason}, 200
 
     call_id = calllog.new_call_id()
     state = brain.new_state(config)
     manifest = calllog.start(call_id, config, state, {"placed_by": "dispatcher"})
+
+    if config.get("override_quiet_hours") and is_quiet(now, config.get("timezone")):
+        manifest.setdefault("compliance", {})["quiet_hours_overridden"] = True
+        print("AUDIT: quiet-hours overridden for call %s to %s" % (call_id, config.get("to")))
 
     twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config))
     manifest.setdefault("telephony", {}).update({"twiml": twiml, "to": config["to"]})
@@ -187,6 +310,16 @@ def handler(event, context):
                 return _response({"ok": False, "error": "dispatch auth not configured"}, 503)
             if (params.get("token") or "") != expected:
                 return _response({"ok": False, "error": "unauthorized"}, 401)
+
+        # One-off account administration: which countries this account may dial at all.
+        if params.get("action") == "verify_caller_id":
+            return _response(caller_ids(params.get("numbers"), params.get("call_delay", 0)))
+
+        if params.get("action") == "geo":
+            codes = [str(c).upper()[:2] for c in (params.get("countries") or [])][:25]
+            if not codes:
+                return _response({"ok": False, "error": "countries is required"}, 400)
+            return _response(geo_permissions(codes, params.get("enable")))
 
         config = params.get("config") or {}
         if not isinstance(config, dict):

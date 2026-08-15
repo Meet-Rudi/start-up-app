@@ -85,6 +85,12 @@ dispatcher._twilio_post = lambda path, form, creds: (
     _TWILIO_CALLS.append((path, form)) or {"sid": "CA999", "status": "queued"})
 
 
+# Pinned to 14:00 Brussels. Every test that dials must be deterministic: an earlier version of
+# this suite passed in the afternoon and failed after 21:30 purely because the quiet-hours gate
+# reads the wall clock.
+MIDDAY = datetime.datetime(2026, 8, 14, 12, 0, tzinfo=datetime.timezone.utc)
+
+
 def _config(**over):
     cfg = {"language": "en", "user_name": "Filip", "topic": "daily walking",
            "to": "+32470000000", "consent_state": "granted", "status": "active",
@@ -143,7 +149,7 @@ def _ended():
 def _new_call(**over):
     _SENT.clear()
     _TWILIO_CALLS.clear()
-    payload, _ = dispatcher.place_call(_config(**over))
+    payload, _ = dispatcher.place_call(_config(**over), now=MIDDAY)
     return payload
 
 
@@ -177,20 +183,20 @@ class Gates(unittest.TestCase):
     """Refusing to dial is the safe failure; these must be impossible to bypass by accident."""
 
     def test_no_consent_no_call(self):
-        payload, _ = dispatcher.place_call(_config(consent_state="unknown"))
+        payload, _ = dispatcher.place_call(_config(consent_state="unknown"), now=MIDDAY)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["skipped"], "consent-not-granted")
 
     def test_revoked_consent_no_call(self):
-        payload, _ = dispatcher.place_call(_config(consent_state="revoked"))
+        payload, _ = dispatcher.place_call(_config(consent_state="revoked"), now=MIDDAY)
         self.assertEqual(payload["skipped"], "consent-not-granted")
 
     def test_archived_contact_no_call(self):
-        payload, _ = dispatcher.place_call(_config(status="archived"))
+        payload, _ = dispatcher.place_call(_config(status="archived"), now=MIDDAY)
         self.assertEqual(payload["skipped"], "contact-not-active")
 
     def test_missing_number_no_call(self):
-        payload, _ = dispatcher.place_call(_config(to=""))
+        payload, _ = dispatcher.place_call(_config(to=""), now=MIDDAY)
         self.assertEqual(payload["skipped"], "no-destination-number")
 
     def test_quiet_hours_wrap_midnight(self):
@@ -204,6 +210,19 @@ class Gates(unittest.TestCase):
     def test_quiet_hours_block_the_call(self):
         late = datetime.datetime(2026, 8, 14, 20, 30, tzinfo=datetime.timezone.utc)
         self.assertEqual(dispatcher.gate(_config(), now=late), "quiet-hours")
+
+    def test_quiet_hours_override_is_explicit_and_audited(self):
+        """Testing happens at night. The gate still runs; the override is recorded so a call
+        placed outside hours can never look like one placed inside them."""
+        late = datetime.datetime(2026, 8, 14, 20, 30, tzinfo=datetime.timezone.utc)
+        self.assertIsNone(dispatcher.gate(_config(override_quiet_hours=True), now=late))
+        self.assertEqual(dispatcher.gate(_config(), now=late), "quiet-hours")
+
+    def test_override_does_not_bypass_consent(self):
+        """The escape hatch is for hours only — it must not unlock anything else."""
+        payload, _ = dispatcher.place_call(
+            _config(override_quiet_hours=True, consent_state="unknown"), now=MIDDAY)
+        self.assertEqual(payload["skipped"], "consent-not-granted")
 
     def test_a_permitted_call_reaches_twilio(self):
         payload = _new_call()
@@ -311,6 +330,46 @@ class LiveCall(unittest.TestCase):
         self.assertFalse(_ended(), "a bad turn must not hang up on the patient")
 
 
+class GreetThenDisclose(unittest.TestCase):
+    """Nobody answers a phone in silence. The first live call showed Rudi delivering his whole
+    opening — including the AI disclosure — straight over the patient saying "hello?", and then
+    having to repeat it. The disclosure must land when they are listening, not when they are
+    talking."""
+
+    def test_opening_asks_for_a_greeting_only(self):
+        system = brain.build_system("goal", {}, _config(), opening=True)
+        self.assertIn("Say ONLY a short greeting", system)
+        self.assertIn("hands the turn straight back", system)
+
+    def test_opening_does_not_carry_the_disclosure(self):
+        system = brain.build_system("goal", {}, _config(), opening=True)
+        self.assertNotIn("You have not yet told them what you are", system)
+
+    def test_first_real_turn_carries_the_disclosure(self):
+        system = brain.build_system("goal", {"clarifiers_left": 2}, _config(), disclose=True)
+        self.assertIn("say plainly that you are Rudi, an AI assistant", system)
+        self.assertIn("mandatory", system)
+
+    def test_disclosure_is_dropped_once_delivered(self):
+        system = brain.build_system("goal", {"clarifiers_left": 2}, _config(), disclose=False)
+        self.assertNotIn("You have not yet told them what you are", system)
+
+    def test_state_tracks_the_disclosure_across_turns(self):
+        _REPLIES[:] = [("Hello Filip?", {}),
+                       ("I'm Rudi, an AI assistant. You wanted to walk more, is that right?", {}),
+                       ("Good.", {})]
+        payload = _new_call()
+        r = Relay(payload["call_id"], "conn-disc")
+        r.setup()
+        self.assertFalse(calllog.load(payload["call_id"])["state"]["disclosed"],
+                         "the greeting must not count as disclosure")
+        r.prompt("Hello? Yes, speaking")
+        self.assertTrue(calllog.load(payload["call_id"])["state"]["disclosed"])
+        r.prompt("Yes that is right")
+        self.assertTrue(calllog.load(payload["call_id"])["state"]["disclosed"],
+                        "must stay disclosed, not re-fire every turn")
+
+
 class Voicemail(unittest.TestCase):
     """Twilio's AMD does not cover Belgium, so this heuristic is the only guard."""
 
@@ -385,7 +444,7 @@ class FailClosed(unittest.TestCase):
         dispatcher._cache.clear()
         _TWILIO_CALLS.clear()
         try:
-            payload, status = dispatcher.place_call(_config())
+            payload, status = dispatcher.place_call(_config(), now=MIDDAY)
         finally:
             dispatcher._secrets = original
             dispatcher._cache.clear()

@@ -108,13 +108,27 @@ def _call_brief(config, opening=False):
     if opening:
         bits.append("")
         bits.append(
-            "This is the very first thing they will hear after picking up. You MUST, in this "
-            "order and inside 3-4 short sentences: greet them by name if you know it; say "
-            "plainly that you are Rudi, an AI assistant — this disclosure is mandatory and must "
-            "never be skipped, softened or implied; say in one line why you are calling; then "
-            "summarise the topic back to them and ask whether you have got it right. Do not ask "
-            "more than one question.")
+            "This is the very first thing they hear after picking up, and they have not spoken "
+            "yet. Nobody answers a phone in silence — they will say 'hello' the moment they "
+            "lift it, so anything you say now lands on top of them.\n"
+            "Say ONLY a short greeting that hands the turn straight back: their first name if "
+            "you know it, and nothing more than a few words. One short sentence. Do not explain "
+            "who or what you are yet, do not say why you are calling, do not mention their "
+            "topic. Wait for them to answer.")
     return "\n".join(bits)
+
+
+# Said on the first turn AFTER the patient has spoken, never on the opening. The obligation is
+# that a person understands they are talking to an AI (EU AI Act Art. 50) — and a disclosure
+# delivered over the top of someone saying "hello?" has been emitted, not understood.
+DISCLOSURE = (
+    "# You have not yet told them what you are\n\n"
+    "They have now spoken, so they are listening. On THIS turn you MUST, before anything else: "
+    "say plainly that you are Rudi, an AI assistant. This disclosure is mandatory and must never "
+    "be skipped, softened or implied. Then say in one line why you are calling, summarise their "
+    "topic back to them, and ask whether you have got it right. Keep it to three short "
+    "sentences and ask only that one question."
+)
 
 
 def _time_note(elapsed_s, max_minutes):
@@ -147,7 +161,7 @@ def _runtime_note(phase, note_state):
     return ""
 
 
-def build_system(phase, note_state, config, elapsed_s=0, opening=False):
+def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose=False):
     """Guardrails first, always. Then voice style, then the phase body, then runtime notes."""
     if phase == "learn":
         base = (_get_s3_text(LEARN_KEY) + "\n\n# About me (context)\n\n"
@@ -171,6 +185,7 @@ def build_system(phase, note_state, config, elapsed_s=0, opening=False):
         raise ValueError("Unknown phase: %r" % phase)
 
     parts = [guardrails, VOICE_STYLE, body, _call_brief(config, opening),
+             DISCLOSURE if disclose else "",
              _runtime_note(phase, note_state), _time_note(elapsed_s, config.get("max_minutes"))]
     return "\n\n".join(p for p in parts if p)
 
@@ -214,6 +229,9 @@ def new_state(config):
         "reject_count": 0,
         "goal": None,
         "goal_domain": None,
+        # False until Rudi has told them he is an AI. The opening is only a greeting now, so
+        # this rides on the state until the first real turn delivers it.
+        "disclosed": False,
     }
 
 
@@ -282,7 +300,8 @@ def open_call(config):
 
     result = gateway.generate(
         [{"role": "system", "content": system},
-         {"role": "user", "content": "(system: the call has just been answered — speak now)"}],
+         {"role": "user",
+          "content": "(system: they have just picked up and said nothing yet — greet them)"}],
         json_mode=False)
 
     reply = _speakable(parse_envelope(result["text"])["reply"])
@@ -301,7 +320,8 @@ def turn(state, user_text, config, elapsed_s=0):
         {"role": "user", "content": (user_text or "")[:MAX_INPUT_CHARS]}]
 
     clarifiers_left, note_state = _note_state(state, phase)
-    system = build_system(phase, note_state, config, elapsed_s=elapsed_s)
+    disclose = not state.get("disclosed")
+    system = build_system(phase, note_state, config, elapsed_s=elapsed_s, disclose=disclose)
 
     result = gateway.generate(
         [{"role": "system", "content": system}] + history[-MAX_HISTORY:], json_mode=True)
@@ -309,6 +329,8 @@ def turn(state, user_text, config, elapsed_s=0):
     reply = _speakable(env["reply"])
 
     state["history"] = history + [{"role": "assistant", "content": reply}]
+    if disclose:
+        state["disclosed"] = True
     advance(state, env["signals"], user_text, clarifiers_left)
 
     # Out of time trumps the phase machine: close on this turn whatever the signals said.
