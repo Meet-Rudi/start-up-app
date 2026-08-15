@@ -424,6 +424,33 @@ class GreetThenDisclose(unittest.TestCase):
                         "must stay disclosed, not re-fire every turn")
 
 
+class Farewell(unittest.TestCase):
+    """The call ends the instant a commitment lands, so that turn is also the goodbye. Without
+    being told, the model wrote an ordinary confirmation and the line went dead — which reads as
+    having got what it came for and hung up."""
+
+    def test_commit_phase_knows_the_call_ends_on_commitment(self):
+        system = brain.build_system("commit", {"attempts_left": 5, "goal": "walk daily"},
+                                    _config())
+        self.assertIn("THE CALL ENDS THE MOMENT THEY COMMIT", system)
+        self.assertIn("say goodbye", system)
+
+    def test_farewell_forbids_a_bare_restatement(self):
+        system = brain.build_system("commit", {"attempts_left": 5, "goal": "walk daily"},
+                                    _config())
+        self.assertIn("Never finish on a bare restatement", system)
+
+    def test_goal_phase_carries_no_farewell(self):
+        """It would be absurd to say goodbye while still eliciting the goal."""
+        system = brain.build_system("goal", {"clarifiers_left": 2}, _config())
+        self.assertNotIn("THE CALL ENDS THE MOMENT", system)
+
+    def test_running_out_of_time_also_closes_warmly(self):
+        system = brain.build_system("commit", {"attempts_left": 5}, _config(max_minutes=12),
+                                    elapsed_s=12 * 60 - 30)
+        self.assertIn("wish them well before saying goodbye", system)
+
+
 class Voicemail(unittest.TestCase):
     """Twilio's AMD does not cover Belgium, so this heuristic is the only guard."""
 

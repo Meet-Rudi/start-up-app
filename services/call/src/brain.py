@@ -137,8 +137,9 @@ def _time_note(elapsed_s, max_minutes):
     left = budget - int(elapsed_s or 0)
     if left <= 60:
         return ("[Runtime: the call is out of time. This is your FINAL message. Do not ask "
-                "another question. Warmly restate what they have agreed to, say you will check "
-                "in by message, and say goodbye.]")
+                "another question. Confirm what they have agreed to, say when you will be back "
+                "in touch, thank them by name and wish them well before saying goodbye. Up to "
+                "four short sentences.]")
     if left <= 150:
         return ("[Runtime: about %d minutes of call time remain. Begin steering toward a close: "
                 "get one concrete commitment and wrap up.]" % max(1, left // 60))
@@ -146,6 +147,24 @@ def _time_note(elapsed_s, max_minutes):
 
 
 # --------------------------------------------------------------------------- prompt assembly
+
+# The call ends the moment a commitment is secured, so the turn that confirms it is also the
+# last thing the patient ever hears — and the model had no way of knowing that. It wrote an
+# ordinary confirming reply and the line went dead: "you're committing to a five-minute walk
+# tomorrow, I'll check in with you later" and then silence. Transactional, not human.
+#
+# Nothing structural is wrong; the model simply has to be told this turn is goodbye. Four
+# sentences are allowed here, against VOICE_STYLE's usual two, because a warm close needs the
+# room and this is the only turn where length costs nothing — nobody is waiting to reply.
+FAREWELL = (
+    "[Runtime: THE CALL ENDS THE MOMENT THEY COMMIT. If this turn is the one where they agree, "
+    "you are also saying goodbye — there is no later turn. End the call properly, the way a "
+    "coach who likes this person would: confirm in one line exactly what they have agreed to, "
+    "say when you will be back in touch, thank them by name, and wish them well before you say "
+    "goodbye. Up to four short sentences here. Never finish on a bare restatement of the "
+    "commitment — that lands as though you got what you came for and hung up.]"
+)
+
 
 def _runtime_note(phase, note_state):
     if phase == "goal":
@@ -157,7 +176,9 @@ def _runtime_note(phase, note_state):
         return ("[Runtime: the user's goal is: \"%s\". Messages left to secure a commitment = %s. "
                 "If that number is 1, this is your FINAL message — do NOT ask again; give the "
                 "short closing (restate the action you suggest and say you'll check in later).]"
-                % (note_state.get("goal", "(their goal)"), note_state.get("attempts_left", 7)))
+                "\n\n%s"
+                % (note_state.get("goal", "(their goal)"), note_state.get("attempts_left", 7),
+                   FAREWELL))
     return ""
 
 
