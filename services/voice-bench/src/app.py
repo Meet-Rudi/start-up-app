@@ -59,8 +59,12 @@ DEFAULT_CONFIG = {
 }
 
 FRIENDLY_ERROR = "Sorry, something went wrong on my side. Let's try that again."
-TIRED_MESSAGE = ("I'm a little overloaded right now and can't think straight. "
-                 "Could we pick this up again in a few minutes?")
+# One message for every fault that ends the session, in the same words the call service speaks —
+# a tester and a patient should meet the same Rudi. Which internal thing broke is our problem.
+UNAVAILABLE_MESSAGE = ("I apologise, but for operational reasons I need to pause our discussion "
+                       "here. I will come back to you soon. Have a great time in the meantime.")
+TIRED_MESSAGE = UNAVAILABLE_MESSAGE
+
 
 
 def _response(payload, status=200):
@@ -411,6 +415,12 @@ def handler(event, context):
     except gateway.AllRateLimited as e:
         print("RATE LIMITED: %s" % e)
         return _response({"ok": False, "error": "rate_limited", "reply": TIRED_MESSAGE})
+    except gateway.AIError as e:
+        # Every endpoint in the cascade failed. The detail is for us, not for whoever is
+        # holding the microphone: on 2026-08-17 a tester was shown three stacked HTTP 404s
+        # naming decommissioned models, which tells them nothing they can act on.
+        print("ALL ENDPOINTS FAILED: %s" % e)
+        return _response({"ok": False, "error": "ai_unavailable", "reply": UNAVAILABLE_MESSAGE})
     except speech.SpeechError as e:
         print("SPEECH ERROR: %s" % e)
         return _response({"ok": False, "error": "speech: %s" % e, "reply": FRIENDLY_ERROR})

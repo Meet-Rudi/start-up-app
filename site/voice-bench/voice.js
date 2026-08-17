@@ -576,9 +576,8 @@
     var roundtrip = Date.now() - t0;
 
     if (!data.ok) {
-      banner(data.error === "rate_limited"
-        ? "All models are rate-limited right now — wait a moment and keep talking."
-        : ("Server error: " + (data.error || "unknown")));
+      banner(data.reply || "Something went wrong on our side — keep talking and I'll retry.");
+      if (data.error) console.error("voice-bench turn failed:", data.error);
       if (data.reply) addTurn("sys", data.reply);
       busy = false;
       startListening();
@@ -670,7 +669,10 @@
     var roundtrip = Date.now() - t0;
 
     if (!data.ok) {
-      banner("Could not start the call: " + (data.error || "unknown"));
+      // Never surface provider internals. data.reply carries the human-readable line;
+      // data.error is a short machine code kept for the console only.
+      banner(data.reply || "Could not start the call. Please try again shortly.");
+      if (data.error) console.error("voice-bench start failed:", data.error);
       setState("error", "Failed to start", "");
       els.btnStart.disabled = false;
       return;

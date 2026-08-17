@@ -451,6 +451,99 @@ class Farewell(unittest.TestCase):
         self.assertIn("wish them well before saying goodbye", system)
 
 
+class ProviderOutage(unittest.TestCase):
+    """On 2026-08-17 Groq decommissioned both models the cascade used and every service died at
+    once. A tester was shown three stacked HTTP 404s. On a CALL the failure is worse: without a
+    spoken apology the patient gets dead air and then the line drops, which reads as being hung
+    up on."""
+
+    def setUp(self):
+        _REPLIES[:] = []
+        self.payload = _new_call()
+        self.r = Relay(self.payload["call_id"], "conn-outage")
+
+    def _break_the_cascade(self):
+        return lambda *a, **k: (_ for _ in ()).throw(
+            brain.gateway.AIError("All endpoints failed -> groq: HTTP 404 model_not_found"))
+
+    def test_outage_at_setup_is_spoken_not_silent(self):
+        original = brain.open_call
+        brain.open_call = self._break_the_cascade()
+        try:
+            self.r.setup()
+        finally:
+            brain.open_call = original
+        self.assertTrue(_spoken(), "the patient must hear something, not dead air")
+        self.assertIn("for operational reasons", _spoken()[0])
+        self.assertTrue(_ended())
+        self.assertEqual(calllog.load(self.payload["call_id"])["end_reason"], "ai-unavailable")
+
+    def test_every_call_ending_fault_says_the_same_thing(self):
+        """A patient should not get a different apology depending on which internal thing broke."""
+        for failure in (brain.gateway.AIError("dead"),
+                        brain.gateway.AllRateLimited("throttled")):
+            _SENT.clear()
+            payload = _new_call()
+            r = Relay(payload["call_id"], "conn-%s" % type(failure).__name__)
+            original = brain.open_call
+            brain.open_call = lambda *a, **k: (_ for _ in ()).throw(failure)
+            try:
+                r.setup()
+            finally:
+                brain.open_call = original
+            self.assertEqual(_spoken(), [ws.OPERATIONAL_PAUSE["en"]], type(failure).__name__)
+
+    def test_the_apology_is_in_the_patients_language(self):
+        """Static text cannot be translated by the model that just failed. Falling back to
+        English as a Flemish speaker's call collapses would make a bad moment worse."""
+        _SENT.clear()
+        payload = _new_call(language="nl")
+        r = Relay(payload["call_id"], "conn-nl-outage")
+        original = brain.open_call
+        brain.open_call = self._break_the_cascade()
+        try:
+            r.setup()
+        finally:
+            brain.open_call = original
+        self.assertIn("operationele redenen", _spoken()[0])
+
+    def test_rate_limit_and_outage_differ_only_in_the_record(self):
+        payload = _new_call()
+        r = Relay(payload["call_id"], "conn-rl")
+        original = brain.open_call
+        brain.open_call = lambda *a, **k: (_ for _ in ()).throw(
+            brain.gateway.AllRateLimited("throttled"))
+        try:
+            r.setup()
+        finally:
+            brain.open_call = original
+        self.assertEqual(calllog.load(payload["call_id"])["end_reason"], "rate-limited")
+
+    def test_outage_never_leaks_provider_detail_to_the_caller(self):
+        original = brain.open_call
+        brain.open_call = self._break_the_cascade()
+        try:
+            self.r.setup()
+        finally:
+            brain.open_call = original
+        spoken = " ".join(_spoken()).lower()
+        for leak in ("404", "groq", "http", "model_not_found", "endpoint"):
+            self.assertNotIn(leak, spoken, "leaked %r to the patient" % leak)
+
+    def test_outage_mid_call_apologises_and_closes(self):
+        _REPLIES[:] = [("Hallo.", {})]
+        self.r.setup()
+        _SENT.clear()
+        original = brain.turn
+        brain.turn = self._break_the_cascade()
+        try:
+            self.r.prompt("I want to walk more")
+        finally:
+            brain.turn = original
+        self.assertIn("for operational reasons", " ".join(_spoken()))
+        self.assertTrue(_ended())
+
+
 class Voicemail(unittest.TestCase):
     """Twilio's AMD does not cover Belgium, so this heuristic is the only guard."""
 

@@ -42,7 +42,7 @@ GROQ_FALLBACK = {
     "name": "groq-fallback",
     "kind": "groq",
     "endpoint": os.environ.get("GROQ_ENDPOINT", "https://api.groq.com/openai/v1/chat/completions"),
-    "model": os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
     "secret": os.environ.get("GROQ_SECRET", "meetrudi/ai/groq"),
     "enabled": True,
 }

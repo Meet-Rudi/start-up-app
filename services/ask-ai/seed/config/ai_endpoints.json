@@ -1,6 +1,35 @@
 {
-  "_comment": "Ordered cascade of external AI endpoints for meetrudi-ask-ai. The Lambda tries each enabled endpoint in order; the first that answers wins. Groq is ALWAYS appended as the final fallback in code, so it need not be listed here. 'secret' is the AWS Secrets Manager id (meetrudi/...). 'kind' selects the call method in providers.py.",
+  "_comment": "Ordered cascade of external AI endpoints. The Lambda tries each enabled endpoint in order; the first that answers wins. Groq is ALWAYS appended as the final fallback in code. 'secret' is the AWS Secrets Manager id. 'kind' selects the call method.",
+
+  "_incident_2026_08_17": "Groq decommissioned llama-3.3-70b-versatile and llama-3.1-8b-instant (announced 17 Jun, effective Aug 2026) and EVERY service went down at once. The cascade looked redundant and was not: three entries, one vendor, two models, both on the same deprecation notice — three doors into the same room. The lesson is that redundancy means a second PROVIDER, not a second model. ovh-gpt-oss-120b below is that second provider: EU-hosted (Gravelines), serving the same open-weight model, so a Groq decision can no longer take the product offline. Enable it as soon as meetrudi/ai/ovh exists.",
+
   "endpoints": [
+    {
+      "name": "groq-gpt-oss-120b",
+      "kind": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "openai/gpt-oss-120b",
+      "secret": "meetrudi-groq-firstkey",
+      "enabled": true
+    },
+    {
+      "name": "ovh-gpt-oss-120b",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "model": "gpt-oss-120b",
+      "secret": "meetrudi/ai/ovh",
+      "enabled": false,
+      "_note": "Second PROVIDER, same model family. EU-resident and roughly 7x cheaper per input token than the Groq Llama we were running. Verify the endpoint host against the OVH AI Endpoints catalogue before enabling."
+    },
+    {
+      "name": "groq-gpt-oss-20b",
+      "kind": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "openai/gpt-oss-20b",
+      "secret": "meetrudi-groq-firstkey",
+      "enabled": true,
+      "_note": "Smaller and faster; last Groq resort before the in-code fallback."
+    },
     {
       "name": "mistral-small",
       "kind": "openai_compatible",
@@ -8,22 +37,6 @@
       "model": "mistral-small-latest",
       "secret": "meetrudi/ai/mistral",
       "enabled": false
-    },
-    {
-      "name": "groq-llama-3.3-70b",
-      "kind": "groq",
-      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
-      "model": "llama-3.3-70b-versatile",
-      "secret": "meetrudi-groq-firstkey",
-      "enabled": true
-    },
-    {
-      "name": "groq-llama-3.1-8b",
-      "kind": "groq",
-      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
-      "model": "llama-3.1-8b-instant",
-      "secret": "meetrudi-groq-firstkey",
-      "enabled": true
     }
   ]
 }

@@ -28,9 +28,34 @@ import gateway
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 WS_ENDPOINT = os.environ.get("WS_MANAGEMENT_ENDPOINT", "")
 
+# Recoverable: one turn failed but the call is fine. Rudi asks them to repeat and carries on.
 FRIENDLY_ERROR = "Sorry, I lost my train of thought there. Could you say that again?"
-TIRED_MESSAGE = ("I'm having trouble thinking clearly right now. Let me call you back another "
-                 "time. Sorry about that.")
+
+# NOT recoverable: the call has to end. One message for every such fault — a patient should not
+# get a different apology depending on which internal thing broke, and "the model is rate
+# limited" is not their problem. Spoken, never silent: dead air followed by the line dropping
+# reads as being hung up on.
+#
+# Static text, so it cannot be translated by the model that just failed — hence one per
+# language. Falling back to English at the moment a Flemish speaker's call collapses would make
+# a bad moment worse.
+OPERATIONAL_PAUSE = {
+    "en": ("I apologise, but for operational reasons I need to pause our discussion here. "
+           "I will come back to you soon. Have a great time in the meantime."),
+    "nl": ("Het spijt me, maar om operationele redenen moet ik ons gesprek hier even pauzeren. "
+           "Ik kom binnenkort bij je terug. Nog een fijne dag verder."),
+    "fr": ("Je suis désolé, mais pour des raisons opérationnelles je dois interrompre notre "
+           "conversation ici. Je reviendrai vers vous bientôt. Bonne journée en attendant."),
+    "de": ("Es tut mir leid, aber aus betrieblichen Gründen muss ich unser Gespräch hier "
+           "unterbrechen. Ich melde mich bald wieder. Ihnen noch eine gute Zeit."),
+}
+
+
+def operational_pause(config):
+    """The one thing Rudi says whenever a call has to end for our reasons rather than theirs."""
+    lang = str((config or {}).get("language") or "en").strip().lower()[:2]
+    return OPERATIONAL_PAUSE.get(lang, OPERATIONAL_PAUSE["en"])
+
 
 _api = None
 
@@ -74,6 +99,21 @@ def _recall(connection_id):
 
 # --------------------------------------------------------------------------- message handlers
 
+def _abandon(connection_id, manifest, config, error, reason):
+    """End a call that cannot continue, gracefully and on the record.
+
+    Says the operational-pause line, hangs up, and finalises with the true reason so the failure
+    is countable afterwards. AllRateLimited subclasses AIError, so one except clause covers both
+    and they differ only in what gets recorded — never in what the patient hears.
+    """
+    print("CALL ABANDONED (%s): %s" % (reason, error))
+    _send(connection_id, relay.say(operational_pause(config)))
+    _send(connection_id, relay.hang_up(reason))
+    manifest.setdefault("telephony", {})["error"] = reason
+    calllog.finish(manifest, reason)
+    return _ok()
+
+
 def _on_setup(connection_id, message):
     """The patient answered. Speak first — this is an outbound call."""
     params = message.get("customParameters") or {}
@@ -97,10 +137,10 @@ def _on_setup(connection_id, message):
     started = time.time()
     try:
         reply, state, info = brain.open_call(config)
-    except gateway.AllRateLimited:
-        _send(connection_id, relay.say(TIRED_MESSAGE))
-        _send(connection_id, relay.hang_up("rate-limited"))
-        return _ok()
+    except gateway.AIError as e:
+        return _abandon(connection_id, manifest, config, e,
+                        "rate-limited" if isinstance(e, gateway.AllRateLimited)
+                        else "ai-unavailable")
 
     manifest["state"] = state
     _send(connection_id, relay.say(reply))
@@ -143,10 +183,10 @@ def _on_prompt(connection_id, message, manifest):
     elapsed = _elapsed_s(manifest)
     try:
         reply, state, info = brain.turn(state, transcript, config, elapsed_s=elapsed)
-    except gateway.AllRateLimited:
-        _send(connection_id, relay.say(TIRED_MESSAGE))
-        _send(connection_id, relay.hang_up("rate-limited"))
-        return _ok()
+    except gateway.AIError as e:
+        return _abandon(connection_id, manifest, config, e,
+                        "rate-limited" if isinstance(e, gateway.AllRateLimited)
+                        else "ai-unavailable")
     except Exception as e:  # noqa: BLE001 — a dropped turn must not drop the call
         print("ERROR: turn failed: %s" % e)
         _send(connection_id, relay.say(FRIENDLY_ERROR))

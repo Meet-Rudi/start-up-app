@@ -125,7 +125,7 @@ Resources:
           WHATSAPP_FROM: !Ref WhatsAppFrom
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
-          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_MODEL: openai/gpt-oss-20b
           GROQ_SECRET: meetrudi-groq-firstkey
           HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
           # Keep-warm test mode: nudge shortly after last inbound so the loop is observable fast.
@@ -193,7 +193,7 @@ Resources:
           # Gateway (for the contextual AI reach-out) — same providers as the processor.
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
-          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_MODEL: openai/gpt-oss-20b
           GROQ_SECRET: meetrudi-groq-firstkey
           HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
       Events:
@@ -227,7 +227,7 @@ Resources:
           # Gateway (same providers as the processor) — the test console runs the real engine.
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
-          GROQ_MODEL: llama-3.1-8b-instant
+          GROQ_MODEL: openai/gpt-oss-20b
           GROQ_SECRET: meetrudi-groq-firstkey
           HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
       FunctionUrlConfig:
