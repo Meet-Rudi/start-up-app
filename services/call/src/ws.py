@@ -22,6 +22,7 @@ import boto3
 
 import brain
 import calllog
+import deid
 import relay
 import gateway
 
@@ -99,6 +100,54 @@ def _recall(connection_id):
 
 # --------------------------------------------------------------------------- message handlers
 
+# De-identification, on the live path.
+#
+# Two tiers, both pure regex — microseconds, not milliseconds. That matters here in a way it does
+# not on WhatsApp: a call is a real-time conversation and anything that costs latency gets felt.
+# No model is involved in the scrubbing.
+#
+#   redact()  irreversible. National number, email, phone, IBAN, card. Gone before the text is
+#             written anywhere or shown to anyone, and never recoverable.
+#   vault     reversible, SESSION-SCOPED. Third-party names become placeholders for the model,
+#             and are swapped back only in the final breath before Twilio speaks them, so Rudi
+#             still sounds natural saying "your daughter Anna".
+#
+# The vault is deliberately NOT persisted. It lives in the manifest only while the call is open
+# and is destroyed at the end, so no name-to-alias mapping survives the conversation that
+# produced it. That is the whole point: the alias is useless later, which is what makes storing
+# the transcript safe.
+_detector = deid.HeuristicDetector()
+
+
+def _vault_for(manifest):
+    return deid.AliasVault.from_dict((manifest.get("_vault") or None))
+
+
+def _scrub_inbound(manifest, text, locale="en"):
+    """Everything the patient said, cleaned before it is stored OR sent to a model."""
+    clean, found = deid.redact(text or "")
+    vault = _vault_for(manifest)
+    masked = vault.mask(clean, _detector, locale)
+    manifest["_vault"] = vault.to_dict()
+    if found:
+        counts = manifest.setdefault("pii", {}).setdefault("redacted", {})
+        for label, n in found.items():
+            counts[label] = counts.get(label, 0) + n
+        print("PII: redacted %s on %s" % (sorted(found), manifest["call_id"]))
+    return masked
+
+
+def _restore_outbound(manifest, text):
+    """Placeholders back to real names, in the last breath before Twilio speaks."""
+    return _vault_for(manifest).unmask(text or "", fallback="them")
+
+
+def _forget_vault(manifest):
+    """Destroy the name-to-alias map when the call ends. Nothing identifying outlives the call."""
+    if manifest.pop("_vault", None) is not None:
+        print("PII: vault discarded for %s" % manifest["call_id"])
+
+
 def _abandon(connection_id, manifest, config, error, reason):
     """End a call that cannot continue, gracefully and on the record.
 
@@ -107,6 +156,7 @@ def _abandon(connection_id, manifest, config, error, reason):
     and they differ only in what gets recorded — never in what the patient hears.
     """
     print("CALL ABANDONED (%s): %s" % (reason, error))
+    _forget_vault(manifest)
     _send(connection_id, relay.say(operational_pause(config)))
     _send(connection_id, relay.hang_up(reason))
     manifest.setdefault("telephony", {})["error"] = reason
@@ -143,7 +193,7 @@ def _on_setup(connection_id, message):
                         else "ai-unavailable")
 
     manifest["state"] = state
-    _send(connection_id, relay.say(reply))
+    _send(connection_id, relay.say(_restore_outbound(manifest, reply)))
 
     calllog.record_turn(manifest, 0, {
         "at": calllog.iso(), "kind": "opening", "transcript": None, "reply": reply,
@@ -156,11 +206,14 @@ def _on_setup(connection_id, message):
 def _on_prompt(connection_id, message, manifest):
     """One finished utterance from the patient."""
     started = time.time()
-    transcript = (message.get("voicePrompt") or "").strip()
-    if not transcript:
+    raw = (message.get("voicePrompt") or "").strip()
+    if not raw:
         return _ok()
 
     config = manifest.get("config") or {}
+    # Scrubbed BEFORE it is stored, logged, or sent to the model — there is no path where the
+    # raw utterance is persisted first and cleaned afterwards.
+    transcript = _scrub_inbound(manifest, raw, config.get("language", "en"))
     state = manifest.get("state") or brain.new_state(config)
     seq = int(manifest.get("totals", {}).get("turns", 0)) + 1
 
@@ -174,6 +227,7 @@ def _on_prompt(connection_id, message, manifest):
             "timings": {},
         })
         _send(connection_id, relay.hang_up("voicemail"))
+        _forget_vault(manifest)
         # Finalise here rather than letting $disconnect do it. Twilio closes the socket a moment
         # later and would otherwise stamp "disconnected" over the real reason, making voicemails
         # uncountable from the index without opening every manifest.
@@ -193,7 +247,7 @@ def _on_prompt(connection_id, message, manifest):
         return _ok()
 
     if reply:
-        _send(connection_id, relay.say(reply))
+        _send(connection_id, relay.say(_restore_outbound(manifest, reply)))
 
     calllog.record_turn(manifest, seq, {
         "at": calllog.iso(), "kind": "turn", "transcript": transcript, "reply": reply,
@@ -206,6 +260,7 @@ def _on_prompt(connection_id, message, manifest):
     if info.get("ended"):
         # Twilio speaks the queued token before acting on `end`, so the goodbye is not cut off.
         _send(connection_id, relay.hang_up("engine-ended"))
+        _forget_vault(manifest)
         calllog.finish(manifest, "engine-ended")
     return _ok()
 
@@ -245,8 +300,12 @@ def handler(event, context):
     if route == "$disconnect":
         call_id = _recall(connection_id)
         manifest = calllog.load(call_id) if call_id else None
-        if manifest and manifest.get("status") != "completed":
-            calllog.finish(manifest, "disconnected")
+        if manifest:
+            _forget_vault(manifest)
+            if manifest.get("status") != "completed":
+                calllog.finish(manifest, "disconnected")
+            else:
+                calllog._put_json(calllog._manifest_key(manifest["call_id"]), manifest)
         return _ok()
 
     message = relay.parse(event.get("body") or "{}")

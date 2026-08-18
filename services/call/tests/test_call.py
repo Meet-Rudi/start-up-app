@@ -63,6 +63,7 @@ for _key, _text in {
     _FAKE_S3.put_object(Bucket=BUCKET, Key=_key, Body=_text.encode("utf-8"))
 
 import brain      # noqa: E402
+import deid       # noqa: E402
 import calllog    # noqa: E402
 import relay      # noqa: E402
 import ws         # noqa: E402
@@ -542,6 +543,96 @@ class ProviderOutage(unittest.TestCase):
             brain.turn = original
         self.assertIn("for operational reasons", " ".join(_spoken()))
         self.assertTrue(_ended())
+
+
+class Deidentification(unittest.TestCase):
+    """PII must never reach storage or a model. deid.py existed and was tested, but until now
+    nothing imported it — the protection was written and not switched on."""
+
+    def setUp(self):
+        _REPLIES[:] = [("Hallo.", {})]
+        self.payload = _new_call()
+        self.r = Relay(self.payload["call_id"], "conn-pii")
+        self.r.setup()
+        _SENT.clear()
+
+    def _said(self, text):
+        _REPLIES[:] = [("Understood.", {})]
+        self.r.prompt(text)
+        return calllog.load(self.payload["call_id"])
+
+    def test_national_number_never_reaches_storage(self):
+        m = self._said("My national number is 85.07.30-033.28, is that what you need?")
+        stored = json.dumps(m)
+        self.assertNotIn("85.07.30-033.28", stored)
+        self.assertNotIn("8507300332", stored)
+        self.assertIn(deid.LBL_NATIONAL_ID, stored)
+
+    def test_card_email_and_iban_are_redacted(self):
+        m = self._said("mail me at beata@example.com or use 4111 1111 1111 1111")
+        stored = json.dumps(m)
+        self.assertNotIn("beata@example.com", stored)
+        self.assertNotIn("4111", stored)
+
+    def test_redaction_happens_before_the_model_sees_it(self):
+        """Not stored-then-cleaned: the model must never receive the raw utterance."""
+        seen = {}
+        original = brain.turn
+        def spy(state, user_text, config, elapsed_s=0):
+            seen["text"] = user_text
+            return original(state, user_text, config, elapsed_s)
+        brain.turn = spy
+        try:
+            self._said("my number is 85.07.30-033.28")
+        finally:
+            brain.turn = original
+        self.assertNotIn("85.07.30-033.28", seen["text"])
+
+    def test_third_party_names_are_pseudonymised_for_the_model(self):
+        seen = {}
+        original = brain.turn
+        def spy(state, user_text, config, elapsed_s=0):
+            seen["text"] = user_text
+            return original(state, user_text, config, elapsed_s)
+        brain.turn = spy
+        try:
+            self._said("I walk with my daughter Anneke every Tuesday")
+        finally:
+            brain.turn = original
+        self.assertNotIn("Anneke", seen["text"])
+        self.assertTrue(deid.has_placeholder(seen["text"]))
+
+    def test_names_are_restored_before_twilio_speaks(self):
+        """Rudi must still sound natural — the patient hears the real name, not a placeholder."""
+        self.r.prompt("I walk with my daughter Anneke")
+        _SENT.clear()
+        _REPLIES[:] = [("That is lovely, say hello to <| person-1 |> from me.", {})]
+        self.r.prompt("yes")
+        spoken = " ".join(_spoken())
+        self.assertNotIn("person-1", spoken)
+        self.assertFalse(deid.has_placeholder(spoken), "a placeholder was spoken aloud")
+
+    def test_vault_does_not_outlive_the_call(self):
+        """The alias map is what would make a stored transcript re-identifiable. It must die."""
+        self._said("I walk with my daughter Anneke")
+        self.assertIn("_vault", calllog.load(self.payload["call_id"]))
+        self.r.disconnect()
+        m = calllog.load(self.payload["call_id"])
+        self.assertNotIn("_vault", m, "the name-to-alias map survived the call")
+        self.assertNotIn("Anneke", json.dumps(m))
+
+    def test_vault_dies_even_when_the_call_collapses(self):
+        original = brain.turn
+        brain.turn = lambda *a, **k: (_ for _ in ()).throw(brain.gateway.AIError("dead"))
+        try:
+            self.r.prompt("my daughter Anneke walks with me")
+        finally:
+            brain.turn = original
+        self.assertNotIn("_vault", calllog.load(self.payload["call_id"]))
+
+    def test_redaction_counts_are_recorded_without_the_values(self):
+        m = self._said("my number is 85.07.30-033.28")
+        self.assertGreaterEqual(m["pii"]["redacted"].get(deid.LBL_NATIONAL_ID, 0), 1)
 
 
 class Voicemail(unittest.TestCase):
