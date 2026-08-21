@@ -1,0 +1,12 @@
+{
+  "_comment": "ADD this statement to the inline policy on the rudi-deployer USER (IAM -> Users -> rudi-deployer -> Add permissions -> Create inline policy -> JSON -> paste as an extra statement). It lets the operator workstation read ONLY the call dispatch token, so an outbound call can be placed from the CLI without the token ever being pasted into a terminal, a chat, or a file. Deliberately scoped to that one secret: rudi-deployer still cannot read the Twilio credentials, the console token, or any other secret. Read-only - it grants no ability to create, edit or delete secrets, which stay console-only per CLAUDE.md.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadCallDispatchTokenOnly",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/call/dispatch-token-*"
+    }
+  ]
+}

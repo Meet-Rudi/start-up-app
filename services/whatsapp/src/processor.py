@@ -20,6 +20,7 @@ import store
 import i18n
 import provider
 import gateway
+import deid
 import responder
 import personality
 
@@ -29,6 +30,40 @@ SALT = os.environ.get("PSEUDONYMIZE_SALT", "meetrudi-pilot-salt")
 AI_RESPONDER = os.environ.get("AI_RESPONDER", "true").lower() == "true"
 
 STORE = store.ConversationStore(_s3, DATA_BUCKET)
+
+
+# De-identification on the WhatsApp path. Same two tiers as the call service, same reasoning,
+# but the session boundary is different: a call ends when the line drops, whereas a WhatsApp
+# conversation has no natural end. The 24h free-form window is the session — the same boundary
+# the product already uses for everything else — so a new window means a fresh vault and no
+# alias mapping outlives the window that created it.
+_DETECTOR = deid.HeuristicDetector()
+
+
+def _session_vault(prior_meta):
+    """(vault, is_new_session). A closed window means the previous session is over."""
+    if prior_meta is None or not prior_meta.is_in_window():
+        return deid.AliasVault(), True
+    return deid.AliasVault.from_dict(prior_meta.alias_vault or None), False
+
+
+def _scrub_inbound(vault, text, locale):
+    """Clean before ANY persistence: this runs ahead of record_inbound, so the raw message is
+    never written to S3, never shown in the operator console and never reaches a model."""
+    clean, found = deid.redact(text or "")
+    if found:
+        print("PII redacted %s" % sorted(found))
+    return vault.mask(clean, _DETECTOR, locale), found
+
+
+def _restore_outbound(vault, text):
+    """Placeholders back to real names in the last step before the send channel."""
+    out = vault.unmask(text or "", fallback="them")
+    if deid.has_placeholder(out):
+        # Belt and braces: never let a raw placeholder reach a patient's phone.
+        print("WARN: unresolved placeholder suppressed before send")
+        out = deid.PLACEHOLDER_RE.sub("them", out)
+    return out
 
 
 def _to_message(msg: dict) -> store.Message:
@@ -43,17 +78,23 @@ def _to_message(msg: dict) -> store.Message:
     )
 
 
-def _reply_and_persist(uid: str, phone: str, text: str, meta) -> None:
-    """Run the AI responder for one turn, send the reply, persist outbound + AI state + locale."""
+def _reply_and_persist(uid: str, phone: str, text: str, meta, vault) -> None:
+    """Run the AI responder for one turn, send the reply, persist outbound + AI state + locale.
+
+    `text` is already de-identified. The reply is stored in that same masked form and only
+    un-masked for the send, so what sits in S3 stays non-identifying while the patient still
+    reads a natural message.
+    """
     locale = meta.locale or i18n.DEFAULT_LOCALE
     pblock = personality.resolve_block(meta.persona)   # operator-chosen persona (or default)
     reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
                                                personality_block=pblock)
     new_locale = info.get("lang") or locale   # "last used language" (falls back to current)
-    provider.send_text(phone, reply)
+    provider.send_text(phone, _restore_outbound(vault, reply))
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
                         text=reply, operator_id="ai:rudi")
-    STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale)
+    STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale,
+                          alias_vault=vault.to_dict())
     print("AI uid=%s phase=%s lang=%s model=%s"
           % (uid, info.get("phase"), new_locale, info.get("model")))
 
@@ -82,18 +123,28 @@ def handler(event, context):
             if not phone:
                 continue
             uid = store.user_id(phone, SALT)
-            meta = STORE.record_inbound(uid, phone, _to_message(msg))
+            # Read the contact BEFORE recording, so the message can be scrubbed on the way in
+            # rather than cleaned up afterwards.
+            prior = STORE.get_meta(uid)
+            vault, new_session = _session_vault(prior)
+            locale = (prior.locale if prior else "") or i18n.DEFAULT_LOCALE
+            if new_session and prior is not None:
+                print("SESSION new window uid=%s — alias vault reset" % uid)
+
+            scrubbed, _found = _scrub_inbound(vault, msg.get("text", "") or "", locale)
+            meta = STORE.record_inbound(uid, phone, _to_message(dict(msg, text=scrubbed)))
+            meta.alias_vault = vault.to_dict()
             locale = meta.locale or i18n.DEFAULT_LOCALE
             print("INBOUND uid=%s type=%s sid=%s" % (uid, msg.get("type"), msg.get("provider_msg_id")))
 
             if not AI_RESPONDER:
                 continue  # operator-console mode: a human answers from the console
 
-            text = msg.get("text", "") or ""
+            text = scrubbed
             if not text:  # media/non-text: acknowledge (localized), don't advance the AI session
                 provider.send_text(phone, i18n.t("media_ack", locale, kind=(msg.get("type") or "message")))
                 continue
-            _reply_and_persist(uid, phone, text, meta)
+            _reply_and_persist(uid, phone, text, meta, vault)
 
         except gateway.AllRateLimited:
             if phone:

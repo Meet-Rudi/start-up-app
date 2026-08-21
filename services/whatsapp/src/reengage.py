@@ -19,6 +19,7 @@ import json
 
 import boto3
 
+import deid
 import store
 import i18n
 import provider
@@ -69,6 +70,23 @@ def _goal_variable(meta) -> str:
         if goal:
             return goal
     return i18n.t("generic_goal", meta.locale or i18n.DEFAULT_LOCALE)
+
+
+def _expire_alias_vault(meta) -> bool:
+    """Drop the session alias map once its 24h window has closed.
+
+    The processor resets the vault when the NEXT message arrives, which is fine for an active
+    contact and useless for a dormant one: someone who never writes again would keep a
+    name-to-alias mapping on their record indefinitely. This runner already visits every
+    contact on a schedule, so expiry belongs here — "forgotten at the end of the session" has
+    to mean the session's end, not the next conversation's start.
+    """
+    if meta.alias_vault and not meta.is_in_window():
+        meta.alias_vault = {}
+        STORE.put_meta(meta)
+        print("PII vault expired uid=%s (window closed)" % meta.user_id)
+        return True
+    return False
 
 
 def _eligible(meta) -> bool:
@@ -145,6 +163,20 @@ def _send_template(meta) -> bool:
 
 def handler(event, context):
     now = store.now_dt()
+
+    # Expire alias vaults across the WHOLE roster, not just the contacts due for outreach.
+    # A dormant or opted-out contact never becomes "due" again, and those are precisely the
+    # records that would otherwise keep a name mapping forever.
+    expired = 0
+    try:
+        for meta in STORE.list_roster():
+            if _expire_alias_vault(meta):
+                expired += 1
+    except Exception as e:  # noqa: BLE001 - never let the sweep block the sends
+        print("WARN: vault sweep failed: %s" % e)
+    if expired:
+        print("PII swept %d expired alias vault(s)" % expired)
+
     due = STORE.list_due(now)
     sent = skipped = 0
     for meta in due:

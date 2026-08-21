@@ -185,7 +185,12 @@ class TestConsoleTests(unittest.TestCase):
         # greeting + user turn + rudi turn (the user/reply pair can share a millisecond under the
         # instant fake gateway, so assert on content, not sub-ms ordering)
         self.assertEqual(len(msgs), 3)
-        self.assertEqual(msgs[0]["direction"], "out")                       # greeting first
+        # Assert on CONTENT, not order: message keys are "{ts_ms}-{uuid}", so two writes in the
+        # same millisecond are ordered by a random UUID. The comment above already says this —
+        # the fix was applied to the user/reply pair below and missed the greeting, which is why
+        # this failed roughly one run in two.
+        self.assertTrue(any(m["direction"] == "out" and m["text"] not in ("hello", "Rudi says hi")
+                            for m in msgs), "the greeting should be present")
         self.assertTrue(any(m["direction"] == "in" and m["text"] == "hello" for m in msgs))
         self.assertTrue(any(m["direction"] == "out" and m["text"] == "Rudi says hi" for m in msgs))
 

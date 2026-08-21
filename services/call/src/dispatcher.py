@@ -70,6 +70,22 @@ def _secret(secret_id):
     return value
 
 
+def _dispatch_token():
+    """The shared dispatch token, accepting either shape the secret may have been created in.
+
+    The README specifies {"token": "..."}, but creating the secret as plaintext is an easy and
+    common slip in the console — and `_secret()` deliberately falls back to the raw string when
+    the payload is not JSON. The two behaviours met badly: a plaintext secret made the caller do
+    `"abc…".get("token")`, so setup failed with an opaque 500 ('str' object has no attribute
+    'get') at exactly the moment an operator is least able to diagnose it, which is the failure
+    mode `_secret()` exists to prevent. Normalise here instead.
+    """
+    value = _secret(DISPATCH_SECRET)
+    if isinstance(value, dict):
+        return (value.get("token") or "").strip()
+    return str(value or "").strip()
+
+
 def _response(payload, status=200):
     return {"statusCode": status, "headers": {"Content-Type": "application/json"},
             "body": json.dumps(payload, ensure_ascii=False)}
@@ -306,7 +322,7 @@ def handler(event, context):
 
         # The Function URL is public, so a shared token guards it. Fails closed.
         if event.get("requestContext"):
-            expected = (_secret(DISPATCH_SECRET) or {}).get("token")
+            expected = _dispatch_token()
             if not expected:
                 return _response({"ok": False, "error": "dispatch auth not configured"}, 503)
             if (params.get("token") or "") != expected:

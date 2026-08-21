@@ -145,6 +145,10 @@ class ContactMeta:
     last_reengage_at: str = ""
     quiet_since: str = ""                # first time we found this contact gone quiet
     ai_state: dict[str, Any] = field(default_factory=dict)  # AI responder session state (phase, counters, history)
+    # Reversible name<->alias map for the CURRENT 24h window only. Reset whenever a new session
+    # opens, so no mapping that could re-identify a stored message outlives the window that
+    # produced it. Never contains direct identifiers — those are redacted irreversibly upstream.
+    alias_vault: dict[str, Any] = field(default_factory=dict)
     # Profile counters (source for conversations/{uid}/profile.json):
     msg_total: int = 0                   # all message turns (in + out, any format)
     msg_user: int = 0                    # inbound turns
@@ -435,13 +439,15 @@ class ConversationStore:
     def record_outbound(self, uid: str, msg: Message,
                         proactive_kind: Optional[str] = None,
                         ai_state: Optional[dict] = None,
-                        locale: Optional[str] = None) -> ContactMeta:
+                        locale: Optional[str] = None,
+                        alias_vault: Optional[dict] = None) -> ContactMeta:
         """Persist an outbound message and advance state (clears unread).
 
         proactive_kind marks a system-initiated send: "nudge" (spends the nudge for this window)
         or "template" (counts toward the cadence cap / dormancy). None = a reactive reply
         (operator or AI) — it does not consume the nudge and does not gate on quiet hours.
         ai_state, when given, is persisted alongside (the AI responder's session state).
+        alias_vault, when given, is persisted alongside (the session-scoped de-identification map).
         """
         self.append_message(uid, msg)
         meta = self.get_meta(uid) or ContactMeta(user_id=uid)
@@ -451,6 +457,8 @@ class ConversationStore:
         meta.last_message_preview = _preview(msg)
         meta.last_direction = "out"
         meta.msg_total += 1
+        if alias_vault is not None:
+            meta.alias_vault = alias_vault
         if ai_state is not None:
             meta.ai_state = ai_state
         if locale:

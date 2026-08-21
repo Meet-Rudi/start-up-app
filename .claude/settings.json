@@ -17,7 +17,11 @@
       "Bash(python -m unittest discover -s services/tts/tests)",
       "Bash(python -m py_compile services/tts/generate_samples.py)",
       "Bash(python -c ' *)",
-      "Bash(curl -s -i -X OPTIONS https://ddkigfzjzpu52qox4zlepvlkji0cvvyu.lambda-url.eu-central-1.on.aws/ -H 'Origin: https://meet-rudi.github.io' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' -m 25)"
+      "Bash(curl -s -i -X OPTIONS https://ddkigfzjzpu52qox4zlepvlkji0cvvyu.lambda-url.eu-central-1.on.aws/ -H 'Origin: https://meet-rudi.github.io' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' -m 25)",
+      "Bash(python -m py_compile deploy.py)",
+      "Bash(python -m py_compile services/call/src/*.py)",
+      "Bash(python -m py_compile services/call/src/dispatcher.py)",
+      "Bash(python -m unittest discover -s services/call/tests)"
     ]
   }
 }

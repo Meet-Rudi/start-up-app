@@ -78,3 +78,21 @@ unauthenticated `{"ping": true}` health check keeps working either way and repor
 
 The same value goes into `meetrudi-voice-bench` only indirectly — that function reads the
 secret itself via `PIPER_TTS_SECRET`, so the token is never copied into an environment variable.
+
+## 5. Let the deployer read the call dispatch token
+
+Needed by the voice test scripts (`services/call/rudi_test_call_*.py`), which place a real call
+from the workstation. Without it they fail with `AccessDeniedException` on
+`secretsmanager:GetSecretValue`.
+
+Console → IAM → Users → `rudi-deployer` → policy `RudiDeployPolicy` (**Edit** → JSON) → add the
+statement from [`rudi-deployer.dispatch-token-add.json`](rudi-deployer.dispatch-token-add.json)
+to the `Statement` array → **Next** → **Save changes**.
+
+Deliberately scoped to that one secret: `rudi-deployer` still cannot read the Twilio credentials
+or any other secret, and read-only means it still cannot create or edit secrets (console-only,
+per CLAUDE.md §7).
+
+**Escape hatch if you can't touch IAM right now:** the scripts also accept the token from
+`RUDI_DISPATCH_TOKEN` (or `--token`), copied out of the Secrets Manager console. That works, but
+it puts the token in your environment — the IAM statement exists so it never has to be.
