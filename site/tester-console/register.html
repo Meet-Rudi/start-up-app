@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- The link is distributed privately to invitees; keep it out of search results entirely. -->
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — tester sign-up</title>
+<link rel="stylesheet" href="rudi.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
+      <div class="brandrow" style="margin:0">
+        <div class="brandlogo">R</div>
+        <div><span class="lbl" data-t="reg.eyebrow"></span><h1 data-t="reg.title"></h1></div>
+      </div>
+      <div class="langsel" role="group" aria-label="Language">
+        <button type="button" data-lang="nl-BE">NL-BE</button>
+        <button type="button" data-lang="en">EN</button>
+      </div>
+    </div>
+
+    <p class="d" style="margin:.75rem 0 1rem" data-t="reg.lead"></p>
+    <div class="deskonly" data-t="app.desktop"></div>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <form id="form" novalidate>
+      <div class="grid2">
+        <div class="field" id="f-first">
+          <label for="first" data-t="reg.first"></label>
+          <input id="first" name="first_name" type="text" autocomplete="given-name" required />
+          <span class="msg bad" hidden></span>
+        </div>
+        <div class="field" id="f-last">
+          <label for="last" data-t="reg.last"></label>
+          <input id="last" name="last_name" type="text" autocomplete="family-name" required />
+          <span class="msg bad" hidden></span>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="field" id="f-phone">
+          <label for="phone" data-t="reg.phone"></label>
+          <input id="phone" name="phone" type="tel" autocomplete="tel" required />
+          <span class="msg" id="phone-msg"></span>
+        </div>
+        <div class="field" id="f-email">
+          <label for="email" data-t="reg.email"></label>
+          <input id="email" name="email" type="email" autocomplete="email" required />
+          <span class="msg" id="email-msg"></span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="help"><span data-t="reg.help"></span> <span class="hint" data-t="reg.help.hint"></span></label>
+        <select id="help" multiple size="6" style="min-height:9rem"></select>
+      </div>
+
+      <div class="field">
+        <label for="goal"><span data-t="reg.goal"></span> <span class="hint" data-t="reg.goal.hint"></span></label>
+        <textarea id="goal" rows="2" data-t-ph="reg.goal.ph"></textarea>
+        <span class="hint" data-t="reg.goal.fallback"></span>
+      </div>
+
+      <label class="checkline"><input type="checkbox" id="c1" /><span data-t="reg.consent1"></span></label>
+      <label class="checkline"><input type="checkbox" id="c2" /><span data-t="reg.consent2"></span></label>
+      <label class="checkline"><input type="checkbox" id="c3" /><span data-t="reg.consent3"></span></label>
+
+      <!-- Honeypot. Off-screen rather than display:none, which some bots skip; a human with a
+           screen reader is told to leave it alone. -->
+      <div style="position:absolute;left:-9999px" aria-hidden="true">
+        <label>Website<input type="text" id="website" name="website" tabindex="-1" autocomplete="off" /></label>
+      </div>
+
+      <button class="btn" id="submit" type="submit" data-t="reg.submit"></button>
+      <p class="hint" style="margin-top:.9rem">
+        <span data-t="reg.haveaccount"></span> <a href="index.html" data-t="reg.login"></a>
+      </p>
+    </form>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="rudi.js"></script>
+<script>
+(function () {
+  "use strict";
+  var R = window.Rudi, $ = R.$;
+
+  // The help areas mirror the CM consent form's registry, so answers stay comparable between
+  // the pilot intake and the tester cohort.
+  var HELP = {
+    "nl-BE": ["Gezonder eten", "Meer bewegen", "Beter slapen",
+              "Mijn motivatie volhouden", "Omgaan met stress", "Meer energie krijgen"],
+    "en": ["Eating healthier", "Moving more", "Sleeping better",
+           "Keeping up my motivation", "Dealing with stress", "Getting more energy"]
+  };
+
+  var BE_PHONE = /^(?:\+32|0)4[5-9][0-9]{7}$/;
+  var EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  // Mirrors tester_api.name_is_plausible. The server re-runs it; this is only for fast feedback.
+  var RUN = /(.)\1{2,}/;
+  var VOWEL = /[aeiouyàáâäèéêëìíîïòóôöùúûü]/i;
+
+  function nameOk(v) {
+    v = (v || "").trim();
+    if (v.length < 2 || v.length > 60) return false;
+    if (!/^[\p{L}\s'-]+$/u.test(v)) return false;
+    return VOWEL.test(v) && !RUN.test(v);
+  }
+
+  function mark(fieldId, ok, message) {
+    var field = $("#" + fieldId), msg = field.querySelector(".msg");
+    field.classList.toggle("bad", !ok);
+    field.classList.toggle("good", ok === true && message === "");
+    if (msg) {
+      msg.className = "msg " + (ok ? "good" : "bad");
+      msg.textContent = message || "";
+      msg.hidden = !message;
+    }
+    return ok;
+  }
+
+  function renderHelp() {
+    var sel = $("#help"), chosen = Array.from(sel.selectedOptions || []).map(function (o) { return o.index; });
+    sel.innerHTML = "";
+    (HELP[R.locale()] || HELP.en).forEach(function (label, i) {
+      var o = document.createElement("option");
+      o.textContent = label;
+      o.selected = chosen.indexOf(i) !== -1;
+      sel.appendChild(o);
+    });
+  }
+
+  function paint() {
+    R.applyStrings();
+    renderHelp();
+    R.$$(".langsel button").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.lang === R.locale());
+    });
+    document.title = R.t("reg.title");
+  }
+
+  R.$$(".langsel button").forEach(function (b) {
+    b.addEventListener("click", function () { R.setLocale(b.dataset.lang); paint(); });
+  });
+
+  $("#phone").addEventListener("input", function () {
+    var raw = this.value.replace(/[\s.\-/()]/g, "");
+    if (raw.length < 4) return mark("f-phone", null, R.t("reg.phone.hint"));
+    mark("f-phone", BE_PHONE.test(raw), BE_PHONE.test(raw) ? R.t("reg.phone.ok") : R.t("reg.phone.bad"));
+  });
+  $("#email").addEventListener("input", function () {
+    var v = this.value.trim();
+    if (!v) return mark("f-email", null, R.t("reg.email.hint"));
+    mark("f-email", EMAIL.test(v), EMAIL.test(v) ? "" : R.t("reg.email.bad"));
+  });
+  [["#first", "f-first"], ["#last", "f-last"]].forEach(function (pair) {
+    $(pair[0]).addEventListener("blur", function () {
+      if (!this.value.trim()) return;
+      mark(pair[1], nameOk(this.value), nameOk(this.value) ? "" : R.t("reg.name.bad"));
+    });
+  });
+
+  $("#form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    R.banner($("#banner"), "", "");
+
+    var first = $("#first").value.trim(), last = $("#last").value.trim();
+    var email = $("#email").value.trim(), phone = $("#phone").value.replace(/[\s.\-/()]/g, "");
+    var ok = true;
+    ok = mark("f-first", nameOk(first), nameOk(first) ? "" : R.t("reg.name.bad")) && ok;
+    ok = mark("f-last", nameOk(last), nameOk(last) ? "" : R.t("reg.name.bad")) && ok;
+    ok = mark("f-email", EMAIL.test(email), EMAIL.test(email) ? "" : R.t("reg.email.bad")) && ok;
+    ok = mark("f-phone", BE_PHONE.test(phone), BE_PHONE.test(phone) ? R.t("reg.phone.ok") : R.t("reg.phone.bad")) && ok;
+    if (!$("#c1").checked || !$("#c2").checked) {
+      R.banner($("#banner"), "bad", R.t("err.validation_failed"));
+      ok = false;
+    }
+    if (!ok) return;
+
+    var btn = $("#submit");
+    btn.disabled = true;
+    btn.textContent = R.t("app.loading");
+
+    R.api("POST", "/register", {
+      first_name: first, last_name: last, email: email, phone: phone,
+      locale: R.locale(),
+      help_areas: Array.from($("#help").selectedOptions).map(function (o) { return o.textContent; }),
+      goal: $("#goal").value.trim(),
+      consent_health: $("#c1").checked,
+      consent_recording: $("#c2").checked,
+      whatsapp_confirmed: $("#c3").checked,
+      website: $("#website").value
+    }).then(function (res) {
+      btn.disabled = false;
+      btn.textContent = R.t("reg.submit");
+      if (res.ok && res.data.already_registered) {
+        R.banner($("#banner"), "info", R.t("reg.already"));
+        return;
+      }
+      if (res.ok) {
+        sessionStorage.setItem("rudi.pending_email", email);
+        location.href = "check-your-email.html" + (res.data.mail_sent ? "" : "?mail=failed");
+        return;
+      }
+      if (res.data && res.data.fields) {
+        var f = res.data.fields;
+        if (f.first_name) mark("f-first", false, R.t("reg.name.bad"));
+        if (f.last_name) mark("f-last", false, R.t("reg.name.bad"));
+        if (f.email) mark("f-email", false, R.t("reg.email.bad"));
+        if (f.phone) mark("f-phone", false, R.t("reg.phone.bad"));
+      }
+      R.banner($("#banner"), "bad", R.errorText(res));
+    });
+  });
+
+  paint();
+})();
+</script>
+</body>
+</html>

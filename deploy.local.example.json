@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Copy this file to deploy.local.json and fill in your values, then run:",
+    "    python deploy.py whatsapp",
+    "",
+    "deploy.local.json is git-ignored. Phone numbers and addresses do not belong in source",
+    "(CLAUDE.md §0.5), which is the whole reason this file exists.",
+    "",
+    "Every key is OPTIONAL. A missing one falls back to the template default, which for the",
+    "tester console means 'not configured yet' — the component still deploys and fails closed",
+    "rather than half-working.",
+    "",
+    "No secrets here, ever. The admin password and the call dispatch token live in Secrets",
+    "Manager and are read by the Lambda at runtime; they are never passed as parameters."
+  ],
+
+  "tester_console_origin": "https://meet-rudi.github.io",
+  "tester_console_base": "https://meet-rudi.github.io/start-up-app/tester-console",
+  "tester_mail_from": "Rudi test <test@meetrudi.eu>",
+  "tester_support_email": "test@meetrudi.eu",
+  "tester_wa_number": "+32460000000",
+  "tester_wa_join_phrase": "join example-phrase"
+}

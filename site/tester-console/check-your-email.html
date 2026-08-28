@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — check your email</title>
+<link rel="stylesheet" href="rudi.css" />
+</head>
+<body>
+<div class="center">
+  <div class="card tight" style="max-width:32rem">
+    <div class="brandrow"><div class="brandlogo">R</div>
+      <div><span class="lbl">Meet Rudi</span><h2 data-t="ver.title"></h2></div></div>
+    <div class="banner warn" id="mailwarn" hidden></div>
+    <p class="d" id="lead" style="margin-bottom:1rem"></p>
+    <p class="hint" data-t="ver.nomail"></p>
+    <p class="hint" id="support" style="margin-top:1rem"></p>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="rudi.js"></script>
+<script>
+(function () {
+  "use strict";
+  var R = window.Rudi;
+  R.applyStrings();
+
+  // The address is carried from the previous page only for display. Nothing here reads or
+  // writes any credential — the verification link in the mail is the sole way forward.
+  var email = sessionStorage.getItem("rudi.pending_email") || "";
+  R.$("#lead").textContent = R.t("ver.lead", { email: email || "…" });
+  sessionStorage.removeItem("rudi.pending_email");
+
+  if (R.param("mail") === "failed") {
+    R.banner(R.$("#mailwarn"), "warn", R.t("ver.mailfail"));
+  }
+  var support = R.CFG.SUPPORT_EMAIL;
+  if (support) {
+    R.$("#support").innerHTML = '<a href="mailto:' + support + '">' + support + "</a>";
+  }
+})();
+</script>
+</body>
+</html>

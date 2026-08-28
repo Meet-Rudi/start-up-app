@@ -296,6 +296,13 @@ def place_call(config, dry_run=False, now=None):
         # calling rules already punish repeated unanswered attempts.
         "Timeout": str(config.get("ring_timeout", 30)),
     }
+    if config.get("machine_detection"):
+        # Rudi must never deliver a coaching conversation to somebody's voicemail. Twilio decides
+        # human-vs-machine before running the TwiML and reports the verdict on the status
+        # callback, where meetrudi-call-status hangs up on any machine answer.
+        form["MachineDetection"] = "Enable"
+        form["MachineDetectionTimeout"] = str(config.get("machine_detection_timeout", 15))
+
     if STATUS_URL:
         form["StatusCallback"] = "%s?call_id=%s" % (STATUS_URL, call_id)
         form["StatusCallbackEvent"] = "initiated ringing answered completed"

@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Secret: meetrudi/tester-console/admin  (region eu-central-1)",
+    "",
+    "The password the test team types on admin.html. meetrudi-tester-api compares it in constant",
+    "time and, on success, mints an ordinary session with role=admin - so the admin pane expires",
+    "on idle exactly like a tester's does.",
+    "",
+    "No IAM change is needed: the runner role's ExternalApiSecrets statement already allows",
+    "GetSecretValue on meetrudi* secrets.",
+    "",
+    "Generate a real one and never reuse a password from anywhere else:",
+    "  python -c \"import secrets;print(secrets.token_urlsafe(24))\"",
+    "",
+    "Until this secret exists, every /admin/* route answers 503 admin_not_configured - the pane",
+    "fails CLOSED, it does not fall open."
+  ],
+  "password": "REPLACE-WITH-A-LONG-RANDOM-STRING"
+}

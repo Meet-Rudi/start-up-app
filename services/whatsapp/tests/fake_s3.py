@@ -40,6 +40,12 @@ class FakeS3:
             raise _NoSuchKey("NoSuchKey: %s" % Key)
         return {"Body": _Body(data)}
 
+    def delete_object(self, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
+        # S3 delete is idempotent — removing a key that was never there is a success, and the
+        # tester console relies on that when it burns an already-consumed link.
+        self._store.get(Bucket, {}).pop(Key, None)
+        return {}
+
     def list_objects_v2(self, Bucket: str, Prefix: str = "", Delimiter: str = "",
                         StartAfter: str = "", ContinuationToken: str = "",
                         MaxKeys: int = 1000, **_: Any) -> dict[str, Any]:

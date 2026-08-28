@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Add these statements to the meetrudi-lambda-runner role's inline policy so the tester",
+    "console can work. Console -> IAM -> Roles -> meetrudi-lambda-runner -> its inline policy",
+    "-> Edit -> JSON -> paste these two statements into the existing Statement array.",
+    "",
+    "TesterConsoleMail: meetrudi-tester-api sends the verification and password-reset mails",
+    "through SES in eu-central-1. Scoped to the verified sender identity by the ses:FromAddress",
+    "condition, so a compromised function cannot send as anybody else. Replace",
+    "test@meetrudi.eu with the address actually verified in SES.",
+    "",
+    "TesterConsoleDeleteObjects: sessions and single-use email links are DELETED, not just",
+    "overwritten - a burnt link must stop existing so a replay cannot redeem it, and a killed",
+    "session must be gone rather than merely marked. The base role only grants Get/Put/List, so",
+    "this adds DeleteObject narrowed to the two prefixes that hold ephemeral state. Tester",
+    "profiles, feedback and conversations are deliberately NOT deletable by this role; erasure",
+    "lands in phase 2 as its own reviewed path."
+  ],
+  "Statement": [
+    {
+      "Sid": "TesterConsoleMail",
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "test@meetrudi.eu"
+        }
+      }
+    },
+    {
+      "Sid": "TesterConsoleDeleteObjects",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": [
+        "arn:aws:s3:::meetrudi-ai-data-949753869755/tester-console/sessions/*",
+        "arn:aws:s3:::meetrudi-ai-data-949753869755/tester-console/tokens/*"
+      ]
+    }
+  ]
+}

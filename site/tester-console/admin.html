@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Rudi test — control room</title>
+<link rel="stylesheet" href="rudi.css" />
+</head>
+<body>
+
+<!-- Admin login. The page ships on the same public origin as the tester console, so this form
+     is a convenience only: meetrudi-tester-api checks the admin role on every /admin/* request
+     and a hidden button here protects nothing. -->
+<div class="center" id="gate">
+  <div class="card tight">
+    <div class="brandrow"><div class="brandlogo">R</div>
+      <div><span class="lbl">Internal</span><h2>Control room</h2></div></div>
+    <p class="hint" style="margin-bottom:1.25rem">Test team only.</p>
+    <div class="banner bad" id="gate-banner" hidden></div>
+    <form id="gate-form">
+      <div class="field">
+        <label for="pw">Admin password</label>
+        <input id="pw" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn block" id="gate-btn" type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+
+<div class="shell" id="shell" hidden style="max-width:82rem">
+  <div class="cbar">
+    <div class="who">
+      <div class="av">R</div>
+      <div><b>Test cohort — control room</b><span id="sub">internal</span></div>
+    </div>
+    <div class="sess">
+      <button class="btn ghost sm" id="refresh">Refresh</button>
+      <button class="btn ghost sm" id="export">Export feedback (CSV)</button>
+      <button class="btn ghost sm" id="signout">Sign out</button>
+    </div>
+  </div>
+
+  <div class="banner" id="banner" hidden style="margin:.75rem 1rem 0"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="toolbar">
+    <span class="lbl">Registration</span>
+    <span class="dotstate" id="reg-state"><i></i><span></span></span>
+    <button class="btn danger sm" id="reg-toggle">Close registration</button>
+    <span style="width:1rem"></span>
+    <span class="lbl">Calling</span>
+    <span class="dotstate" id="call-state"><i></i><span></span></span>
+    <button class="btn danger sm" id="call-toggle">Pause all calling</button>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Search name, email or id…" style="max-width:18rem" />
+    <button class="btn ghost sm" data-filter="all">All</button>
+    <button class="btn ghost sm" data-filter="pending">Unverified</button>
+    <button class="btn ghost sm" data-filter="locked">Locked</button>
+    <button class="btn ghost sm" data-filter="spent">Calls spent</button>
+    <button class="btn ghost sm" data-filter="nofeedback">No feedback</button>
+    <span style="flex:1"></span>
+    <span class="hint" id="count"></span>
+  </div>
+
+  <div class="tblwrap">
+    <table class="t">
+      <thead><tr>
+        <th>Tester</th><th>Lang</th><th>State</th><th>Call goal (system-set)</th>
+        <th>Calls</th><th>A / B / C</th><th>Feedback</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div style="padding:.8rem 1rem;border-top:1px solid var(--border);background:var(--sunk)">
+    <span class="hint">
+      The call goal is set by the system and never shown to the tester — Rudi receives it as an
+      input parameter on every call. Transcripts are stored with names and personal details
+      redacted. Data erasure is deliberately not wired here; it lands in phase 2.
+    </span>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="rudi.js"></script>
+<script>
+(function () {
+  "use strict";
+  var R = window.Rudi, $ = R.$, $$ = R.$$;
+
+  // Keep the admin session in its own slot. A team member with the console open in another tab
+  // must not be signed out of it by signing in here, and vice versa.
+  R.useScope("admin");
+
+  var GOALS = ["GET_TO_KNOW", "SET_NEARTERM_GOAL", "GOAL_FOLLOWUP", "REINSTATE_TALK"];
+  var STATE_COLOR = { active: "var(--ok)", pending: "var(--warn)",
+                      locked: "var(--err)", revoked: "var(--err)" };
+  var testers = [];
+  var settings = {};
+  var filter = "all";
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // ---------------------------------------------------------------- gate
+  $("#gate-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("#gate-btn");
+    btn.disabled = true;
+    R.api("POST", "/admin/login", { password: $("#pw").value }).then(function (res) {
+      btn.disabled = false;
+      if (res.ok && res.data.session) {
+        R.setToken(res.data.session);
+        $("#gate").hidden = true;
+        $("#shell").hidden = false;
+        load();
+        return;
+      }
+      R.banner($("#gate-banner"), "bad", res.data.error === "admin_not_configured"
+        ? "Admin password isn't configured yet — create the meetrudi/tester-console/admin secret."
+        : "Wrong password.");
+    });
+  });
+
+  // ---------------------------------------------------------------- load
+  function load() {
+    R.api("GET", "/admin/overview").then(function (res) {
+      if (res.status === 401) { R.clearToken(); location.reload(); return; }
+      if (!res.ok) { R.banner($("#banner"), "bad", "Couldn't load the overview."); return; }
+      settings = res.data.settings || {};
+      renderKpis(res.data.kpis || {}, res.data.quiet_now);
+      renderSwitches();
+    });
+    R.api("GET", "/admin/testers").then(function (res) {
+      if (!res.ok) return;
+      testers = res.data.testers || [];
+      renderRows();
+    });
+  }
+
+  function renderKpis(k, quietNow) {
+    var quotaPct = k.daily_call_cap ? Math.round((k.calls_today / k.daily_call_cap) * 100) : 0;
+    var tiles = [
+      ["Registered", k.registered, (k.unverified || 0) + " unverified"],
+      ["Active now", k.active_sessions, "live sessions"],
+      ["Calls today", k.calls_today, (k.queued || 0) + " queued" + (quietNow ? " · quiet hours" : "")],
+      ["Voice quota", quotaPct + "%", "of " + k.daily_call_cap + " · resets 06:30"],
+      ["Feedback in", k.feedback_in, "of " + k.feedback_possible + " possible"]
+    ];
+    $("#kpis").innerHTML = tiles.map(function (t, i) {
+      var alarm = (i === 3 && quotaPct >= 80) ? " alarm" : "";
+      return '<div class="kpi' + alarm + '"><span class="lbl">' + esc(t[0]) + "</span><b>" +
+        esc(t[1]) + '</b><span class="hint">' + esc(t[2]) + "</span></div>";
+    }).join("");
+  }
+
+  function renderSwitches() {
+    var open = settings.registration_open !== false;
+    var paused = settings.calling_paused === true;
+    var rs = $("#reg-state");
+    rs.style.color = open ? "var(--ok)" : "var(--muted)";
+    rs.querySelector("span").textContent = open
+      ? "Open — " + testers.length + " joined" + (settings.invited_count ? " of " + settings.invited_count + " invited" : "")
+      : "Closed";
+    $("#reg-toggle").textContent = open ? "Close registration" : "Re-open registration";
+    $("#reg-toggle").className = "btn sm " + (open ? "danger" : "ghost");
+
+    var cs = $("#call-state");
+    cs.style.color = paused ? "var(--err)" : "var(--ok)";
+    cs.querySelector("span").textContent = paused ? "Paused" : "Running";
+    $("#call-toggle").textContent = paused ? "Resume calling" : "Pause all calling";
+    $("#call-toggle").className = "btn sm " + (paused ? "ghost" : "danger");
+  }
+
+  function matches(t) {
+    var q = $("#search").value.trim().toLowerCase();
+    if (q && [t.name, t.email, t.tester_id].join(" ").toLowerCase().indexOf(q) === -1) return false;
+    if (filter === "pending") return t.status === "pending";
+    if (filter === "locked") return t.status === "locked" || t.status === "revoked";
+    if (filter === "spent") return t.calls_used >= t.calls_max;
+    if (filter === "nofeedback") return Object.keys(t.feedback || {}).length === 0;
+    return true;
+  }
+
+  function feedbackCell(t) {
+    var fb = t.feedback || {};
+    var parts = ["chat", "call", "whatsapp"].map(function (track) {
+      var rec = fb[track];
+      if (!rec) return '<span class="tag">' + track[0].toUpperCase() + " –</span>";
+      var score = (rec.score === null || rec.score === undefined) ? "–" : rec.score;
+      var title = rec.text ? esc(rec.text) : "no comment";
+      return '<span class="tag" title="' + title + '" style="border-color:var(--secondary);color:var(--secondary)">' +
+        track[0].toUpperCase() + " " + score + "</span>";
+    });
+    return parts.join(" ");
+  }
+
+  function actionsFor(t) {
+    var acts = [];
+    if (t.status === "pending") {
+      acts.push(["resend_verification", "Resend verification", "btn xs"]);
+      acts.push(["force_verify", "Force-verify", "btn ghost xs"]);
+    }
+    if (t.status === "locked") acts.push(["unlock", "Unlock", "btn xs"]);
+    if (t.status !== "pending") acts.push(["send_reset", "Send reset link", "btn ghost xs"]);
+    if (t.calls_used > 0) acts.push(["reset_call_limit", "Reset call limit", "btn ghost xs"]);
+    if (t.calls_used >= t.calls_max) acts.push(["grant_calls", "+5 calls", "btn ghost xs"]);
+    if (t.queue_position >= 0) acts.push(["drop_from_queue", "Drop from queue", "btn ghost xs"]);
+    acts.push(["kill_session", "Kill session", "btn ghost xs"]);
+    acts.push(t.status === "revoked"
+      ? ["reinstate", "Reinstate", "btn ghost xs"]
+      : ["revoke", "Revoke", "btn danger xs"]);
+    return acts.map(function (a) {
+      return '<button class="' + a[2] + '" data-act="' + a[0] + '" data-tid="' + esc(t.tester_id) + '">' +
+        esc(a[1]) + "</button>";
+    }).join("");
+  }
+
+  function renderRows() {
+    var shown = testers.filter(matches);
+    $("#count").textContent = shown.length + " of " + testers.length + " testers";
+    $("#rows").innerHTML = shown.map(function (t) {
+      var pips = "";
+      for (var i = 0; i < t.calls_max; i++) pips += '<i class="' + (i < t.calls_used ? "used" : "") + '"></i>';
+      var queue = t.queue_position > 0 ? " · queue #" + t.queue_position
+        : (t.queue_position === 0 ? " · on the line" : "");
+      var goalSelect = '<select data-goal="' + esc(t.tester_id) + '" style="font-size:.75rem;padding:.2rem .3rem">' +
+        GOALS.map(function (g) {
+          return '<option' + (g === t.call_goal ? " selected" : "") + ">" + g + "</option>";
+        }).join("") + "</select>";
+      return "<tr>" +
+        "<td><b>" + esc(t.name) + '</b><div class="hint">' + esc(t.email) + "</div>" +
+        '<div class="hint mono">' + esc(t.phone_masked) + "</div></td>" +
+        '<td><span class="tag">' + esc(t.locale) + "</span></td>" +
+        '<td><span class="dotstate" style="color:' + (STATE_COLOR[t.status] || "var(--muted)") + '"><i></i>' +
+        esc(t.status) + "</span>" + '<div class="hint">' + esc((t.last_login_at || t.created_at || "").slice(0, 16).replace("T", " ")) + queue + "</div></td>" +
+        "<td>" + goalSelect + "</td>" +
+        '<td><span class="pips">' + pips + '</span><div class="hint">' + t.calls_used + " / " + t.calls_max +
+        (t.last_call_outcome ? " · " + esc(t.last_call_outcome) : "") + "</div></td>" +
+        "<td>" + ["chat", "call", "whatsapp"].map(function (n) {
+          return '<span class="chip ' + esc(t.tracks[n]) + '">' + n[0].toUpperCase() + "</span>";
+        }).join(" ") + "</td>" +
+        "<td>" + feedbackCell(t) + "</td>" +
+        '<td class="acts">' + actionsFor(t) + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
+  // ---------------------------------------------------------------- actions
+  $("#rows").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    var act = btn.dataset.act;
+    if (act === "revoke" && !confirm("Revoke this tester? Their sessions end immediately and they can't log back in.")) return;
+    btn.disabled = true;
+    R.api("POST", "/admin/action", { action: act, tester_id: btn.dataset.tid, calls: 5 })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { R.banner($("#banner"), "bad", "Action failed: " + (res.data.error || res.status)); return; }
+        var msg = act + " done";
+        if (res.data.result && res.data.result.mail_sent === false) {
+          msg = act + " done, but the mail could not be sent — check the SES sender identity.";
+        }
+        R.banner($("#banner"), res.data.result && res.data.result.mail_sent === false ? "warn" : "good", msg);
+        load();
+      });
+  });
+
+  $("#rows").addEventListener("change", function (e) {
+    var sel = e.target.closest("[data-goal]");
+    if (!sel) return;
+    R.api("POST", "/admin/action", {
+      action: "set_call_goal", tester_id: sel.dataset.goal, call_goal: sel.value
+    }).then(function (res) {
+      R.banner($("#banner"), res.ok ? "good" : "bad",
+        res.ok ? "Call goal set to " + sel.value : "Couldn't change the call goal.");
+    });
+  });
+
+  $("#reg-toggle").addEventListener("click", function () {
+    var open = settings.registration_open !== false;
+    if (open && !confirm("Close registration? The sign-up page stops accepting new testers.")) return;
+    R.api("POST", "/admin/settings", { registration_open: !open }).then(function () { load(); });
+  });
+
+  $("#call-toggle").addEventListener("click", function () {
+    R.api("POST", "/admin/settings", { calling_paused: settings.calling_paused !== true })
+      .then(function () { load(); });
+  });
+
+  $("#search").addEventListener("input", renderRows);
+  $$("[data-filter]").forEach(function (b) {
+    b.addEventListener("click", function () { filter = b.dataset.filter; renderRows(); });
+  });
+  $("#refresh").addEventListener("click", load);
+  $("#signout").addEventListener("click", function () {
+    R.api("POST", "/logout", {}).then(function () { R.clearToken(); location.reload(); });
+  });
+
+  // ---------------------------------------------------------------- export
+  $("#export").addEventListener("click", function () {
+    var head = ["tester_id", "name", "email", "locale", "status", "call_goal",
+                "calls_used", "track", "score", "text", "sent_at"];
+    var lines = [head.join(",")];
+    testers.forEach(function (t) {
+      Object.keys(t.feedback || {}).forEach(function (track) {
+        var f = t.feedback[track];
+        lines.push([t.tester_id, t.name, t.email, t.locale, t.status, t.call_goal, t.calls_used,
+                    track, f.score === null ? "" : f.score, f.text || "", f.sent_at || ""]
+          .map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(","));
+      });
+    });
+    var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "rudi-tester-feedback.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // An existing admin session survives a refresh; try it before showing the gate.
+  if (R.token()) {
+    R.api("GET", "/admin/overview").then(function (res) {
+      if (res.ok) { $("#gate").hidden = true; $("#shell").hidden = false; load(); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

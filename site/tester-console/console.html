@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — tester console</title>
+<link rel="stylesheet" href="rudi.css" />
+</head>
+<body>
+
+<!-- Do's and don'ts. Shown on EVERY entry, not just the first: the acknowledgement is per
+     session, and the two "that's correct behaviour" lines pre-empt the most likely false bug
+     reports (Rudi refusing medical advice, Rudi ending a steered call). -->
+<div class="modal" id="dd" hidden>
+  <div class="mcard" role="dialog" aria-modal="true" aria-labelledby="dd-title">
+    <header>
+      <span class="lbl" data-t="con.dd.eyebrow"></span>
+      <h3 id="dd-title" data-t="con.dd.title"></h3>
+      <p class="d" style="margin-top:.5rem" data-t="con.dd.rec"></p>
+    </header>
+    <div class="body">
+      <div class="dl do">
+        <h4 data-t="con.dd.do"></h4>
+        <ul><li data-t="con.dd.do1"></li><li data-t="con.dd.do2"></li>
+            <li data-t="con.dd.do3"></li><li data-t="con.dd.do4"></li></ul>
+      </div>
+      <div class="dl dont">
+        <h4 data-t="con.dd.dont"></h4>
+        <ul><li data-t="con.dd.dont1"></li><li data-t="con.dd.dont2"></li>
+            <li data-t="con.dd.dont3"></li><li data-t="con.dd.dont4"></li>
+            <li data-t="con.dd.dont5"></li></ul>
+      </div>
+    </div>
+    <footer>
+      <label class="checkline" style="margin:0">
+        <input type="checkbox" id="dd-ack" /><span data-t="con.dd.ack"></span>
+      </label>
+      <button class="btn" id="dd-start" data-t="con.dd.start" disabled></button>
+    </footer>
+  </div>
+</div>
+
+<div class="shell" id="shell" hidden>
+  <div class="cbar">
+    <div class="who">
+      <div class="av" id="av">–</div>
+      <div><b id="who-name"></b><span id="who-sub"></span></div>
+    </div>
+    <div class="sess">
+      <span><span data-t="con.session"></span> <span class="num" id="clock">--:--</span></span>
+      <button class="btn ghost sm" id="extend" data-t="con.extend"></button>
+      <button class="btn ghost sm" id="logout" data-t="con.logout"></button>
+    </div>
+  </div>
+
+  <div class="goal"><span class="lbl" data-t="con.goal"></span><p id="goal-text"></p></div>
+  <div class="banner warn" id="top-banner" hidden style="margin:.75rem 1.1rem 0"></div>
+
+  <!-- ---------------- Track A: chat ---------------- -->
+  <section class="track">
+    <div class="tmain">
+      <div class="thead">
+        <div><span class="lbl" data-t="con.trackA"></span><h3 data-t="con.chat.title"></h3></div>
+        <span class="chip not_started" id="chip-chat"></span>
+      </div>
+      <div class="tbody">
+        <div>
+          <div class="thread" id="thread"></div>
+          <form class="composer" id="chat-form">
+            <input type="text" id="chat-input" data-t-ph="con.chat.ph" autocomplete="off" />
+            <button class="btn sm" type="submit" id="chat-send" data-t="con.chat.send"></button>
+          </form>
+          <p class="hint" id="chat-status" style="margin-top:.35rem">&nbsp;</p>
+        </div>
+        <p class="d" data-t="con.chat.lead"></p>
+      </div>
+    </div>
+    <div class="fb" data-track="chat">
+      <span class="lbl" data-t="con.fb.chat"></span>
+      <span class="hint"><span data-t="con.fb.scale.chat"></span> <b data-t="con.fb.scale.hint"></b></span>
+      <div class="scale" data-scale></div>
+      <textarea data-fb data-t-ph="con.fb.ph.chat" maxlength="1000"></textarea>
+      <div class="fbfoot"><span class="cnt"><span data-cnt>0</span>/1000</span>
+        <span class="sent" data-sent hidden></span></div>
+      <button class="btn sm" data-send data-t="con.fb.send" disabled></button>
+    </div>
+  </section>
+
+  <!-- ---------------- Track B: call ---------------- -->
+  <section class="track">
+    <div class="tmain">
+      <div class="thead">
+        <div><span class="lbl" data-t="con.trackB"></span><h3 data-t="con.call.title"></h3></div>
+        <span class="chip not_started" id="chip-call"></span>
+      </div>
+      <div class="tbody">
+        <div class="dial">
+          <div class="state" id="call-state" hidden></div>
+          <span class="lbl" id="call-willcall" data-t="con.call.willcall"></span>
+          <span class="locknum mono" id="call-number"></span>
+          <span class="lockrow" data-t="con.call.locked"></span>
+          <button class="btn pink" id="call-btn" style="align-self:stretch" data-t="con.call.now"></button>
+          <button class="btn ghost sm" id="call-leave" hidden data-t="con.call.leave"></button>
+          <div class="quota"><span class="pips" id="pips"></span><span id="pips-text"></span></div>
+          <span class="hint" id="call-hint"></span>
+        </div>
+        <p class="d" data-t="con.call.lead"></p>
+      </div>
+    </div>
+    <div class="fb" data-track="call">
+      <span class="lbl" data-t="con.fb.call"></span>
+      <span class="hint"><span data-t="con.fb.scale.call"></span> <b data-t="con.fb.scale.hint"></b></span>
+      <div class="scale" data-scale></div>
+      <textarea data-fb data-t-ph="con.fb.ph.call" maxlength="1000"></textarea>
+      <div class="fbfoot"><span class="cnt"><span data-cnt>0</span>/1000</span>
+        <span class="sent" data-sent hidden></span></div>
+      <button class="btn sm" data-send data-t="con.fb.send" disabled></button>
+    </div>
+  </section>
+
+  <!-- ---------------- Track C: WhatsApp ---------------- -->
+  <section class="track">
+    <div class="tmain">
+      <div class="thead">
+        <div><span class="lbl" data-t="con.trackC"></span><h3 data-t="con.wa.title"></h3></div>
+        <span class="chip not_started" id="chip-whatsapp"></span>
+      </div>
+      <div class="tbody">
+        <div style="display:flex;flex-direction:column;gap:.6rem">
+          <ol class="steps3">
+            <li id="wa-step1"></li>
+            <li data-t="con.wa.step2"></li>
+          </ol>
+          <span class="kw" style="align-self:flex-start">
+            <b id="wa-phrase"></b>
+            <button class="btn ghost xs" id="wa-copy" data-t="con.wa.copy"></button>
+          </span>
+          <ol class="steps3" style="counter-reset:s 2"><li data-t="con.wa.step3"></li></ol>
+          <button class="btn ghost sm" id="wa-done" style="align-self:flex-start" data-t="con.wa.done"></button>
+        </div>
+        <p class="d" id="wa-lead"></p>
+      </div>
+    </div>
+    <div class="fb" data-track="whatsapp">
+      <span class="lbl" data-t="con.fb.whatsapp"></span>
+      <span class="hint"><span data-t="con.fb.scale.whatsapp"></span> <b data-t="con.fb.scale.hint"></b></span>
+      <div class="scale" data-scale></div>
+      <textarea data-fb data-t-ph="con.fb.ph.whatsapp" maxlength="1000"></textarea>
+      <div class="fbfoot"><span class="cnt"><span data-cnt>0</span>/1000</span>
+        <span class="sent" data-sent hidden></span></div>
+      <button class="btn sm" data-send data-t="con.fb.send" disabled></button>
+    </div>
+  </section>
+
+  <div style="padding:.8rem 1.1rem;border-top:1px solid var(--border);background:var(--sunk)">
+    <span class="hint" id="footer-support"></span>
+  </div>
+</div>
+
+<!-- Shown when the console can't load at all. Without it a failed boot leaves a blank page,
+     which reads as "the whole site is broken" rather than "sign in again". -->
+<div class="center" id="boot-error" hidden>
+  <div class="card tight">
+    <div class="brandrow"><div class="brandlogo">R</div><div><span class="lbl">Meet Rudi</span></div></div>
+    <div class="banner bad" id="boot-message"></div>
+    <a class="btn block" href="index.html"
+       style="display:block;text-align:center;text-decoration:none" data-t="con.relogin"></a>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="rudi.js"></script>
+<script>
+(function () {
+  "use strict";
+  var R = window.Rudi, $ = R.$, $$ = R.$$;
+
+  if (!R.token()) { location.href = "index.html"; return; }
+
+  var ME = null;
+  var IDLE_SECONDS = 600;
+  var idleLeft = IDLE_SECONDS;
+  var callTimer = null;
+
+  // ---------------------------------------------------------------- session clock
+  // The server is the authority on expiry; this countdown only makes it visible, and every
+  // interaction resets it locally the same way a request resets it server-side.
+  function resetIdle() { idleLeft = IDLE_SECONDS; }
+  setInterval(function () {
+    idleLeft--;
+    $("#clock").textContent = R.hhmm(idleLeft);
+    if (idleLeft <= 0) { R.clearToken(); location.href = "index.html?expired=1"; }
+  }, 1000);
+  ["click", "keydown"].forEach(function (evt) {
+    document.addEventListener(evt, resetIdle, true);
+  });
+
+  // ---------------------------------------------------------------- boot
+  function paintTracks() {
+    ["chat", "call", "whatsapp"].forEach(function (name) {
+      var state = (ME.tracks || {})[name] || "not_started";
+      var chip = $("#chip-" + name);
+      chip.className = "chip " + state;
+      chip.textContent = { not_started: "•", in_progress: "…", done: "✓" }[state] +
+        " " + R.t("con.state." + state);
+    });
+  }
+
+  function paintCallLedger() {
+    var pips = $("#pips");
+    pips.innerHTML = "";
+    for (var i = 0; i < ME.calls_max; i++) {
+      var el = document.createElement("i");
+      if (i < ME.calls_used) el.className = "used";
+      pips.appendChild(el);
+    }
+    $("#pips-text").textContent = R.t("con.call.used", { used: ME.calls_used, max: ME.calls_max });
+  }
+
+  function bootFailed(res) {
+    R.applyStrings();
+    $("#shell").hidden = true;
+    $("#boot-error").hidden = false;
+    $("#boot-message").textContent = R.errorText(res);
+  }
+
+  function boot() {
+    R.api("GET", "/me").then(function (res) {
+      if (R.guard(res)) return;
+      // Anything else — a forbidden session, a network drop, a 500 — has to say so. Leaving the
+      // shell hidden with no message is the one outcome a tester cannot act on.
+      if (!res.ok) { bootFailed(res); return; }
+
+      ME = res.data.me;
+      if (ME.locale) R.setLocale(ME.locale);
+      R.applyStrings();
+
+      $("#shell").hidden = false;
+      $("#av").textContent = ME.initials;
+      $("#who-name").textContent = ME.first_name;
+      $("#who-sub").textContent = ME.tester_id.slice(0, 12) + " · " + ME.locale;
+      $("#goal-text").textContent = "“" + ME.goal + "”";
+      $("#call-number").textContent = ME.phone;
+      paintTracks();
+      paintCallLedger();
+
+      var wa = res.data.whatsapp || {};
+      $("#wa-step1").textContent = R.t("con.wa.step1", { number: wa.number || "—" });
+      $("#wa-phrase").textContent = wa.join_phrase || "—";
+      $("#wa-lead").textContent = R.t("con.wa.lead", { phone: ME.phone });
+
+      var support = res.data.support_email || R.CFG.SUPPORT_EMAIL;
+      if (support) {
+        $("#footer-support").innerHTML = '<a href="mailto:' + support + '">' + support + "</a>";
+      }
+      if (res.data.calling_paused) {
+        setCallState("warn", R.t("con.call.paused"), true);
+      }
+
+      // Pre-fill any feedback already sent, so a returning tester edits rather than retypes.
+      var fb = res.data.feedback || {};
+      Object.keys(fb).forEach(function (track) {
+        var card = $('.fb[data-track="' + track + '"]');
+        if (!card) return;
+        $("[data-fb]", card).value = fb[track].text || "";
+        R.setScale($("[data-scale]", card), fb[track].score);
+        updateFeedback(card);
+      });
+
+      loadThread();
+      pollCall();
+      if (!res.data.acked) openModal();
+    });
+  }
+
+  // ---------------------------------------------------------------- do's and don'ts
+  function openModal() {
+    $("#dd").hidden = false;
+    $("#dd-ack").addEventListener("change", function () {
+      $("#dd-start").disabled = !this.checked;
+    });
+    $("#dd-start").addEventListener("click", function () {
+      R.api("POST", "/ack", {}).then(function () { $("#dd").hidden = true; });
+    });
+  }
+
+  // ---------------------------------------------------------------- track A: chat
+  function bubble(m) {
+    var el = document.createElement("div");
+    el.className = "bub " + (m.direction === "out" ? "in" : "out");
+    el.textContent = m.text || "";
+    var time = document.createElement("time");
+    time.textContent = (m.at || "").slice(11, 16);
+    el.appendChild(time);
+    return el;
+  }
+
+  function renderThread(messages) {
+    var thread = $("#thread");
+    thread.innerHTML = "";
+    messages.forEach(function (m) { thread.appendChild(bubble(m)); });
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function loadThread() {
+    R.api("GET", "/chat").then(function (res) {
+      if (R.guard(res)) return;
+      if (res.ok) renderThread(res.data.messages || []);
+    });
+  }
+
+  $("#chat-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var input = $("#chat-input"), text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    $("#chat-send").disabled = true;
+    $("#chat-status").textContent = R.t("con.chat.busy");
+
+    R.api("POST", "/chat", { text: text }).then(function (res) {
+      $("#chat-send").disabled = false;
+      $("#chat-status").innerHTML = "&nbsp;";
+      if (R.guard(res)) return;
+      if (!res.ok) {
+        $("#chat-status").textContent = R.errorText(res);
+        input.value = text;                       // give them their sentence back to retry
+        return;
+      }
+      (res.data.messages || []).forEach(function (m) { $("#thread").appendChild(bubble(m)); });
+      $("#thread").scrollTop = $("#thread").scrollHeight;
+      if (ME.tracks) { ME.tracks.chat = "in_progress"; paintTracks(); }
+    });
+  });
+
+  // ---------------------------------------------------------------- track B: call
+  function setCallState(kind, text, hideButton) {
+    var el = $("#call-state");
+    el.className = "state " + (kind || "");
+    el.textContent = text;
+    el.hidden = !text;
+    $("#call-btn").hidden = !!hideButton;
+  }
+
+  function applyCallState(d) {
+    var state = d.state;
+    $("#call-leave").hidden = state !== "queued";
+    $("#call-hint").textContent = "";
+
+    if (state === "idle") {
+      var last = d.last_outcome || ME.last_call_outcome;
+      if (last === "voicemail") setCallState("warn", R.t("con.call.voicemail"));
+      else if (last === "no_answer") setCallState("warn", R.t("con.call.noanswer"));
+      else if (last === "failed") setCallState("bad", R.t("con.call.failed"));
+      else if (last === "connected") setCallState("ok", R.t("con.call.done"));
+      else setCallState("", "");
+      $("#call-hint").textContent = R.t("con.call.free");
+      $("#call-btn").hidden = false;
+      $("#call-btn").disabled = ME.calls_left <= 0;
+      return;
+    }
+    if (state === "queued") {
+      setCallState("warn", R.t("con.call.queued", { n: d.position }), true);
+      return;
+    }
+    if (state === "dialing") { setCallState("ok", R.t("con.call.dialing"), true); return; }
+    if (state === "on_call") { setCallState("ok", R.t("con.call.oncall"), true); return; }
+    if (state === "finished") {
+      ME.calls_used = d.calls_used;
+      ME.calls_left = d.calls_left;
+      ME.last_call_outcome = d.outcome;
+      paintCallLedger();
+      if (d.outcome === "connected") { ME.tracks.call = "done"; paintTracks(); }
+      applyCallState({ state: "idle", last_outcome: d.outcome });
+      return;
+    }
+    if (state === "quiet_hours") {
+      setCallState("", R.t("con.call.quiet", { start: "21:30", end: "06:30" }), true);
+      $("#call-hint").textContent = R.t("con.call.quiet.lead");
+      return;
+    }
+    if (state === "quota_spent") {
+      setCallState("bad", R.t("con.call.quota"), true);
+      $("#call-hint").textContent = R.t("con.call.quota.lead", { when: R.clockOf(d.next_slot) });
+      return;
+    }
+    if (state === "calls_spent") {
+      setCallState("bad", R.t("con.call.spent", { max: ME.calls_max }), true);
+      $("#call-hint").textContent = R.t("con.call.spent.lead");
+      return;
+    }
+    if (state === "paused") { setCallState("warn", R.t("con.call.paused"), true); return; }
+    if (state === "failed") { setCallState("bad", R.t("con.call.failed")); }
+  }
+
+  function pollCall() {
+    R.api("GET", "/call/status").then(function (res) {
+      if (R.guard(res)) return;
+      if (!res.ok) return;
+      applyCallState(res.data);
+      // Poll only while something is actually happening; an idle console makes no requests, so
+      // it never keeps a session alive on its own.
+      var live = ["queued", "dialing", "on_call"].indexOf(res.data.state) !== -1;
+      clearTimeout(callTimer);
+      if (live) callTimer = setTimeout(pollCall, 5000);
+    });
+  }
+
+  $("#call-btn").addEventListener("click", function () {
+    var btn = this;
+    btn.disabled = true;
+    R.api("POST", "/call", {}).then(function (res) {
+      btn.disabled = false;
+      if (R.guard(res)) return;
+      if (!res.ok && !res.data.state) {
+        setCallState("bad", R.errorText(res));
+        return;
+      }
+      applyCallState(res.data);
+      if (["queued", "dialing"].indexOf(res.data.state) !== -1) {
+        clearTimeout(callTimer);
+        callTimer = setTimeout(pollCall, 5000);
+      }
+      if (ME.tracks) { ME.tracks.call = "in_progress"; paintTracks(); }
+    });
+  });
+
+  $("#call-leave").addEventListener("click", function () {
+    R.api("POST", "/call/leave", {}).then(function () {
+      clearTimeout(callTimer);
+      applyCallState({ state: "idle" });
+    });
+  });
+
+  // ---------------------------------------------------------------- track C: WhatsApp
+  $("#wa-copy").addEventListener("click", function () {
+    var btn = this;
+    navigator.clipboard.writeText($("#wa-phrase").textContent).then(function () {
+      btn.textContent = R.t("con.wa.copied");
+      setTimeout(function () { btn.textContent = R.t("con.wa.copy"); }, 1500);
+    });
+  });
+
+  $("#wa-done").addEventListener("click", function () {
+    // Self-reported: the tester tells us they've started the thread. The authoritative signal is
+    // their inbound message arriving on the WhatsApp side; this just moves their own chip.
+    R.api("POST", "/feedback", { track: "whatsapp", text: "", score: null }).then(function () {});
+    ME.tracks.whatsapp = "in_progress";
+    paintTracks();
+  });
+
+  // ---------------------------------------------------------------- feedback
+  function updateFeedback(card) {
+    var ta = $("[data-fb]", card);
+    var hasScore = R.scaleValue($("[data-scale]", card)) !== null;
+    $("[data-cnt]", card).textContent = ta.value.length;
+    $("[data-send]", card).disabled = !(ta.value.trim().length > 0 || hasScore);
+    $("[data-sent]", card).hidden = true;
+  }
+
+  $$(".fb").forEach(function (card) {
+    R.buildScale($("[data-scale]", card), function () { updateFeedback(card); });
+    $("[data-fb]", card).addEventListener("input", function () { updateFeedback(card); });
+
+    $("[data-send]", card).addEventListener("click", function () {
+      var btn = this;
+      btn.disabled = true;
+      R.api("POST", "/feedback", {
+        track: card.dataset.track,
+        score: R.scaleValue($("[data-scale]", card)),
+        text: $("[data-fb]", card).value.trim()
+      }).then(function (res) {
+        if (R.guard(res)) return;
+        if (res.ok) {
+          var sent = $("[data-sent]", card);
+          sent.textContent = R.t("con.fb.sent");
+          sent.hidden = false;
+        } else {
+          btn.disabled = false;
+          R.banner($("#top-banner"), "bad", R.errorText(res));
+        }
+      });
+    });
+    updateFeedback(card);
+  });
+
+  // ---------------------------------------------------------------- session controls
+  $("#extend").addEventListener("click", function () {
+    // Any authenticated request slides the server's idle window; /me is the cheapest one.
+    R.api("GET", "/me").then(function (res) { if (!R.guard(res)) resetIdle(); });
+  });
+  $("#logout").addEventListener("click", function () {
+    R.api("POST", "/logout", {}).then(function () {
+      R.clearToken();
+      location.href = "index.html";
+    });
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="nl-BE">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Meet Rudi — tester log-in</title>
+<link rel="stylesheet" href="rudi.css" />
+</head>
+<body>
+<div class="center">
+  <div class="card tight">
+    <div class="brandrow"><div class="brandlogo">R</div>
+      <div><span class="lbl">Meet Rudi</span><h2 id="title"></h2></div></div>
+    <p class="hint" id="lead" style="margin-bottom:1.25rem"></p>
+    <div class="banner" id="banner" hidden></div>
+
+    <!-- log in -->
+    <form id="login" novalidate>
+      <div class="field">
+        <label for="email" data-t="log.email"></label>
+        <input id="email" type="email" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="password" data-t="log.password"></label>
+        <input id="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn block" id="submit" type="submit" data-t="log.submit"></button>
+      <p class="hint" style="margin-top:1rem;display:flex;justify-content:space-between;gap:.75rem">
+        <a href="#" id="forgot-link" data-t="log.forgot"></a>
+        <a href="register.html" data-t="log.register"></a>
+      </p>
+    </form>
+
+    <!-- forgotten password -->
+    <form id="forgot" novalidate hidden>
+      <div class="field">
+        <label for="fmail" data-t="log.email"></label>
+        <input id="fmail" type="email" autocomplete="username" required />
+      </div>
+      <button class="btn block" id="fsubmit" type="submit" data-t="log.forgot.submit"></button>
+      <p class="hint" style="margin-top:1rem"><a href="#" id="back-link" data-t="log.back"></a></p>
+    </form>
+
+    <p class="hint" id="support" style="margin-top:1.25rem"></p>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="rudi.js"></script>
+<script>
+(function () {
+  "use strict";
+  var R = window.Rudi, $ = R.$;
+
+  function showLogin() {
+    $("#login").hidden = false;
+    $("#forgot").hidden = true;
+    $("#title").textContent = R.t("log.title");
+    $("#lead").textContent = R.t("log.lead");
+    document.title = R.t("log.title");
+  }
+  function showForgot() {
+    $("#login").hidden = true;
+    $("#forgot").hidden = false;
+    $("#title").textContent = R.t("log.forgot.title");
+    $("#lead").textContent = R.t("log.forgot.lead");
+    $("#fmail").value = $("#email").value;
+  }
+
+  R.applyStrings();
+  showLogin();
+
+  // Arriving here from an expired or revoked session should say so — landing on a login form
+  // with no explanation reads as a bug.
+  if (R.param("expired")) R.banner($("#banner"), "warn", R.t("con.expired"));
+  if (R.param("revoked")) R.banner($("#banner"), "bad", R.t("err.revoked"));
+
+  var support = R.CFG.SUPPORT_EMAIL;
+  if (support) $("#support").innerHTML = '<a href="mailto:' + support + '">' + support + "</a>";
+
+  $("#forgot-link").addEventListener("click", function (e) { e.preventDefault(); showForgot(); });
+  $("#back-link").addEventListener("click", function (e) { e.preventDefault(); showLogin(); });
+
+  $("#login").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("#submit");
+    btn.disabled = true;
+    btn.textContent = R.t("app.loading");
+    R.api("POST", "/login", { email: $("#email").value.trim(), password: $("#password").value })
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = R.t("log.submit");
+        if (res.ok && res.data.session) {
+          R.setToken(res.data.session);
+          if (res.data.me && res.data.me.locale) R.setLocale(res.data.me.locale);
+          location.href = "console.html";
+          return;
+        }
+        R.banner($("#banner"), "bad", R.errorText(res));
+      });
+  });
+
+  $("#forgot").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("#fsubmit");
+    btn.disabled = true;
+    btn.textContent = R.t("app.loading");
+    // The API answers 200 whether or not the address is known, so this message is always the
+    // same — the page must not become a way to discover who is in the cohort.
+    R.api("POST", "/forgot", { email: $("#fmail").value.trim() }).then(function () {
+      btn.disabled = false;
+      btn.textContent = R.t("log.forgot.submit");
+      R.banner($("#banner"), "good", R.t("log.sent"));
+      showLogin();
+    });
+  });
+})();
+</script>
+</body>
+</html>

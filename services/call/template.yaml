@@ -127,6 +127,7 @@ Resources:
           DISPATCH_SECRET: meetrudi/call/dispatch-token
           TWILIO_REGION: ie1
           WS_URL: !Sub "wss://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
+          STATUS_URL: !GetAtt StatusFunctionUrl.FunctionUrl
           QUIET_START: "21:30"
           QUIET_END: "06:30"
           DEFAULT_TZ: Europe/Brussels
@@ -137,6 +138,41 @@ Resources:
           AllowMethods: [POST]
           AllowHeaders: [content-type]
 
+  # ------------------------------------------------------------------ status callbacks
+  StatusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-call-status
+      RetentionInDays: 30
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: StatusLogGroup
+    Properties:
+      FunctionName: meetrudi-call-status
+      Description: >
+        Twilio call status callbacks. Hangs up on any answering-machine verdict so Rudi never
+        talks to voicemail, and records the terminal outcome the tester console reads to decide
+        whether a call counts against a tester's five.
+      Handler: status.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 15
+      MemorySize: 256
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          CALL_PREFIX: calls
+          TWILIO_SECRET: meetrudi/twilio/voice
+          TWILIO_REGION: ie1
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: ["*"]
+          AllowMethods: [POST]
+          AllowHeaders: [content-type]
+
 Outputs:
   WebSocketUrl:
     Description: ConversationRelay endpoint (goes into the TwiML)
@@ -144,3 +180,6 @@ Outputs:
   DispatchUrl:
     Description: Function URL for placing a call
     Value: !GetAtt DispatcherFunctionUrl.FunctionUrl
+  StatusUrl:
+    Description: Twilio status callback endpoint (wired into the dispatcher automatically)
+    Value: !GetAtt StatusFunctionUrl.FunctionUrl

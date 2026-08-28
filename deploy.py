@@ -16,6 +16,7 @@ Deploy `base` once before `ask-ai`.
 
 import os
 import sys
+import json
 import shutil
 import subprocess
 
@@ -59,6 +60,18 @@ COMPONENTS = {
         "build": True,
         "seed_dir": "services/whatsapp/seed",   # WhatsApp-aware prompt(s)
         "seed_bucket_from": "meetrudi-base",
+        # Tester console settings. The dispatch URL is read straight off the call stack so the
+        # two are never wired together by hand; the rest come from deploy.local.json because
+        # they are phone numbers and addresses, which do not belong in git.
+        "params": {
+            "CallDispatchUrl": {"from_stack": ("meetrudi-call", "DispatchUrl")},
+            "TesterConsoleOrigin": {"from_config": "tester_console_origin"},
+            "TesterConsoleBase": {"from_config": "tester_console_base"},
+            "TesterMailFrom": {"from_config": "tester_mail_from"},
+            "TesterSupportEmail": {"from_config": "tester_support_email"},
+            "TesterWaNumber": {"from_config": "tester_wa_number"},
+            "TesterWaJoinPhrase": {"from_config": "tester_wa_join_phrase"},
+        },
     },
     "registration": {
         "stack": "meetrudi-registration",
@@ -87,6 +100,27 @@ COMPONENTS = {
         # rudi-chat and whatsapp already seed, so there is one source of truth for Rudi's words.
     },
 }
+
+
+# Deployment settings that must NOT live in source: phone numbers, sender addresses, the join
+# phrase (CLAUDE.md §0.5 — no numbers in source). They live in a git-ignored file at the repo
+# root, and every one of them is optional: a missing value falls back to the template default,
+# which for the tester console means "not configured yet" and a component that fails closed
+# rather than half-working.
+LOCAL_CONFIG = os.path.join(ROOT, "deploy.local.json")
+
+
+def _local_config():
+    if not os.path.exists(LOCAL_CONFIG):
+        return {}
+    try:
+        with open(LOCAL_CONFIG, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (ValueError, OSError) as e:
+        print("!! %s is unreadable (%s) — deploying with template defaults."
+              % (os.path.basename(LOCAL_CONFIG), e))
+        return {}
 
 
 def _exe(name):
@@ -150,6 +184,37 @@ def _build(comp):
     return os.path.join(build_dir, "template.yaml")
 
 
+def _parameter_overrides(comp):
+    """Resolve this component's CloudFormation parameters.
+
+    Two sources, neither of which puts a phone number or an address in git:
+      - `from_stack`: read another stack's output (e.g. the call dispatcher's Function URL), so
+        the operator never copies a URL between stacks by hand.
+      - `from_config`: read deploy.local.json.
+    A value that resolves to nothing is omitted, leaving the template's own default in place.
+    """
+    spec = comp.get("params") or {}
+    if not spec:
+        return []
+    cfg = _local_config()
+    overrides = []
+    for key, source in sorted(spec.items()):
+        if "from_stack" in source:
+            stack, output = source["from_stack"]
+            value = _stack_output(stack, output)
+            if value in ("", "None"):
+                print("   (%s: %s has no %s output yet — using the template default)"
+                      % (key, stack, output))
+                continue
+        else:
+            value = str(cfg.get(source["from_config"], "")).strip()
+            if not value:
+                print("   (%s: not set in deploy.local.json — using the template default)" % key)
+                continue
+        overrides.append("%s=%s" % (key, value))
+    return overrides
+
+
 def _deploy(comp, template_file):
     cmd = [
         _exe("sam"), "deploy",
@@ -163,6 +228,9 @@ def _deploy(comp, template_file):
         "--no-fail-on-empty-changeset",
         "--tags", "project=meetrudi", "component=%s" % comp["stack"],
     ]
+    overrides = _parameter_overrides(comp)
+    if overrides:
+        cmd += ["--parameter-overrides", *overrides]
     _run(cmd)
 
 
@@ -229,6 +297,14 @@ def main():
         print(">> Test console needs secret meetrudi/test-console/auth (fails CLOSED without it).")
         print(">> Put the Test console URL into site/test-console/test-config.js (API_BASE), then")
         print("   push to main -> GitHub Pages publishes https://meet-rudi.github.io/start-up-app/test-console/")
+        print("")
+        print("Tester API  :", _stack_output("meetrudi-whatsapp", "TesterApiUrl"))
+        print(">> Put the Tester API URL into site/tester-console/config.js (API_BASE), then push.")
+        print(">> Needs (once, console-only — see infra/iam/README.md §6):")
+        print("     secret meetrudi/tester-console/admin   (admin pane 503s without it)")
+        print("     the two statements in infra/iam/meetrudi-lambda-runner.tester-console-add.json")
+        print("     a verified SES sender in eu-central-1 (no verification mails without it)")
+        print(">> Settings come from deploy.local.json; copy deploy.local.example.json to start.")
     elif name == "tts":
         print("Function URL:", _stack_output("meetrudi-tts", "FunctionUrl"))
         print("Layer       :", _stack_output("meetrudi-tts", "LayerArn"))

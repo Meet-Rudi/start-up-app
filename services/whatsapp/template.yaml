@@ -17,6 +17,43 @@ Parameters:
     Type: String
     Default: "*"
     Description: CORS origin for the console (set to the CloudFront domain once the console is hosted).
+  TesterConsoleOrigin:
+    Type: String
+    Default: "https://meet-rudi.github.io"
+    Description: >
+      Origin the tester console is served from (GitHub Pages). This is the CORS allow-list for
+      meetrudi-tester-api — keep it exact, never "*": the API is the only thing standing between
+      a public page and the cohort's data.
+  TesterConsoleBase:
+    Type: String
+    Default: "https://meet-rudi.github.io/start-up-app/tester-console"
+    Description: >
+      Base URL the verification and reset links point at (must serve set-password.html). The
+      Pages workflow publishes /site as the site root under the repo name, so site/tester-console
+      lands at /start-up-app/tester-console. Get this wrong and every verification link 404s.
+  TesterMailFrom:
+    Type: String
+    Default: ""
+    Description: >
+      Verified SES sender for tester mail, e.g. "Rudi test <test@meetrudi.eu>". Leave blank until
+      the identity is verified in SES eu-central-1 — registration still works, and the admin pane
+      can re-issue links once mail is live.
+  TesterSupportEmail:
+    Type: String
+    Default: ""
+    Description: Human contact shown to testers and printed in every mail footer.
+  TesterWaNumber:
+    Type: String
+    Default: ""
+    Description: WhatsApp number testers message for Track C (display only).
+  TesterWaJoinPhrase:
+    Type: String
+    Default: ""
+    Description: Twilio sandbox join phrase for Track C, e.g. "join olive-tiger".
+  CallDispatchUrl:
+    Type: String
+    Default: ""
+    Description: Function URL of meetrudi-call-dispatcher (DispatchUrl output of meetrudi-call).
 
 Globals:
   Function:
@@ -80,6 +117,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/meetrudi-test-console
+      RetentionInDays: 30
+
+  TesterApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-tester-api
       RetentionInDays: 30
 
   WaWebhookFunction:
@@ -237,6 +280,58 @@ Resources:
           AllowMethods: ["GET", "POST"]
           AllowHeaders: ["content-type", "authorization", "x-console-token"]
 
+  # ------------------------------------------------------------------ third-party tester console
+  # Serves the closed tester cohort: registration, email verification, sessions, the three test
+  # tracks and the admin control room. The front-end is static on GitHub Pages, so this function
+  # owns every authentication and authorisation decision — the browser is trusted with nothing.
+  TesterApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TesterApiLogGroup
+    Properties:
+      FunctionName: meetrudi-tester-api
+      Description: Tester console API — registration, auth, chat/call/WhatsApp tracks, feedback, admin.
+      Handler: tester_api.handler
+      CodeUri: src/
+      Timeout: 60
+      MemorySize: 512
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          TESTER_CHAT_PREFIX: tester-conversations
+          TESTER_ALLOW_ORIGIN: !Ref TesterConsoleOrigin
+          TESTER_CONSOLE_BASE: !Ref TesterConsoleBase
+          TESTER_ADMIN_SECRET: meetrudi/tester-console/admin
+          TESTER_MAIL_FROM: !Ref TesterMailFrom
+          TESTER_SUPPORT_EMAIL: !Ref TesterSupportEmail
+          TESTER_WA_NUMBER: !Ref TesterWaNumber
+          TESTER_WA_JOIN_PHRASE: !Ref TesterWaJoinPhrase
+          TESTER_MAX_CALLS: "5"
+          TESTER_SESSION_IDLE_MIN: "10"
+          TESTER_LINK_TTL_HOURS: "24"
+          TESTER_DAILY_CALL_CAP: "40"
+          TESTER_CALL_MAX_SECONDS: "300"
+          CALL_DISPATCH_URL: !Ref CallDispatchUrl
+          CALL_DISPATCH_SECRET: meetrudi/call/dispatch-token
+          CALL_PREFIX: calls
+          QUIET_START: "21:30"
+          QUIET_END: "06:30"
+          DEFAULT_TZ: Europe/Brussels
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2
+          # Gateway — Track A runs the real engine, same providers as the processor.
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: openai/gpt-oss-20b
+          GROQ_SECRET: meetrudi-groq-firstkey
+          HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref TesterConsoleOrigin]
+          AllowMethods: ["GET", "POST"]
+          AllowHeaders: ["content-type", "x-tester-token"]
+
   # Throwaway outbound tester (token-gated). Remove once WhatsApp sending is confirmed.
   WaSendTestFunction:
     Type: AWS::Serverless::Function
@@ -267,5 +362,8 @@ Outputs:
   TestConsoleApiUrl:
     Description: Put this into console/test-config.js (API_BASE) for the personality test console
     Value: !GetAtt WaTestConsoleFunctionUrl.FunctionUrl
+  TesterApiUrl:
+    Description: Put this into site/tester-console/config.js (API_BASE)
+    Value: !GetAtt TesterApiFunctionUrl.FunctionUrl
   InboundQueueName:
     Value: !GetAtt WaInboundQueue.QueueName

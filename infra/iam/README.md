@@ -96,3 +96,44 @@ per CLAUDE.md §7).
 **Escape hatch if you can't touch IAM right now:** the scripts also accept the token from
 `RUDI_DISPATCH_TOKEN` (or `--token`), copied out of the Secrets Manager console. That works, but
 it puts the token in your environment — the IAM statement exists so it never has to be.
+
+## 6. Tester console (third-party cohort)
+
+Three pieces, all console-only. The tester console **fails closed** without them: the admin pane
+answers `503 admin_not_configured` and, without the SES statement, registration still succeeds
+but no verification mail goes out (the admin pane can re-issue links once mail works).
+
+### 6a. Extend the runner role
+Console → IAM → Roles → `meetrudi-lambda-runner` → its inline policy (**Edit** → JSON) → add
+both statements from
+[`meetrudi-lambda-runner.tester-console-add.json`](meetrudi-lambda-runner.tester-console-add.json)
+to the `Statement` array → **Save changes**.
+
+- `TesterConsoleMail` — SES send, pinned by condition to the one verified sender address, so a
+  compromised function cannot send as anyone else. Edit the address to match what you verify in
+  SES below.
+- `TesterConsoleDeleteObjects` — `s3:DeleteObject` on **only** `tester-console/sessions/*` and
+  `tester-console/tokens/*`. Burning a single-use link has to actually remove it (a replay must
+  find nothing), and killing a session has to remove it too. Tester profiles, feedback and
+  conversations are deliberately **not** deletable by this role — erasure is its own reviewed
+  path in phase 2.
+
+### 6b. Secret: `meetrudi/tester-console/admin`
+Console → Secrets Manager → **Store a new secret** → *Other type of secret* → **Plaintext** →
+paste JSON matching
+[`meetrudi-tester-console-admin.example.json`](meetrudi-tester-console-admin.example.json) →
+name it exactly **`meetrudi/tester-console/admin`** (region `eu-central-1`).
+
+No IAM change needed — the runner role already reads `meetrudi*` secrets.
+
+### 6c. Verify the SES sender
+Console → Amazon SES (**eu-central-1**) → Identities → **Create identity** → verify either the
+domain `meetrudi.eu` or the single address you intend to send from. A domain identity is better:
+it survives changing the local part and lets you set DKIM.
+
+New SES accounts start in the **sandbox**, where you may only send to *verified* addresses. For
+a closed cohort of invitees that is survivable but awkward — request production access before
+the cohort starts, or verify each tester's address by hand first.
+
+Then redeploy with the sender wired in (see the deploy command in
+[`docs/tester-console.md`](../../docs/tester-console.md)).
