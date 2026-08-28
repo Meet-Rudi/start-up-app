@@ -115,8 +115,10 @@
 
   function mark(fieldId, ok, message) {
     var field = $("#" + fieldId), msg = field.querySelector(".msg");
-    field.classList.toggle("bad", !ok);
-    field.classList.toggle("good", ok === true && message === "");
+    field.classList.toggle("bad", ok === false);
+    // `ok === true` and not "no message": the phone field passes a confirming message on success,
+    // and it should still get the green border rather than a green sentence beside a grey box.
+    field.classList.toggle("good", ok === true);
     if (msg) {
       msg.className = "msg " + (ok ? "good" : "bad");
       msg.textContent = message || "";

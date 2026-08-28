@@ -77,6 +77,7 @@ _ses = boto3.client("ses") if os.environ.get("TESTER_MAIL_FROM") else None
 
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 CHAT_PREFIX = os.environ.get("TESTER_CHAT_PREFIX", "tester-conversations")
+# Read only so it can be logged/asserted; the Function URL enforces the actual CORS allow-list.
 ALLOW_ORIGIN = os.environ.get("TESTER_ALLOW_ORIGIN", "*")
 SALT = os.environ.get("PSEUDONYMIZE_SALT", "meetrudi-pilot-salt-change-me")
 
@@ -114,17 +115,20 @@ DEAD_STATUSES = {"no-answer", "busy", "failed", "canceled"}
 
 
 # --------------------------------------------------------------------------- http plumbing
-def _cors() -> dict:
-    return {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": ALLOW_ORIGIN,
-        "Access-Control-Allow-Headers": "content-type,x-tester-token",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    }
+def _headers() -> dict:
+    """Content type only — CORS belongs to the Function URL, not to us.
+
+    The Function URL's own Cors block already emits Access-Control-Allow-Origin. Emitting it here
+    as well produced `Access-Control-Allow-Origin: https://meet-rudi.github.io,
+    https://meet-rudi.github.io`, which every browser rejects outright ("contains multiple
+    values"), while curl and Invoke-WebRequest happily join the duplicates and show a header that
+    looks perfectly correct. One owner, in the template.
+    """
+    return {"Content-Type": "application/json"}
 
 
 def _resp(status, obj):
-    return {"statusCode": status, "headers": _cors(),
+    return {"statusCode": status, "headers": _headers(),
             "body": json.dumps(obj, ensure_ascii=False)}
 
 

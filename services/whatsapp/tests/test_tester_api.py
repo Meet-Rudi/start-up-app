@@ -635,10 +635,14 @@ class TestRouting(unittest.TestCase):
     def test_options_preflight_is_answered(self):
         self.assertEqual(call("OPTIONS", "/register")[0], 200)
 
-    def test_cors_is_pinned_to_the_configured_origin(self):
+    def test_handler_never_emits_its_own_cors_headers(self):
+        """CORS is the Function URL's job. If the handler emits it too, the browser sees the
+        origin twice and refuses every request — while curl shows a header that looks fine."""
         headers = api.handler({"requestContext": {"http": {"method": "GET"}},
                                "rawPath": "/health"}, None)["headers"]
-        self.assertEqual(headers["Access-Control-Allow-Origin"], api.ALLOW_ORIGIN)
+        for name in headers:
+            self.assertFalse(name.lower().startswith("access-control-"),
+                             "handler must not set %s" % name)
 
     def test_unknown_path_is_404_not_500(self):
         _, session = register_and_activate()

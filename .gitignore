@@ -51,3 +51,6 @@ _voice_samples/
 # join phrase. Not secrets, but not for git either (CLAUDE.md §0.5). Copy
 # deploy.local.example.json to get started.
 deploy.local.json
+
+# Playwright MCP scratch output (page snapshots, console logs) — never source.
+.playwright-mcp/
