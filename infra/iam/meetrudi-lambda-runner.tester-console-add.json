@@ -6,8 +6,11 @@
     "",
     "TesterConsoleMail: meetrudi-tester-api sends the verification and password-reset mails",
     "through SES in eu-central-1. Scoped to the verified sender identity by the ses:FromAddress",
-    "condition, so a compromised function cannot send as anybody else. Replace",
-    "test@meetrudi.eu with the address actually verified in SES.",
+    "condition, so a compromised function cannot send as anybody else.",
+    "",
+    "The address below MUST match TesterMailFrom exactly. If they disagree, SES refuses every",
+    "send with AccessDenied and the only symptom a tester sees is a verification mail that never",
+    "arrives. Cohort sender as of 2026-08-28: support@meetrudi.eu.",
     "",
     "TesterConsoleDeleteObjects: sessions and single-use email links are DELETED, not just",
     "overwritten - a burnt link must stop existing so a replay cannot redeem it, and a killed",
@@ -27,7 +30,7 @@
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "ses:FromAddress": "test@meetrudi.eu"
+          "ses:FromAddress": "support@meetrudi.eu"
         }
       }
     },

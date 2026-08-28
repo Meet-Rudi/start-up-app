@@ -68,6 +68,7 @@ COMPONENTS = {
             "TesterConsoleOrigin": {"from_config": "tester_console_origin"},
             "TesterConsoleBase": {"from_config": "tester_console_base"},
             "TesterMailFrom": {"from_config": "tester_mail_from"},
+            "TesterMailFromName": {"from_config": "tester_mail_from_name"},
             "TesterSupportEmail": {"from_config": "tester_support_email"},
             "TesterWaNumber": {"from_config": "tester_wa_number"},
             "TesterWaJoinPhrase": {"from_config": "tester_wa_join_phrase"},
@@ -211,7 +212,22 @@ def _parameter_overrides(comp):
             if not value:
                 print("   (%s: not set in deploy.local.json — using the template default)" % key)
                 continue
-        overrides.append("%s=%s" % (key, value))
+        # `sam` is a .CMD on Windows, so the override string is re-parsed by cmd.exe: `<` and `>`
+        # are redirection operators and abort the deploy with "The system cannot find the file
+        # specified", while `"` breaks SAM's own parser. Refuse loudly rather than ship a
+        # half-applied parameter — a sender that silently became "Rudi" is exactly this bug.
+        bad = [c for c in '"<>|&^' if c in value]
+        if bad:
+            print("!! %s contains %s, which cannot be passed through sam deploy — skipping it."
+                  % (key, " ".join(repr(c) for c in bad)))
+            print("   Use a value without those characters (a display name and an address are")
+            print("   separate settings for exactly this reason).")
+            continue
+        # SAM re-parses the override string itself and splits unquoted values on whitespace, so a
+        # display-name sender like `Rudi test <support@meetrudi.eu>` would arrive as just "Rudi".
+        # Quoting the value keeps it whole.
+        overrides.append('%s="%s"' % (key, value) if any(c.isspace() for c in value)
+                         else "%s=%s" % (key, value))
     return overrides
 
 

@@ -19,9 +19,20 @@ from __future__ import annotations
 
 import os
 import html
+import email.utils
 from typing import Any, Optional
 
-MAIL_FROM = os.environ.get("TESTER_MAIL_FROM", "")          # e.g. "Rudi test <test@meetrudi.eu>"
+# The sender is carried as TWO settings, not one "Name <addr>" string, for two reasons:
+#   - the SES IAM condition matches on ses:FromAddress, which is the bare address; keeping them
+#     separate makes the policy and the config obviously the same value.
+#   - a combined string has to survive `sam deploy --parameter-overrides` on Windows, where the
+#     angle brackets are cmd redirection operators and silently break the deploy.
+MAIL_FROM_ADDRESS = os.environ.get("TESTER_MAIL_FROM", "")          # e.g. "support@meetrudi.eu"
+MAIL_FROM_NAME = os.environ.get("TESTER_MAIL_FROM_NAME", "")        # e.g. "Rudi test"
+# formataddr quotes the display name correctly, so a comma or a non-ASCII character in it can't
+# produce a malformed header.
+MAIL_FROM = (email.utils.formataddr((MAIL_FROM_NAME, MAIL_FROM_ADDRESS))
+             if MAIL_FROM_ADDRESS else "")
 MAIL_REPLY_TO = os.environ.get("TESTER_MAIL_REPLY_TO", "")
 CONSOLE_BASE = os.environ.get("TESTER_CONSOLE_BASE", "").rstrip("/")
 LINK_TTL_HOURS = int(os.environ.get("TESTER_LINK_TTL_HOURS", "24"))

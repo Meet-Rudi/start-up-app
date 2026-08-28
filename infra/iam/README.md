@@ -110,8 +110,10 @@ both statements from
 to the `Statement` array → **Save changes**.
 
 - `TesterConsoleMail` — SES send, pinned by condition to the one verified sender address, so a
-  compromised function cannot send as anyone else. Edit the address to match what you verify in
-  SES below.
+  compromised function cannot send as anyone else. The condition value **must match
+  `TesterMailFrom` exactly** (`support@meetrudi.eu`). If they disagree, SES refuses every send
+  with `AccessDenied` and the only symptom is a verification mail that never arrives — so if you
+  added this statement before the sender was chosen, go back and correct the address.
 - `TesterConsoleDeleteObjects` — `s3:DeleteObject` on **only** `tester-console/sessions/*` and
   `tester-console/tokens/*`. Burning a single-use link has to actually remove it (a replay must
   find nothing), and killing a session has to remove it too. Tester profiles, feedback and

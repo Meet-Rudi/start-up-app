@@ -35,9 +35,16 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      Verified SES sender for tester mail, e.g. "Rudi test <test@meetrudi.eu>". Leave blank until
-      the identity is verified in SES eu-central-1 — registration still works, and the admin pane
-      can re-issue links once mail is live.
+      Verified SES sender ADDRESS for tester mail, bare — e.g. support@meetrudi.eu. Must equal the
+      ses:FromAddress condition on the runner role, or every send is refused. Leave blank until the
+      identity is verified in SES eu-central-1 — registration still works, and the admin pane can
+      re-issue links once mail is live.
+  TesterMailFromName:
+    Type: String
+    Default: "Rudi test"
+    Description: >
+      Display name shown beside the sender address. Kept separate from the address so the value
+      never needs angle brackets, which break `sam deploy` on Windows.
   TesterSupportEmail:
     Type: String
     Default: ""
@@ -304,6 +311,7 @@ Resources:
           TESTER_CONSOLE_BASE: !Ref TesterConsoleBase
           TESTER_ADMIN_SECRET: meetrudi/tester-console/admin
           TESTER_MAIL_FROM: !Ref TesterMailFrom
+          TESTER_MAIL_FROM_NAME: !Ref TesterMailFromName
           TESTER_SUPPORT_EMAIL: !Ref TesterSupportEmail
           TESTER_WA_NUMBER: !Ref TesterWaNumber
           TESTER_WA_JOIN_PHRASE: !Ref TesterWaJoinPhrase

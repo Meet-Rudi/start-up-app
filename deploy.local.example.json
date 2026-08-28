@@ -13,11 +13,11 @@
     "No secrets here, ever. The admin password and the call dispatch token live in Secrets",
     "Manager and are read by the Lambda at runtime; they are never passed as parameters."
   ],
-
   "tester_console_origin": "https://meet-rudi.github.io",
   "tester_console_base": "https://meet-rudi.github.io/start-up-app/tester-console",
-  "tester_mail_from": "Rudi test <test@meetrudi.eu>",
+  "tester_mail_from": "sender@example.eu",
   "tester_support_email": "test@meetrudi.eu",
   "tester_wa_number": "+32460000000",
-  "tester_wa_join_phrase": "join example-phrase"
+  "tester_wa_join_phrase": "join example-phrase",
+  "tester_mail_from_name": "Rudi test"
 }
