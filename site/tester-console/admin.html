@@ -212,6 +212,7 @@
     if (t.calls_used > 0) acts.push(["reset_call_limit", "Reset call limit", "btn ghost xs"]);
     if (t.calls_used >= t.calls_max) acts.push(["grant_calls", "+5 calls", "btn ghost xs"]);
     if (t.queue_position >= 0) acts.push(["drop_from_queue", "Drop from queue", "btn ghost xs"]);
+    acts.push(["set_phone", "Change number", "btn ghost xs"]);
     acts.push(["kill_session", "Kill session", "btn ghost xs"]);
     acts.push(t.status === "revoked"
       ? ["reinstate", "Reinstate", "btn ghost xs"]
@@ -258,8 +259,20 @@
     if (!btn) return;
     var act = btn.dataset.act;
     if (act === "revoke" && !confirm("Revoke this tester? Their sessions end immediately and they can't log back in.")) return;
+
+    var extra = {};
+    if (act === "set_phone") {
+      // The only way a number changes after sign-up. Registration refuses a conflicting number,
+      // so a tester who mistyped theirs needs someone here to correct it.
+      var entered = prompt("New Belgian mobile number for this tester.\n\n" +
+                           "Rudi calls and messages this number and nothing else — check it " +
+                           "against what the tester told you before saving.");
+      if (!entered) return;
+      extra.phone = entered;
+    }
     btn.disabled = true;
-    R.api("POST", "/admin/action", { action: act, tester_id: btn.dataset.tid, calls: 5 })
+    R.api("POST", "/admin/action",
+          Object.assign({ action: act, tester_id: btn.dataset.tid, calls: 5 }, extra))
       .then(function (res) {
         btn.disabled = false;
         if (!res.ok) { R.banner($("#banner"), "bad", "Action failed: " + (res.data.error || res.status)); return; }

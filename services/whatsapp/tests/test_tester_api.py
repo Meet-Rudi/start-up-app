@@ -133,6 +133,7 @@ def reset_world():
     _FAKE_S3._store.clear()
     _MAILS.clear()
     _DIALED.clear()
+    _PHONES.clear()
     api._cache.clear()
     api.STORE = ts.TesterStore(_FAKE_S3, BUCKET)
     api.CHAT = store.ConversationStore(_FAKE_S3, BUCKET, prefix="tester-conversations")
@@ -162,9 +163,23 @@ def fake_dispatch(ok=True, skipped=None, call_id="call_test_1"):
     api.urllib.request.urlopen = urlopen
 
 
-def register_and_activate(email="marieke@example.be", password="Test1234"):
+_PHONES: dict = {}
+
+
+def phone_for(email):
+    """A distinct Belgian mobile per test email.
+
+    The API refuses two testers on one number, so a helper that handed every test tester the
+    same phone would only ever build a cohort of one.
+    """
+    if email not in _PHONES:
+        _PHONES[email] = "+32%d" % (470000000 + len(_PHONES))
+    return _PHONES[email]
+
+
+def register_and_activate(email="marieke@example.be", password="Test1234", phone=None):
     """Walk a tester through the real flow and return (tester_id, session_token)."""
-    payload = dict(GOOD_REG, email=email)
+    payload = dict(GOOD_REG, email=email, phone=phone or phone_for(email))
     call("POST", "/register", payload)
     tid = ts.tester_id(email, "test-salt")
     token = api.STORE.issue_link(tid, "verify")
@@ -246,9 +261,57 @@ class TestValidation(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(data["error"], "registration_closed")
 
+    def test_same_email_different_number_is_refused_not_overwritten(self):
+        """Two people on one mailbox must not silently become one account.
+
+        A record holds exactly one phone number. Letting the second sign-up overwrite it would
+        point Rudi's calls at one person while the account describes the other's health goal.
+        """
+        call("POST", "/register", GOOD_REG)                      # person A, still pending
+        tid = ts.tester_id("marieke@example.be", "test-salt")
+        self.assertEqual(api.STORE.get(tid).phone, "+32479123456")
+
+        status, data = call("POST", "/register",
+                            dict(GOOD_REG, first_name="Joris", last_name="Vermeulen",
+                                 phone="0486 11 22 33"))
+        self.assertEqual(status, 409)
+        self.assertEqual(data["error"], "email_taken_different_number")
+        after = api.STORE.get(tid)
+        self.assertEqual(after.phone, "+32479123456", "A's number must survive")
+        self.assertEqual(after.first_name, "Marieke", "A's name must survive")
+
+    def test_same_number_on_a_different_email_is_refused(self):
+        """Two accounts on one phone would both call it, and Track C is keyed by the phone's
+        pseudonym — their WhatsApp threads would land on top of each other."""
+        call("POST", "/register", GOOD_REG)
+        status, data = call("POST", "/register",
+                            dict(GOOD_REG, email="someone.else@example.be"))
+        self.assertEqual(status, 409)
+        self.assertEqual(data["error"], "number_already_registered")
+        self.assertEqual(api.STORE.count(), 1)
+
+    def test_the_same_person_may_correct_their_own_details(self):
+        """Same email AND same number is one person fixing a typo, not a collision."""
+        call("POST", "/register", GOOD_REG)
+        status, _ = call("POST", "/register", dict(GOOD_REG, first_name="Marieke",
+                                                   goal="A corrected goal"))
+        self.assertEqual(status, 201)
+        tid = ts.tester_id("marieke@example.be", "test-salt")
+        self.assertEqual(api.STORE.get(tid).goal, "A corrected goal")
+
+    def test_a_revoked_testers_number_is_free_again(self):
+        tid, _ = register_and_activate()
+        tester = api.STORE.get(tid)
+        tester.status = "revoked"
+        api.STORE.put(tester)
+        status, _ = call("POST", "/register", dict(GOOD_REG, email="fresh@example.be"))
+        self.assertEqual(status, 201, "a revoked record must not hold a number hostage")
+
     def test_registering_twice_does_not_fork_a_second_record(self):
         register_and_activate()
-        status, data = call("POST", "/register", GOOD_REG)
+        # Same email AND same number: one person going round again, not a collision.
+        status, data = call("POST", "/register",
+                            dict(GOOD_REG, phone=phone_for("marieke@example.be")))
         self.assertEqual(status, 200)
         self.assertTrue(data["already_registered"])
         self.assertEqual(api.STORE.count(), 1)
@@ -347,7 +410,7 @@ class TestConsoleSurface(unittest.TestCase):
         status, data = call("GET", "/me", token=self.session)
         self.assertEqual(status, 200)
         self.assertNotIn("call_goal", json.dumps(data))
-        self.assertEqual(data["me"]["phone"], "+32479123456")
+        self.assertEqual(data["me"]["phone"], phone_for("marieke@example.be"))
         self.assertEqual(data["whatsapp"]["join_phrase"], "join olive-tiger")
 
     def test_chat_seeds_a_greeting_then_answers(self):
@@ -413,7 +476,8 @@ class TestCallGates(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["state"], "dialing")
         cfg = _DIALED[0]["config"]
-        self.assertEqual(cfg["to"], "+32479123456")
+        self.assertEqual(cfg["to"], phone_for("marieke@example.be"),
+                         "Rudi may only ever dial the number captured at registration")
         self.assertIn(cfg["call_goal"], ts.CALL_GOALS)
         self.assertTrue(cfg["machine_detection"])
         self.assertEqual(cfg["max_seconds"], 300)
@@ -613,6 +677,34 @@ class TestAdmin(unittest.TestCase):
         self.assertEqual(call("POST", "/admin/action",
                               {"action": "set_call_goal", "tester_id": self.tid,
                                "call_goal": "MAKE_IT_UP"}, token=self.admin)[0], 400)
+
+    def test_admin_can_correct_a_mistyped_number(self):
+        call("POST", "/admin/action",
+             {"action": "set_phone", "tester_id": self.tid, "phone": "0486 11 22 33"},
+             token=self.admin)
+        tester = api.STORE.get(self.tid)
+        self.assertEqual(tester.phone, "+32486112233")
+        self.assertEqual(tester.wa_user_id, store.user_id("+32486112233", "test-salt"),
+                         "Track C is keyed by the phone, so it has to follow the change")
+
+    def test_admin_cannot_move_a_number_onto_two_testers(self):
+        _, _ = register_and_activate(email="joris@example.be")
+        other = ts.tester_id("joris@example.be", "test-salt")
+        tester = api.STORE.get(other)
+        tester.phone = "+32486112233"
+        api.STORE.put(tester)
+        status, data = call("POST", "/admin/action",
+                            {"action": "set_phone", "tester_id": self.tid,
+                             "phone": "0486 11 22 33"}, token=self.admin)
+        self.assertEqual(status, 409)
+        self.assertEqual(data["error"], "number_already_registered")
+
+    def test_admin_set_phone_rejects_a_landline(self):
+        status, data = call("POST", "/admin/action",
+                            {"action": "set_phone", "tester_id": self.tid,
+                             "phone": "02 123 45 67"}, token=self.admin)
+        self.assertEqual(status, 400)
+        self.assertEqual(data["error"], "not_belgian_mobile")
 
     def test_unknown_action_and_unknown_tester_are_refused(self):
         self.assertEqual(call("POST", "/admin/action",

@@ -277,11 +277,35 @@ def _register(payload):
 
     tid = tester_store.tester_id(email, SALT)
     existing = STORE.get(tid)
-    if existing and existing.status in ("active", "locked"):
-        # Already through the door. Don't confirm or deny anything useful; point at login.
-        return _resp(200, {"ok": True, "already_registered": True})
     if existing and existing.status == "revoked":
         return _resp(403, {"error": "revoked"})
+
+    # Identity is the email address, and a record holds exactly ONE phone number. Two people
+    # sharing a mailbox must therefore not be allowed to collide, in either direction:
+    #
+    #   same email, different number  — the second sign-up would overwrite the first person's
+    #     number on a still-pending record, so Rudi would ring one person to talk about the
+    #     other's health goal. That is a disclosure of special-category data between two people,
+    #     not merely a mix-up.
+    #   same number, different email  — two accounts pointing at one phone. Both would call and
+    #     message it, and Track C is keyed by the phone's pseudonym, so their WhatsApp threads
+    #     would land on top of each other.
+    #
+    # Neither is resolvable from what the form collects, so we refuse and hand it to the test
+    # team, who can correct a mistyped number from the admin pane. Refusing costs one person a
+    # detour; guessing costs somebody their privacy.
+    if existing and existing.phone and existing.phone != phone:
+        print("TESTER register refused: email on record with a different number")
+        return _resp(409, {"error": "email_taken_different_number"})
+    clash = STORE.find_by_phone(phone, exclude=tid)
+    if clash is not None:
+        print("TESTER register refused: number already on another tester")
+        return _resp(409, {"error": "number_already_registered"})
+
+    if existing and existing.status in ("active", "locked"):
+        # Already through the door, same number. Don't confirm or deny anything useful about the
+        # account; point at login.
+        return _resp(200, {"ok": True, "already_registered": True})
 
     help_areas = [_clean(a, 60) for a in (payload.get("help_areas") or [])][:2]
     goal = _clean(payload.get("goal"), 400) or tester_store.DEFAULT_GOAL
@@ -780,6 +804,19 @@ def _admin_action(payload):
     elif action == "reinstate":
         tester.status = "active" if tester.password_hash else "pending"
         result = {"status": tester.status}
+    elif action == "set_phone":
+        # Registration refuses a number that conflicts with an existing record, so a tester who
+        # mistyped theirs cannot fix it alone. This is that escape hatch — and the only way a
+        # number ever changes after sign-up.
+        new_phone = normalize_phone(payload.get("phone"))
+        if not new_phone:
+            return _resp(400, {"error": "not_belgian_mobile"})
+        holder = STORE.find_by_phone(new_phone, exclude=tid)
+        if holder is not None:
+            return _resp(409, {"error": "number_already_registered"})
+        tester.phone = new_phone
+        tester.wa_user_id = store.user_id(new_phone, SALT)   # Track C follows the number
+        result = {"phone_masked": tester_store.mask_phone(new_phone)}
     elif action == "set_call_goal":
         goal = _clean(payload.get("call_goal"), 40)
         if goal not in tester_store.CALL_GOALS:

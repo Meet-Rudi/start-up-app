@@ -295,6 +295,22 @@ class TesterStore:
     def count(self) -> int:
         return sum(1 for k in self._list_keys(self.prefix + "/") if k.endswith("/profile.json"))
 
+    def find_by_phone(self, phone: str, exclude: str = "") -> Optional[Tester]:
+        """The tester already holding this number, if any.
+
+        The phone is where Rudi actually calls and messages, and Track C is keyed by the phone's
+        pseudonym — so two testers on one number would collide there whatever their email says.
+        A linear scan is honest at cohort scale (tens of profiles, registrations are rare); if
+        the cohort ever grows, this becomes an index, not a bigger scan.
+        """
+        if not phone:
+            return None
+        for tester in self.list_all():
+            if tester.phone == phone and tester.tester_id != exclude \
+                    and tester.status != "revoked":
+                return tester
+        return None
+
     # ---------------------------------------------------------------- email links (verify/reset)
     def _token_key(self, digest: str) -> str:
         return "%s/tokens/%s.json" % (self.console, digest)
