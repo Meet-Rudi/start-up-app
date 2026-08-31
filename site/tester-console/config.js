@@ -17,7 +17,7 @@ window.RUDI_CONFIG = {
   API_BASE: "https://rczvuf3n5xrdcz5wt7yybs3uiq0vecoo.lambda-url.eu-central-1.on.aws/",
 
   // Shown on the login page and in the console footer so a stuck tester has somewhere to write.
-  SUPPORT_EMAIL: "",
+  SUPPORT_EMAIL: "support@meetrudi.eu",
 
   // Default language of the sign-up form. A tester can switch; their choice is stored on their
   // profile and drives the console, the mails, Rudi's replies and his voice.

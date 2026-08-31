@@ -49,6 +49,8 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "verify_cta": "Verify and set password",
         "verify_footer": (
+            "If you signed up more than once, only the newest of these mails works — the older "
+            "links stop working the moment a new one is sent. "
             "Didn't sign up? Ignore this mail — no account is created until you click. "
             "Questions: {support}"
         ),
@@ -76,6 +78,8 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "verify_cta": "Bevestigen en wachtwoord kiezen",
         "verify_footer": (
+            "Schreef je je meer dan één keer in? Dan werkt alleen de nieuwste van deze mails — "
+            "oudere links vervallen zodra er een nieuwe verstuurd wordt. "
             "Heb je je niet ingeschreven? Negeer deze mail — er wordt pas een account "
             "aangemaakt als je klikt. Vragen: {support}"
         ),

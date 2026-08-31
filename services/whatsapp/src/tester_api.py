@@ -317,6 +317,10 @@ def _set_password(payload):
 
     tid, reason = STORE.consume_link(token, kind)
     if not tid:
+        # Log the failure (kind + reason only, never the token — a logged token is a live
+        # credential). Without this line an "invalid link" report is undiagnosable after the fact,
+        # which is exactly the hole we fell into the first time it happened.
+        print("TESTER link refused kind=%s reason=%s" % (kind, reason or "invalid"))
         return _resp(400, {"error": reason or "invalid"})
     tester = STORE.get(tid)
     if tester is None:
