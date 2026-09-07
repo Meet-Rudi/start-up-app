@@ -193,7 +193,10 @@ def _on_setup(connection_id, message):
                         else "ai-unavailable")
 
     manifest["state"] = state
-    _send(connection_id, relay.say(_restore_outbound(manifest, reply)))
+    if _send(connection_id, relay.say(_restore_outbound(manifest, reply))):
+        vkey = (manifest.get("telephony") or {}).get("voice_key")
+        if vkey and calllog.voice_health().get(vkey, {}).get("ok") is not True:
+            calllog.mark_voice(vkey, True)
 
     calllog.record_turn(manifest, 0, {
         "at": calllog.iso(), "kind": "opening", "transcript": None, "reply": reply,
@@ -326,7 +329,14 @@ def handler(event, context):
         if kind == "interrupt":
             return _on_interrupt(connection_id, message, manifest)
         if kind == "error":
-            print("TWILIO ERROR: %s" % message.get("description"))
+            description = str(message.get("description") or "")
+            print("TWILIO ERROR: %s" % description)
+            # A TTS failure is the one error worth remembering. The voice cannot be changed on a
+            # live call, so all we can do is make sure the NEXT call does not repeat it.
+            vkey = (manifest.get("telephony") or {}).get("voice_key")
+            if vkey and any(w in description.lower()
+                            for w in ("tts", "voice", "speech synthesis", "64111", "64112")):
+                calllog.mark_voice(vkey, False, description)
             return _ok()
         return _ok()
 

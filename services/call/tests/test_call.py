@@ -205,9 +205,12 @@ class Languages(unittest.TestCase):
         self.assertIn('language="en-US"',
                       relay.build_twiml("wss://x/live", "c1", language="klingon"))
 
-    def test_non_english_leaves_the_voice_to_twilio(self):
-        """Guessing a provider voice ID fails at dial time; an unset voice does not."""
-        self.assertNotIn("voice=", relay.build_twiml("wss://x/live", "c1", language="nl"))
+    def test_locales_without_a_chosen_voice_defer_to_twilio(self):
+        """Guessing a provider voice ID fails at dial time, so only locales whose voice has
+        actually been chosen and heard name one. Flemish now does (Luk Belcer); fr and de do
+        not, and must stay unset rather than acquire a guess."""
+        for lang in ("fr", "de", "nl-NL"):
+            self.assertNotIn("voice=", relay.build_twiml("wss://x/live", "c1", language=lang), lang)
 
     def test_endpointing_is_eager_because_barge_in_covers_it(self):
         """The pause a caller feels is mostly this. It can be aggressive precisely because
@@ -231,6 +234,85 @@ class Languages(unittest.TestCase):
         twiml = json.loads(_FAKE_S3._store[BUCKET][
             "calls/%s/manifest.json" % payload["call_id"]].decode("utf-8"))["telephony"]["twiml"]
         self.assertIn('language="nl-BE"', twiml)
+
+
+class VoiceCascade(unittest.TestCase):
+    """The voice is fixed in the TwiML at dial time — ConversationRelay's `language` message can
+    switch ttsLanguage but accepts neither `voice` nor `ttsProvider`, so there is no mid-call
+    failover. The cascade therefore has to be resolved before the phone rings."""
+
+    def setUp(self):
+        _FAKE_S3._store.get(BUCKET, {}).pop("calls/_voices/health.json", None)
+
+    def test_flemish_default_is_luk_belcer(self):
+        twiml = relay.build_twiml("wss://x/live", "c1", language="nl")
+        self.assertIn('voice="ppGIZI01uUlIWI734dUU"', twiml)
+        self.assertIn('ttsProvider="ElevenLabs"', twiml)
+        self.assertIn('language="nl-BE"', twiml)
+
+    def test_falls_back_to_elevenlabs_default_when_luk_fails(self):
+        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": False}}
+        twiml = relay.build_twiml("wss://x/live", "c1", language="nl", health=health)
+        self.assertNotIn("ppGIZI01uUlIWI734dUU", twiml)
+        self.assertIn('ttsProvider="ElevenLabs"', twiml)
+        self.assertNotIn("voice=", twiml)
+
+    def test_falls_back_to_twilio_when_elevenlabs_fails_too(self):
+        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": False},
+                  "ElevenLabs:default": {"ok": False}}
+        twiml = relay.build_twiml("wss://x/live", "c1", language="nl", health=health)
+        self.assertNotIn("ttsProvider=", twiml)
+        self.assertIn('language="nl-BE"', twiml)
+
+    def test_the_tail_of_a_cascade_cannot_be_misconfigured(self):
+        """Every chain must end in something with no voice or provider to get wrong."""
+        for lang in ("en", "nl", "fr", "de", "nl-NL"):
+            self.assertEqual(relay.profile_for(lang)["cascade"][-1], {}, lang)
+
+    def test_a_healthy_voice_is_not_skipped(self):
+        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": True}}
+        option, key = relay.pick_voice("nl", health)
+        self.assertEqual(option.get("voice"), "ppGIZI01uUlIWI734dUU")
+        self.assertEqual(key, "ElevenLabs:ppGIZI01uUlIWI734dUU")
+
+    def test_failure_is_remembered_so_the_next_call_skips_it(self):
+        calllog.mark_voice("ElevenLabs:ppGIZI01uUlIWI734dUU", False, "64111 TTS provider error")
+        option, _ = relay.pick_voice("nl", calllog.voice_health())
+        self.assertIsNone(option.get("voice"))
+        entry = calllog.voice_health()["ElevenLabs:ppGIZI01uUlIWI734dUU"]
+        self.assertEqual(entry["failures"], 1)
+        self.assertIn("64111", entry["reason"])
+
+    def test_a_tts_error_on_a_call_marks_the_voice(self):
+        _REPLIES[:] = [("Hallo.", {})]
+        payload = _new_call(language="nl")
+        r = Relay(payload["call_id"], "conn-voice")
+        r.setup()
+        ws.handler({"requestContext": {"routeKey": "$default", "connectionId": "conn-voice"},
+                    "body": json.dumps({"type": "error",
+                                        "description": "64111 ConversationRelay: TTS provider "
+                                                       "service error"})}, None)
+        self.assertIs(calllog.voice_health()
+                      .get("ElevenLabs:ppGIZI01uUlIWI734dUU", {}).get("ok"), False)
+
+    def test_an_unrelated_error_does_not_blame_the_voice(self):
+        _REPLIES[:] = [("Hallo.", {})]
+        payload = _new_call(language="nl")
+        r = Relay(payload["call_id"], "conn-voice2")
+        r.setup()
+        ws.handler({"requestContext": {"routeKey": "$default", "connectionId": "conn-voice2"},
+                    "body": json.dumps({"type": "error",
+                                        "description": "Invalid message received: {}"})}, None)
+        # A successful opening marks the voice healthy, so the key legitimately exists here.
+        # What matters is that an unrelated error did not mark it FAILED.
+        self.assertIsNot(calllog.voice_health()
+                         .get("ElevenLabs:ppGIZI01uUlIWI734dUU", {}).get("ok"), False)
+
+    def test_the_chosen_voice_is_recorded_on_the_call(self):
+        payload = _new_call(language="nl")
+        tel = calllog.load(payload["call_id"])["telephony"]
+        self.assertEqual(tel["voice_key"], "ElevenLabs:ppGIZI01uUlIWI734dUU")
+        self.assertEqual(tel["voice"], "ppGIZI01uUlIWI734dUU")
 
 
 class Gates(unittest.TestCase):

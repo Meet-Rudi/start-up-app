@@ -138,6 +138,34 @@ def record_turn(manifest, seq, record):
     return manifest
 
 
+# Voice health. There is no Twilio API that validates a ConversationRelay voice before a call,
+# and the voice cannot be changed once a call is running, so this record IS the pre-flight: a
+# voice that has demonstrably failed is skipped from then on. One shared file, because the
+# question "is this voice usable" is about the account, not about any one patient.
+VOICE_HEALTH_KEY = "_voices/health.json"
+
+
+def voice_health():
+    return _get_json("%s/%s" % (PREFIX, VOICE_HEALTH_KEY)) or {}
+
+
+def mark_voice(key, ok, reason=""):
+    """Record that a voice worked or failed. Returns the updated health map."""
+    health = voice_health()
+    entry = health.setdefault(key, {})
+    entry["ok"] = bool(ok)
+    entry["at"] = iso()
+    if ok:
+        entry.pop("reason", None)
+        entry["failures"] = 0
+    else:
+        entry["reason"] = str(reason)[:300]
+        entry["failures"] = int(entry.get("failures") or 0) + 1
+    _put_json("%s/%s" % (PREFIX, VOICE_HEALTH_KEY), health)
+    print("VOICE %s -> %s%s" % (key, "ok" if ok else "FAILED", "" if ok else " (%s)" % reason))
+    return health
+
+
 def _feedback_key(call_id, seq):
     return "%s/%s/feedback/%02d.json" % (PREFIX, call_id, seq)
 

@@ -46,6 +46,50 @@ The bench had to build these by hand in the browser. Here they are TwiML attribu
 | `hints` | the Whisper prompt seeded with name and topic |
 | `ttsProvider` / `voice` | **Piper is not used here** — Twilio owns TTS on a real call |
 
+## Voices
+
+Set per language in `relay.VOICE_PROFILES`, as an **ordered cascade** rather than a single value.
+
+| Language | Locale | Voice |
+|---|---|---|
+| `en` (default) | `en-US` | `en-US-Journey-D` (Google, male) |
+| **`nl`, `nl_BE`** | **`nl-BE`** | **Luk Belcer — `ppGIZI01uUlIWI734dUU` (ElevenLabs, male)** |
+| `nl_NL` | `nl-NL` | Twilio default |
+| `fr` | `fr-BE` | Twilio default (Wallonia, not `fr-FR`) |
+| `de` | `de-DE` | Twilio default |
+
+> **If a FEMALE Dutch voice is ever needed** — a second persona, an operator preference, or a
+> patient who reacts better to one — the selected option is **Amazon Polly "Lisa" (`nl-BE`)**,
+> the first purpose-built synthetic Flemish voice. Add it as a cascade entry with
+> `{"ttsProvider": "Amazon", "voice": "Lisa"}`; the machinery already supports it and nothing
+> else needs to change.
+
+Locales with no chosen voice deliberately leave `voice` unset and let Twilio pick for the
+locale. A guessed voice ID fails at **dial** time — the worst possible place to discover a typo
+— so only voices that have actually been heard on a call are named here.
+
+### Why the cascade is resolved before dialling, not during
+
+ConversationRelay's `language` message can switch `ttsLanguage` and `transcriptionLanguage`
+mid-call, but it accepts **neither `voice` nor `ttsProvider`** — those are fixed in the TwiML
+when the call starts. There is no failover once someone has answered.
+
+There is also no Twilio API that validates a ConversationRelay voice ahead of time, so a literal
+"test the voice before calling" is not available. What exists instead is a **health record** at
+`calls/_voices/health.json`, which is the closest honest equivalent:
+
+- the dispatcher picks the first cascade step not known to have failed, and stamps `voice_key`
+  on the call;
+- a `type: error` frame mentioning TTS (Twilio 64111/64112) marks that voice failed;
+- a turn Rudi actually speaks marks it healthy.
+
+So a misconfigured voice costs **one** call rather than all of them, and recovery is automatic.
+Unrelated errors never blame the voice. To force a retry of a demoted voice, delete its entry
+from `health.json`.
+
+Every cascade ends in `{}` — no provider, no voice — because the last resort must be something
+that cannot itself be misconfigured.
+
 ## The join key
 
 `call_id` travels in the TwiML as `<Parameter name="call_id">` and comes back in Twilio's

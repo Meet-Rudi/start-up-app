@@ -47,32 +47,82 @@ DEFAULT_VOICE_ATTRS = {
     "eotThreshold": "0.6",
 }
 
-# Per-language locale and voice. Twilio picks a sensible default voice for whatever locale it
-# is given, so only `en` names one explicitly — that is the voice already heard on a real call
-# and known good. The rest deliberately leave `voice` unset rather than guessing a provider's
-# voice ID, which fails at dial time rather than at deploy time.
+# Per-language locale, and an ORDERED CASCADE of voices to try.
+#
+# The cascade is resolved at DIAL time, not mid-call. That is forced by the protocol: the
+# `language` message can switch ttsLanguage and transcriptionLanguage on a live call, but it
+# accepts neither `voice` nor `ttsProvider` — those are fixed in the TwiML when the call starts.
+# So there is no way to fail over to another voice once someone has answered; the choice has to
+# be right before the phone rings. See pick_voice() for how that choice is made.
 #
 # `nl` resolves to FLEMISH, matching meetrudi-tts's short keys: the pilot cohort is Belgian and
-# a Netherlands-Dutch voice reads as audibly foreign to them. Unlike Piper — which offered two
-# mediocre Flemish voices — Twilio has proper nl-BE from Amazon (Polly "Lisa", the first
-# synthetic Flemish voice), Google (up to Chirp 3) and ElevenLabs.
+# a Netherlands-Dutch voice reads as audibly foreign to them.
+#
+# An entry with no `voice` means "let the provider pick its default for this locale", and an
+# empty entry means "let Twilio pick" — each step is strictly more conservative than the last,
+# so the tail of a cascade is always something that cannot itself be misconfigured.
 VOICE_PROFILES = {
-    "en": {"language": "en-US", "ttsProvider": "Google", "voice": "en-US-Journey-D"},
-    "nl": {"language": "nl-BE"},        # Flemish
-    "nl-be": {"language": "nl-BE"},
-    "nl-nl": {"language": "nl-NL"},     # Netherlands Dutch, if ever needed
-    "fr": {"language": "fr-BE"},        # Wallonia, not fr-FR
-    "de": {"language": "de-DE"},
+    "en": {
+        "language": "en-US",
+        "cascade": [
+            {"ttsProvider": "Google", "voice": "en-US-Journey-D"},
+            {},
+        ],
+    },
+    "nl": {
+        "language": "nl-BE",
+        "cascade": [
+            # Luk Belcer — the chosen Flemish voice.
+            {"ttsProvider": "ElevenLabs", "voice": "ppGIZI01uUlIWI734dUU"},
+            # ElevenLabs' own default for the locale.
+            {"ttsProvider": "ElevenLabs"},
+            # Whatever Twilio picks for nl-BE. Cannot be misconfigured, so it ends the chain.
+            {},
+        ],
+    },
+    "fr": {"language": "fr-BE", "cascade": [{}]},        # Wallonia, not fr-FR
+    "de": {"language": "de-DE", "cascade": [{}]},
 }
+VOICE_PROFILES["nl-be"] = VOICE_PROFILES["nl"]
+VOICE_PROFILES["nl-nl"] = {"language": "nl-NL", "cascade": [{}]}
 
 
-def voice_attrs_for(language, overrides=None):
-    """Merge the shared dials with the locale profile, then any per-call override."""
+def profile_for(language):
     key = str(language or "en").strip().lower()
-    profile = VOICE_PROFILES.get(key) or VOICE_PROFILES.get(key.split("-")[0]) \
-        or VOICE_PROFILES["en"]
+    return (VOICE_PROFILES.get(key)
+            or VOICE_PROFILES.get(key.split("-")[0])
+            or VOICE_PROFILES["en"])
+
+
+def voice_key(option):
+    """Stable id for a cascade step, used as the key in the voice-health record."""
+    return "%s:%s" % (option.get("ttsProvider", "twilio"), option.get("voice", "default"))
+
+
+def pick_voice(language, health=None):
+    """First cascade step this language has not been seen to fail on. Returns (option, key).
+
+    There is no Twilio API that validates a ConversationRelay voice ahead of a call, and no way
+    to change voice once one is in progress — so "test before dialling" is not literally
+    available. This is the closest honest equivalent: a voice that has demonstrably failed is
+    skipped on every subsequent call, so a misconfigured voice costs one call rather than all
+    of them.
+    """
+    health = health or {}
+    cascade = profile_for(language).get("cascade") or [{}]
+    for option in cascade:
+        if health.get(voice_key(option), {}).get("ok") is not False:
+            return option, voice_key(option)
+    return cascade[-1], voice_key(cascade[-1])
+
+
+def voice_attrs_for(language, overrides=None, health=None):
+    """Shared dials + locale + the healthiest cascade step, then any per-call override."""
+    profile = profile_for(language)
+    option, _key = pick_voice(language, health)
     merged = dict(DEFAULT_VOICE_ATTRS)
-    merged.update(profile)
+    merged["language"] = profile["language"]
+    merged.update(option)
     merged.update(overrides or {})
     return merged
 
@@ -83,7 +133,7 @@ def _attr(value):
             .replace('"', "&quot;").replace("'", "&apos;"))
 
 
-def build_twiml(ws_url, call_id, attrs=None, hints="", language="en"):
+def build_twiml(ws_url, call_id, attrs=None, hints="", language="en", health=None):
     """TwiML returned when the patient answers.
 
     `call_id` rides through as a customParameter and comes back in the setup message. It is the
@@ -93,7 +143,7 @@ def build_twiml(ws_url, call_id, attrs=None, hints="", language="en"):
     Note there is no welcomeGreeting: Rudi's opening is generated, not canned, because it has to
     name the person, summarise their topic and carry the AI disclosure.
     """
-    merged = voice_attrs_for(language, attrs)
+    merged = voice_attrs_for(language, attrs, health)
     if hints:
         merged["hints"] = hints[:1000]
 

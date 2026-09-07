@@ -273,8 +273,15 @@ def place_call(config, dry_run=False, now=None):
         manifest.setdefault("compliance", {})["quiet_hours_overridden"] = True
         print("AUDIT: quiet-hours overridden for call %s to %s" % (call_id, config.get("to")))
 
+    # The cascade is decided HERE, before the phone rings — the voice cannot be swapped once a
+    # call is live, so this is the only moment the choice can be made.
+    health = calllog.voice_health()
+    language = config.get("language", "en")
+    option, vkey = relay.pick_voice(language, health)
     twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config),
-                              language=config.get("language", "en"))
+                              language=language, health=health)
+    manifest.setdefault("telephony", {})["voice_key"] = vkey
+    manifest["telephony"]["voice"] = option.get("voice") or "(provider default)"
     manifest.setdefault("telephony", {}).update({"twiml": twiml, "to": config["to"]})
     calllog._put_json(calllog._manifest_key(call_id), manifest)
 
