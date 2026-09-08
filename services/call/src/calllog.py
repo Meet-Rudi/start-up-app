@@ -125,6 +125,10 @@ def record_turn(manifest, seq, record):
     totals = manifest.setdefault(
         "totals", {"turns": 0, "asr_ms": 0, "llm_ms": 0, "tts_ms": 0, "server_ms": 0})
     totals["turns"] = seq
+    # Words spoken on both sides, accumulated per turn so the admin listing never has to reopen
+    # the transcript to answer "how much was actually said".
+    spoken = "%s %s" % (record.get("transcript") or "", record.get("reply") or "")
+    totals["words"] = int(totals.get("words") or 0) + len(spoken.split())
     for field in ("asr_ms", "llm_ms", "tts_ms", "server_ms"):
         totals[field] = totals.get(field, 0) + int(record.get("timings", {}).get(field) or 0)
 
@@ -235,5 +239,9 @@ def finish(manifest, reason="hangup"):
         "language": manifest.get("config", {}).get("language"),
         "outcome": manifest.get("outcome"),
         "feedback_count": len(manifest.get("feedback") or []),
+        "words": manifest.get("totals", {}).get("words", 0),
+        # The join back to a tester. Set by the tester console when it dispatches; absent for
+        # calls placed by hand, which is exactly how those are told apart in the listing.
+        "tester_id": (manifest.get("config") or {}).get("tester_id") or "",
     })
     return manifest

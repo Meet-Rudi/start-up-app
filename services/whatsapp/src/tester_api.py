@@ -141,6 +141,13 @@ def _path(event):
     return event.get("rawPath") or event.get("path") or "/"
 
 
+def _query(event, name, default=""):
+    """One query-string value. Function URLs hand these over already decoded."""
+    params = event.get("queryStringParameters") or {}
+    value = params.get(name)
+    return default if value is None else str(value)
+
+
 def _body(event):
     raw = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
@@ -729,6 +736,155 @@ def _admin_overview():
     })
 
 
+# --------------------------------------------------------------------------- session listing
+
+# The three tracks live in three different stores, joined to a tester three different ways:
+#
+#   chat      tester-conversations/{tester_id}/   the key IS the tester id
+#   whatsapp  conversations/{uid}/                uid = user_id(tester.phone, SALT)
+#   call      calls/_index/{day}/{id}.json        row carries tester_id, set at dispatch
+#
+# So this reads three shapes and normalises them into one row. Stats come from the index rows
+# and thread metadata, never from reopening transcripts — a listing that had to read every
+# message would get slower every day the cohort keeps testing.
+WA = store.ConversationStore(_s3, DATA_BUCKET)
+
+
+def _day_range(dfrom, dto):
+    """Inclusive YYYY-MM-DD range as a list of day strings, capped so a typo cannot scan years."""
+    try:
+        start = datetime.date.fromisoformat(dfrom)
+        end = datetime.date.fromisoformat(dto)
+    except (ValueError, TypeError):
+        return []
+    if end < start:
+        start, end = end, start
+    days, cursor = [], start
+    while cursor <= end and len(days) < 400:
+        days.append(cursor.isoformat())
+        cursor += datetime.timedelta(days=1)
+    return days
+
+
+def _thread_row(channel, meta, tester):
+    """One conversation thread (chat or whatsapp) as a listing row."""
+    return {
+        "channel": channel,
+        "id": meta.user_id,
+        "tester_id": tester.tester_id if tester else "",
+        "tester": ("%s %s" % (tester.first_name, tester.last_name)).strip() if tester else "",
+        "started_at": meta.created_at,
+        "last_at": meta.last_message_at or meta.created_at,
+        "turns": meta.msg_total,
+        "turns_user": meta.msg_user,
+        "words": getattr(meta, "words_total", 0),
+        "duration_s": None,                 # a thread has no duration; it has a span
+        "locale": meta.locale,
+        "outcome": "",
+    }
+
+
+def _call_rows(days, tester_by_id):
+    """Call index rows for the given days. One S3 listing per day, no manifests opened."""
+    rows = []
+    for day in days:
+        prefix = "%s/_index/%s/" % (CALL_PREFIX, day)
+        try:
+            listed = _s3.list_objects_v2(Bucket=DATA_BUCKET, Prefix=prefix, MaxKeys=1000)
+        except Exception as e:  # noqa: BLE001 - a missing day is simply a day with no calls
+            print("WARN: call index %s unavailable (%s)" % (day, type(e).__name__))
+            continue
+        for item in listed.get("Contents", []) or []:
+            try:
+                raw = _s3.get_object(Bucket=DATA_BUCKET, Key=item["Key"])["Body"].read()
+                row = json.loads(raw.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            tester = tester_by_id.get(row.get("tester_id") or "")
+            rows.append({
+                "channel": "call",
+                "id": row.get("call_id", ""),
+                "tester_id": row.get("tester_id") or "",
+                "tester": ("%s %s" % (tester.first_name, tester.last_name)).strip()
+                          if tester else (row.get("user_name") or ""),
+                "started_at": row.get("started_at", ""),
+                "last_at": row.get("ended_at") or row.get("started_at", ""),
+                "turns": row.get("turns") or 0,
+                "turns_user": None,
+                "words": row.get("words") or 0,
+                "duration_s": row.get("duration_s"),
+                "locale": row.get("language") or "",
+                "outcome": row.get("end_reason") or row.get("status") or "",
+                "topic": row.get("topic") or "",
+                "feedback_count": row.get("feedback_count") or 0,
+            })
+    return rows
+
+
+def _admin_sessions(event):
+    """Every realised test session across all three tracks, newest first.
+
+    Filters: ?tester=<tester_id>&from=YYYY-MM-DD&to=YYYY-MM-DD&channel=<track>&limit=N
+    Dates bound the CALL scan (the index is stored per day); threads are filtered on their last
+    activity, since a WhatsApp thread has no single moment it happened.
+    """
+    tester_filter = (_query(event, "tester") or "").strip()
+    channel_filter = (_query(event, "channel") or "").strip().lower()
+    dto = (_query(event, "to") or datetime.date.today().isoformat()).strip()
+    dfrom = (_query(event, "from") or "").strip()
+    if not dfrom:
+        dfrom = (datetime.date.fromisoformat(dto) - datetime.timedelta(days=30)).isoformat()
+    try:
+        limit = max(1, min(500, int(_query(event, "limit") or 200)))
+    except (TypeError, ValueError):
+        limit = 200
+
+    testers = STORE.list_all()
+    by_id = {t.tester_id: t for t in testers}
+    wanted = [t for t in testers if not tester_filter or t.tester_id == tester_filter]
+
+    rows = []
+    if channel_filter in ("", "call"):
+        for row in _call_rows(_day_range(dfrom, dto), by_id):
+            if not tester_filter or row["tester_id"] == tester_filter:
+                rows.append(row)
+
+    for tester in wanted:
+        if channel_filter in ("", "chat"):
+            meta = CHAT.get_meta(tester.tester_id)
+            if meta and meta.msg_total:
+                rows.append(_thread_row("chat", meta, tester))
+        if channel_filter in ("", "whatsapp"):
+            if tester.phone:
+                meta = WA.get_meta(store.user_id(tester.phone, SALT))
+                if meta and meta.msg_total:
+                    rows.append(_thread_row("whatsapp", meta, tester))
+
+    # Threads are placed by last activity so everything sorts on one comparable axis.
+    def _within(row):
+        stamp = (row.get("last_at") or row.get("started_at") or "")[:10]
+        return bool(stamp) and dfrom <= stamp <= dto
+
+    rows = [r for r in rows if r["channel"] == "call" or _within(r)]
+    rows.sort(key=lambda r: r.get("last_at") or r.get("started_at") or "", reverse=True)
+
+    totals = {
+        "sessions": len(rows),
+        "calls": sum(1 for r in rows if r["channel"] == "call"),
+        "chats": sum(1 for r in rows if r["channel"] == "chat"),
+        "whatsapp": sum(1 for r in rows if r["channel"] == "whatsapp"),
+        "words": sum(int(r.get("words") or 0) for r in rows),
+        "turns": sum(int(r.get("turns") or 0) for r in rows),
+        "call_seconds": round(sum(float(r.get("duration_s") or 0)
+                                  for r in rows if r["channel"] == "call"), 1),
+    }
+    return _resp(200, {"ok": True, "from": dfrom, "to": dto, "totals": totals,
+                       "testers": [{"id": t.tester_id,
+                                    "name": ("%s %s" % (t.first_name, t.last_name)).strip()}
+                                   for t in testers],
+                       "rows": rows[:limit], "truncated": len(rows) > limit})
+
+
 def _admin_testers():
     rows = []
     for t in STORE.list_all():
@@ -869,6 +1025,8 @@ def handler(event, context):
                 return _admin_overview()
             if parts == ["admin", "testers"] and method == "GET":
                 return _admin_testers()
+            if parts == ["admin", "sessions"] and method == "GET":
+                return _admin_sessions(event)
             if parts == ["admin", "settings"] and method == "POST":
                 return _admin_settings(_body(event))
             if parts == ["admin", "action"] and method == "POST":

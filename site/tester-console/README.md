@@ -11,7 +11,7 @@ as they are. Product context and the deploy sequence live in
 | `set-password.html` | Serves both first-time verification (`?t=…`) and reset (`?t=…&mode=reset`). Signs the tester straight in. |
 | `index.html` | Login, plus the forgotten-password form. The landing page. |
 | `console.html` | The three tracks, the do's-and-don'ts modal, the session clock. |
-| `admin.html` | Internal control room: KPIs, roster, actions, settings, CSV export. |
+| `admin.html` | Internal control room: KPIs, roster, actions, settings, CSV export, and the activity log. |
 | `config.js` | **The only file to edit after deploying.** |
 | `rudi.css` / `rudi.js` / `i18n.js` | Shared styling, client helpers, and every user-facing string. |
 
@@ -25,6 +25,29 @@ aws cloudformation describe-stacks --stack-name meetrudi-whatsapp ^
   --region eu-central-1 --profile rudi-deployer ^
   --query "Stacks[0].Outputs[?OutputKey=='TesterApiUrl'].OutputValue" --output text
 ```
+
+## The activity log
+
+The lower half of `admin.html` lists every session the cohort has actually had — calls, console
+chats and WhatsApp threads — newest first, with duration, turns and words. It is served by
+`GET /admin/sessions` and filtered by person, date window and channel.
+
+Three tracks, joined to a tester three different ways:
+
+| Track | Where it lives | Joined by |
+|---|---|---|
+| call | `calls/_index/{day}/{id}.json` | `tester_id`, stamped at dispatch |
+| chat | `tester-conversations/{tester_id}/` | the key *is* the tester id |
+| whatsapp | `conversations/{uid}/` | `uid = user_id(phone, salt)` |
+
+**A call is a session; a thread is not.** A call has a start, an end and a duration. A chat or
+WhatsApp conversation is continuous, so it appears as one row placed at its latest activity, with
+`duration_s: null` — the date filter asks what a thread last did, not what every message in it
+did. Conflating the two would invent durations that were never measured.
+
+Stats come from index rows and thread metadata; no transcript is ever reopened to build the
+listing. A listing that had to read every message would get slower every day the cohort keeps
+testing. The date range bounds the call scan directly, since that index is stored per day.
 
 ## Rules these pages keep
 

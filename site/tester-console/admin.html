@@ -84,6 +84,56 @@
   </div>
 </div>
 
+<div class="shell" id="log-shell" hidden style="max-width:82rem;margin-top:1rem">
+  <div class="cbar">
+    <div class="who">
+      <div class="av">≡</div>
+      <div><b>Activity log</b><span id="log-sub">every realised session, newest first</span></div>
+    </div>
+    <div class="sess">
+      <button class="btn ghost sm" id="log-export">Export log (CSV)</button>
+    </div>
+  </div>
+
+  <div class="kpis" id="log-kpis"></div>
+
+  <div class="toolbar">
+    <select id="log-tester" style="max-width:14rem"><option value="">Everyone</option></select>
+    <span class="lbl">from</span>
+    <input type="date" id="log-from" style="max-width:10rem" />
+    <span class="lbl">to</span>
+    <input type="date" id="log-to" style="max-width:10rem" />
+    <button class="btn ghost sm" data-span="7">7d</button>
+    <button class="btn ghost sm" data-span="30">30d</button>
+    <button class="btn ghost sm" data-span="90">90d</button>
+    <span style="width:.5rem"></span>
+    <button class="btn ghost sm" data-track="">All</button>
+    <button class="btn ghost sm" data-track="call">Calls</button>
+    <button class="btn ghost sm" data-track="chat">Chat</button>
+    <button class="btn ghost sm" data-track="whatsapp">WhatsApp</button>
+    <span style="flex:1"></span>
+    <span class="hint" id="log-count"></span>
+  </div>
+
+  <div class="tblwrap">
+    <table class="t">
+      <thead><tr>
+        <th>When</th><th>Channel</th><th>Tester</th><th>Lang</th>
+        <th>Duration</th><th>Turns</th><th>Words</th><th>Outcome</th>
+      </tr></thead>
+      <tbody id="log-rows"></tbody>
+    </table>
+  </div>
+
+  <div style="padding:.8rem 1rem;border-top:1px solid var(--border);background:var(--sunk)">
+    <span class="hint" id="log-note">
+      A call is one session with a start and an end. A chat or WhatsApp thread is continuous, so
+      it appears as a single row placed at its latest activity — the dates filter what a thread
+      last did, not every message inside it.
+    </span>
+  </div>
+</div>
+
 <script src="config.js"></script>
 <script src="i18n.js"></script>
 <script src="rudi.js"></script>
@@ -119,6 +169,7 @@
         R.setToken(res.data.session);
         $("#gate").hidden = true;
         $("#shell").hidden = false;
+        $("#log-shell").hidden = false;
         load();
         return;
       }
@@ -142,6 +193,7 @@
       testers = res.data.testers || [];
       renderRows();
     });
+    loadLog();
   }
 
   function renderKpis(k, quietNow) {
@@ -307,6 +359,121 @@
       .then(function () { load(); });
   });
 
+  // ---------------------------------------------------------------- activity log
+  //
+  // Three tracks, one list. The server does the merging and the arithmetic; this only asks for a
+  // window and draws it. Every filter change is a fresh request rather than a client-side cut,
+  // because the call index is stored per day and the browser holds only what it last asked for.
+  var log = { rows: [], totals: {}, track: "" };
+
+  function isoDaysAgo(n) {
+    var d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function hhmmss(seconds) {
+    if (seconds === null || seconds === undefined || seconds === "") return "–";
+    var s = Math.round(Number(seconds));
+    if (!isFinite(s)) return "–";
+    var m = Math.floor(s / 60);
+    return m + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function loadLog() {
+    var q = "?from=" + encodeURIComponent($("#log-from").value) +
+            "&to=" + encodeURIComponent($("#log-to").value) +
+            "&channel=" + encodeURIComponent(log.track);
+    if ($("#log-tester").value) q += "&tester=" + encodeURIComponent($("#log-tester").value);
+    $("#log-count").textContent = "loading…";
+    R.api("GET", "/admin/sessions" + q).then(function (res) {
+      if (!res.ok) { $("#log-count").textContent = "couldn't load the log"; return; }
+      log.rows = res.data.rows || [];
+      log.totals = res.data.totals || {};
+      // Populated from the same response, so a tester who has never been called still appears.
+      var sel = $("#log-tester");
+      if (sel.options.length <= 1) {
+        (res.data.testers || []).forEach(function (t) {
+          sel.insertAdjacentHTML("beforeend",
+            '<option value="' + esc(t.id) + '">' + esc(t.name || t.id) + "</option>");
+        });
+      }
+      renderLog(res.data.truncated);
+    });
+  }
+
+  function renderLog(truncated) {
+    var t = log.totals;
+    $("#log-kpis").innerHTML = [
+      ["Sessions", t.sessions || 0, (t.calls || 0) + " calls · " + (t.chats || 0) + " chat · " +
+                                    (t.whatsapp || 0) + " WhatsApp"],
+      ["Turns", t.turns || 0, "exchanges across all tracks"],
+      ["Words", (t.words || 0).toLocaleString(), "spoken and typed"],
+      ["Talk time", hhmmss(t.call_seconds), "on calls only"]
+    ].map(function (k) {
+      return '<div class="kpi"><span class="lbl">' + esc(k[0]) + "</span><b>" + esc(k[1]) +
+        '</b><span class="hint">' + esc(k[2]) + "</span></div>";
+    }).join("");
+
+    $("#log-count").textContent = log.rows.length + " session" +
+      (log.rows.length === 1 ? "" : "s") + (truncated ? " (capped — narrow the window)" : "");
+
+    if (!log.rows.length) {
+      $("#log-rows").innerHTML = '<tr><td colspan="8" class="hint" style="padding:1rem">' +
+        "Nothing in this window.</td></tr>";
+      return;
+    }
+    $("#log-rows").innerHTML = log.rows.map(function (r) {
+      var when = String(r.last_at || r.started_at || "").slice(0, 16).replace("T", " ");
+      var span = (r.channel !== "call" && r.started_at && r.started_at !== r.last_at)
+        ? '<div class="hint">since ' + esc(String(r.started_at).slice(0, 10)) + "</div>" : "";
+      var who = r.tester || '<span class="hint">unlinked</span>';
+      var detail = r.topic ? '<div class="hint">' + esc(r.topic) + "</div>" : "";
+      return "<tr>" +
+        "<td><b>" + esc(when) + "</b>" + span + "</td>" +
+        '<td><span class="chip">' + esc(r.channel) + "</span></td>" +
+        "<td>" + who + detail + "</td>" +
+        '<td><span class="tag">' + esc(r.locale || "–") + "</span></td>" +
+        "<td>" + esc(hhmmss(r.duration_s)) + "</td>" +
+        "<td>" + esc(r.turns || 0) +
+        (r.turns_user !== null && r.turns_user !== undefined
+          ? '<div class="hint">' + esc(r.turns_user) + " from tester</div>" : "") + "</td>" +
+        "<td>" + esc((r.words || 0).toLocaleString()) + "</td>" +
+        '<td class="hint">' + esc(r.outcome || "–") + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
+  $("#log-from").value = isoDaysAgo(30);
+  $("#log-to").value = isoDaysAgo(0);
+  ["#log-tester", "#log-from", "#log-to"].forEach(function (sel) {
+    $(sel).addEventListener("change", loadLog);
+  });
+  $$("[data-span]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      $("#log-from").value = isoDaysAgo(Number(b.dataset.span));
+      $("#log-to").value = isoDaysAgo(0);
+      loadLog();
+    });
+  });
+  $$("[data-track]").forEach(function (b) {
+    b.addEventListener("click", function () { log.track = b.dataset.track; loadLog(); });
+  });
+
+  $("#log-export").addEventListener("click", function () {
+    var head = ["when", "channel", "tester_id", "tester", "locale",
+                "duration_s", "turns", "words", "outcome"];
+    var lines = [head.join(",")].concat(log.rows.map(function (r) {
+      return [r.last_at || r.started_at, r.channel, r.tester_id, r.tester, r.locale,
+              r.duration_s === null || r.duration_s === undefined ? "" : r.duration_s,
+              r.turns, r.words, r.outcome]
+        .map(function (v) { return '"' + String(v === null || v === undefined ? "" : v).replace(/"/g, '""') + '"'; })
+        .join(",");
+    }));
+    R.download("rudi-activity-" + $("#log-from").value + "-to-" + $("#log-to").value + ".csv",
+               lines.join("\n"));
+  });
+
   $("#search").addEventListener("input", renderRows);
   $$("[data-filter]").forEach(function (b) {
     b.addEventListener("click", function () { filter = b.dataset.filter; renderRows(); });
@@ -340,7 +507,12 @@
   // An existing admin session survives a refresh; try it before showing the gate.
   if (R.token()) {
     R.api("GET", "/admin/overview").then(function (res) {
-      if (res.ok) { $("#gate").hidden = true; $("#shell").hidden = false; load(); }
+      if (res.ok) {
+        $("#gate").hidden = true;
+        $("#shell").hidden = false;
+        $("#log-shell").hidden = false;
+        load();
+      }
     });
   }
 })();

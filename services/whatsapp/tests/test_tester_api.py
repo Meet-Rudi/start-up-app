@@ -137,6 +137,7 @@ def reset_world():
     api._cache.clear()
     api.STORE = ts.TesterStore(_FAKE_S3, BUCKET)
     api.CHAT = store.ConversationStore(_FAKE_S3, BUCKET, prefix="tester-conversations")
+    api.WA = store.ConversationStore(_FAKE_S3, BUCKET)
     fake_dispatch(ok=True)
 
 
@@ -713,6 +714,128 @@ class TestAdmin(unittest.TestCase):
         self.assertEqual(call("POST", "/admin/action",
                               {"action": "unlock", "tester_id": "tst_nobody"},
                               token=self.admin)[0], 404)
+
+
+class TestActivityLog(unittest.TestCase):
+    """The chronological listing of every realised session across all three tracks."""
+
+    def setUp(self):
+        reset_world()
+        self.tid, self.session = register_and_activate()
+        self.admin = call("POST", "/admin/login", {"password": "adm1n-secret"})[1]["session"]
+        self.today = datetime.date.today().isoformat()
+
+    # -- fixtures ----------------------------------------------------------------
+    def _a_call(self, day=None, tester_id=None, seconds=185.0, turns=8, words=240):
+        day = day or self.today
+        cid = "call_%s_%d" % (day.replace("-", ""), seconds)
+        _FAKE_S3.put_object(
+            Bucket=BUCKET, Key="calls/_index/%s/%s.json" % (day, cid),
+            Body=json.dumps({
+                "call_id": cid, "tester_id": tester_id or self.tid,
+                "started_at": day + "T10:00:00Z", "ended_at": day + "T10:03:05Z",
+                "duration_s": seconds, "turns": turns, "words": words,
+                "language": "nl-BE", "topic": "walking", "end_reason": "completed",
+            }).encode())
+        return cid
+
+    def _thread(self, conv, uid, phone, texts):
+        for i, text in enumerate(texts):
+            inbound = i % 2 == 0
+            msg = store.Message(id="m%d" % i, direction="in" if inbound else "out", text=text)
+            if inbound:
+                conv.record_inbound(uid, phone, msg)
+            else:
+                conv.record_outbound(uid, msg, locale="nl-BE")
+
+    def _a_chat(self, texts=("hallo Rudi", "ik ga wandelen vandaag")):
+        self._thread(api.CHAT, self.tid, "", texts)
+
+    def _a_whatsapp(self, texts=("hoi", "goedemorgen")):
+        phone = api.STORE.get(self.tid).phone
+        uid = store.user_id(phone, api.SALT)
+        self._thread(api.WA, uid, phone, texts)
+        return uid
+
+    def _log(self, **query):
+        status, data = call("GET", "/admin/sessions", token=self.admin,
+                            query={k: str(v) for k, v in query.items()})
+        self.assertEqual(status, 200, data)
+        return data
+
+    # -- tests -------------------------------------------------------------------
+    def test_requires_an_admin_session(self):
+        self.assertEqual(call("GET", "/admin/sessions", token=self.session)[0], 403)
+        self.assertEqual(call("GET", "/admin/sessions")[0], 401)
+
+    def test_all_three_tracks_appear_in_one_list(self):
+        self._a_call()
+        self._a_chat()
+        self._a_whatsapp()
+        data = self._log()
+        self.assertEqual({r["channel"] for r in data["rows"]}, {"call", "chat", "whatsapp"})
+        self.assertEqual(data["totals"]["sessions"], 3)
+
+    def test_rows_are_newest_first(self):
+        self._a_call(day=(datetime.date.today() - datetime.timedelta(days=3)).isoformat())
+        self._a_call(seconds=90.0)
+        stamps = [r["last_at"] for r in self._log()["rows"]]
+        self.assertEqual(stamps, sorted(stamps, reverse=True))
+
+    def test_stats_come_through_per_row(self):
+        self._a_call(seconds=185.0, turns=8, words=240)
+        row = self._log(channel="call")["rows"][0]
+        self.assertEqual((row["duration_s"], row["turns"], row["words"]), (185.0, 8, 240))
+        self.assertEqual(row["outcome"], "completed")
+
+    def test_chat_row_counts_words_and_turns(self):
+        self._a_chat(texts=("hallo Rudi", "fijn dat je er bent vandaag"))
+        row = self._log(channel="chat")["rows"][0]
+        self.assertEqual(row["turns"], 2)
+        self.assertEqual(row["words"], 8)          # 2 + 6
+        self.assertIsNone(row["duration_s"])       # a thread has a span, not a duration
+
+    def test_filtering_by_person_excludes_everyone_else(self):
+        self._a_call()
+        self._a_call(tester_id="tester_someone_else", seconds=42.0)
+        rows = self._log(tester=self.tid)["rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tester_id"], self.tid)
+
+    def test_filtering_by_time_window_excludes_older_calls(self):
+        old = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+        self._a_call(day=old)
+        self._a_call()
+        self.assertEqual(len(self._log()["rows"]), 1)                  # default window is 30d
+        self.assertEqual(len(self._log(**{"from": old})["rows"]), 2)
+
+    def test_filtering_by_channel(self):
+        self._a_call()
+        self._a_chat()
+        self.assertEqual([r["channel"] for r in self._log(channel="chat")["rows"]], ["chat"])
+
+    def test_totals_add_up_across_tracks(self):
+        self._a_call(seconds=100.0, turns=4, words=50)
+        self._a_chat(texts=("een twee drie", "vier"))
+        totals = self._log()["totals"]
+        self.assertEqual(totals["turns"], 6)           # 4 spoken + 2 typed
+        self.assertEqual(totals["words"], 54)          # 50 spoken + 4 typed
+        self.assertEqual(totals["call_seconds"], 100.0)
+
+    def test_a_tester_with_no_activity_is_still_offered_as_a_filter(self):
+        data = self._log()
+        self.assertEqual(data["rows"], [])
+        self.assertIn(self.tid, [t["id"] for t in data["testers"]])
+
+    def test_the_listing_never_carries_a_phone_number(self):
+        self._a_call()
+        self._a_whatsapp()
+        self.assertNotIn("+32479123456", json.dumps(self._log()))
+
+    def test_a_reversed_or_broken_date_range_does_not_explode(self):
+        self._a_call()
+        self.assertEqual(self._log(**{"from": self.today, "to": self.today})["totals"]["calls"], 1)
+        self.assertEqual(self._log(**{"from": "not-a-date"})["rows"], [])
 
 
 class TestRouting(unittest.TestCase):

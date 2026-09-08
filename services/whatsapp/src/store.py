@@ -151,6 +151,9 @@ class ContactMeta:
     alias_vault: dict[str, Any] = field(default_factory=dict)
     # Profile counters (source for conversations/{uid}/profile.json):
     msg_total: int = 0                   # all message turns (in + out, any format)
+    # Running word count across the whole thread. Kept incrementally because the admin listing
+    # shows it for every conversation, and recomputing means opening every message object.
+    words_total: int = 0
     msg_user: int = 0                    # inbound turns
     msg_image_user: int = 0              # inbound image/video turns
     msg_audio_user: int = 0              # inbound audio turns
@@ -342,6 +345,10 @@ class ConversationStore:
         return meta
 
     # ------------------------------------------------------------------ messages
+    @staticmethod
+    def _words(text: str) -> int:
+        return len((text or "").split())
+
     def append_message(self, uid: str, msg: Message) -> str:
         key = self._message_key(uid, msg)
         self._put_json(key, msg.to_dict())
@@ -423,6 +430,7 @@ class ConversationStore:
         meta.last_direction = "in"
         # Profile counters (created_at doubles as first_message; last_inbound_at as last user turn).
         meta.msg_total += 1
+        meta.words_total += self._words(msg.text)
         meta.msg_user += 1
         if msg.type in ("image", "video"):
             meta.msg_image_user += 1
@@ -457,6 +465,7 @@ class ConversationStore:
         meta.last_message_preview = _preview(msg)
         meta.last_direction = "out"
         meta.msg_total += 1
+        meta.words_total += self._words(msg.text)
         if alias_vault is not None:
             meta.alias_vault = alias_vault
         if ai_state is not None:
