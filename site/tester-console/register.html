@@ -101,7 +101,24 @@
   };
 
   var BE_PHONE = /^(?:\+32|0)4[5-9][0-9]{7}$/;
+  // A well-formed international number. The page cannot know whether it is allowlisted — the
+  // list is admin-only and must never be published here — so such a number is let through to the
+  // server, which decides. Only a Belgian mobile gets the green tick in advance.
+  var INTL_PHONE = /^(?:\+|00)[1-9][0-9]{7,14}$/;
   var EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+  // true = Belgian mobile, null = foreign but plausible (server decides), false = not a number.
+  function phoneVerdict(raw) {
+    if (BE_PHONE.test(raw)) return true;
+    return INTL_PHONE.test(raw) ? null : false;
+  }
+
+  function markPhone(raw) {
+    var v = phoneVerdict(raw);
+    var text = v === true ? R.t("reg.phone.ok") : (v === null ? R.t("reg.phone.intl") : R.t("reg.phone.bad"));
+    mark("f-phone", v, text);
+    return v !== false;
+  }
   // Mirrors tester_api.name_is_plausible. The server re-runs it; this is only for fast feedback.
   var RUN = /(.)\1{2,}/;
   var VOWEL = /[aeiouyàáâäèéêëìíîïòóôöùúûü]/i;
@@ -154,7 +171,7 @@
   $("#phone").addEventListener("input", function () {
     var raw = this.value.replace(/[\s.\-/()]/g, "");
     if (raw.length < 4) return mark("f-phone", null, R.t("reg.phone.hint"));
-    mark("f-phone", BE_PHONE.test(raw), BE_PHONE.test(raw) ? R.t("reg.phone.ok") : R.t("reg.phone.bad"));
+    markPhone(raw);
   });
   $("#email").addEventListener("input", function () {
     var v = this.value.trim();
@@ -178,7 +195,7 @@
     ok = mark("f-first", nameOk(first), nameOk(first) ? "" : R.t("reg.name.bad")) && ok;
     ok = mark("f-last", nameOk(last), nameOk(last) ? "" : R.t("reg.name.bad")) && ok;
     ok = mark("f-email", EMAIL.test(email), EMAIL.test(email) ? "" : R.t("reg.email.bad")) && ok;
-    ok = mark("f-phone", BE_PHONE.test(phone), BE_PHONE.test(phone) ? R.t("reg.phone.ok") : R.t("reg.phone.bad")) && ok;
+    ok = markPhone(phone) && ok;
     if (!$("#c1").checked || !$("#c2").checked) {
       R.banner($("#banner"), "bad", R.t("err.validation_failed"));
       ok = false;
@@ -215,7 +232,10 @@
         if (f.first_name) mark("f-first", false, R.t("reg.name.bad"));
         if (f.last_name) mark("f-last", false, R.t("reg.name.bad"));
         if (f.email) mark("f-email", false, R.t("reg.email.bad"));
-        if (f.phone) mark("f-phone", false, R.t("reg.phone.bad"));
+        if (f.phone) {
+          // A foreign number the server refused is not a typo — it simply isn't on the list.
+          mark("f-phone", false, phoneVerdict(phone) === null ? R.t("reg.phone.intl_refused") : R.t("reg.phone.bad"));
+        }
       }
       R.banner($("#banner"), "bad", R.errorText(res));
     });

@@ -24,6 +24,7 @@ import json
 import types
 import datetime
 import unittest
+import contextlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
@@ -714,6 +715,111 @@ class TestAdmin(unittest.TestCase):
         self.assertEqual(call("POST", "/admin/action",
                               {"action": "unlock", "tester_id": "tst_nobody"},
                               token=self.admin)[0], 404)
+
+
+class TestPhoneAllowlist(unittest.TestCase):
+    """Registration accepts a Belgian mobile OR an admin-allowlisted number — nothing else.
+
+    Every number here is synthetic (§8): the +49 151 000… range is not a real subscriber.
+    """
+
+    FOREIGN = "+4915100000001"
+    OTHER_FOREIGN = "+4915100000002"
+
+    def setUp(self):
+        reset_world()
+        self.admin = call("POST", "/admin/login", {"password": "adm1n-secret"})[1]["session"]
+
+    def _allow(self, phone, action="add", note=""):
+        return call("POST", "/admin/allowlist", {"action": action, "phone": phone, "note": note},
+                    token=self.admin)
+
+    def _register(self, phone, email="abroad@example.de"):
+        return call("POST", "/register", dict(GOOD_REG, email=email, phone=phone))
+
+    # -- the rule --------------------------------------------------------------
+    def test_shape_normalises_every_way_a_number_gets_typed(self):
+        for typed in ("+49 151 00000001", "0049 151 00000001", "+49-151-000-000-01"):
+            self.assertEqual(api.to_e164(typed), self.FOREIGN, typed)
+        self.assertEqual(api.to_e164("0479 12 34 56"), "+32479123456")
+        for bad in ("", "abc", "+0123456789", "12345", "+4915100000000123456"):
+            self.assertEqual(api.to_e164(bad), "", bad)
+
+    def test_accept_is_belgian_or_listed(self):
+        self.assertEqual(api.accept_phone("0479123456", set()), "+32479123456")
+        self.assertEqual(api.accept_phone(self.FOREIGN, set()), "")
+        self.assertEqual(api.accept_phone(self.FOREIGN, {self.FOREIGN}), self.FOREIGN)
+        self.assertEqual(api.accept_phone("0049 151 00000001", {self.FOREIGN}), self.FOREIGN)
+        self.assertEqual(api.accept_phone(self.OTHER_FOREIGN, {self.FOREIGN}), "")
+
+    def test_a_belgian_landline_is_still_refused(self):
+        self.assertEqual(api.accept_phone("+3223456789", set()), "")
+
+    # -- registration ----------------------------------------------------------
+    def test_unlisted_foreign_number_cannot_register(self):
+        status, data = self._register(self.FOREIGN)
+        self.assertEqual(status, 400)
+        self.assertEqual(data["fields"]["phone"], "not_belgian_mobile")
+
+    def test_listed_foreign_number_registers(self):
+        self.assertEqual(self._allow(self.FOREIGN)[0], 200)
+        status, data = self._register("0049 151 00000001")
+        self.assertEqual(status, 201, data)
+        tester = api.STORE.get(ts.tester_id("abroad@example.de", "test-salt"))
+        self.assertEqual(tester.phone, self.FOREIGN)
+
+    def test_listing_one_number_does_not_open_its_country(self):
+        self._allow(self.FOREIGN)
+        self.assertEqual(self._register(self.OTHER_FOREIGN)[0], 400)
+
+    def test_removing_a_number_closes_registration_for_it(self):
+        self._allow(self.FOREIGN)
+        self._allow(self.FOREIGN, action="remove")
+        self.assertEqual(self._register(self.FOREIGN)[0], 400)
+
+    def test_belgian_registration_is_unaffected(self):
+        self._allow(self.FOREIGN)
+        self.assertEqual(self._register("0479 12 34 56", email="thuis@example.be")[0], 201)
+
+    def test_admin_can_move_a_tester_onto_a_listed_number(self):
+        tid, _ = register_and_activate()
+        refused = call("POST", "/admin/action",
+                       {"action": "set_phone", "tester_id": tid, "phone": self.FOREIGN}, token=self.admin)
+        self.assertEqual(refused[0], 400)
+        self._allow(self.FOREIGN)
+        moved = call("POST", "/admin/action",
+                     {"action": "set_phone", "tester_id": tid, "phone": self.FOREIGN}, token=self.admin)
+        self.assertEqual(moved[0], 200)
+        self.assertEqual(api.STORE.get(tid).phone, self.FOREIGN)
+
+    # -- managing the list -----------------------------------------------------
+    def test_only_an_admin_can_touch_the_list(self):
+        _, session = register_and_activate()
+        self.assertEqual(call("GET", "/admin/allowlist", token=session)[0], 403)
+        self.assertEqual(call("GET", "/admin/allowlist")[0], 401)
+
+    def test_adding_twice_keeps_one_row_with_the_newer_note(self):
+        self._allow(self.FOREIGN, note="first")
+        _, data = self._allow("0049 151 00000001", note="second")
+        self.assertEqual([(e["phone"], e["note"]) for e in data["entries"]], [(self.FOREIGN, "second")])
+
+    def test_a_belgian_mobile_is_refused_as_pointless(self):
+        status, data = self._allow("0479123456")
+        self.assertEqual((status, data["error"]), (400, "already_belgian"))
+
+    def test_garbage_is_refused(self):
+        self.assertEqual(self._allow("call me maybe")[1]["error"], "not_a_phone_number")
+
+    def test_the_list_stays_out_of_the_overview_payload(self):
+        self._allow(self.FOREIGN)
+        _, overview = call("GET", "/admin/overview", token=self.admin)
+        self.assertNotIn(self.FOREIGN, json.dumps(overview))
+
+    def test_the_log_never_carries_the_full_number(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self._allow(self.FOREIGN)
+        self.assertNotIn(self.FOREIGN, buf.getvalue())
 
 
 class TestActivityLog(unittest.TestCase):

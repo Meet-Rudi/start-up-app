@@ -47,6 +47,8 @@ Routes
     POST /admin/login                  {password} -> {session}
     GET  /admin/overview               -> KPIs + settings + queue
     GET  /admin/testers                -> roster with feedback
+    GET  /admin/allowlist              -> non-Belgian numbers allowed to register
+    POST /admin/allowlist              {action:add|remove, phone, note}
     POST /admin/settings               {registration_open,calling_paused}
     POST /admin/action                 {action,tester_id,...}
 """
@@ -201,6 +203,40 @@ def normalize_phone(raw):
     return "+32" + digits[1:] if digits.startswith("0") else digits
 
 
+def to_e164(raw):
+    """Any international number → E.164, or "" if it cannot be one.
+
+    Deliberately shape-only: it says a string *could* be a phone number, never that it is one.
+    Admission is decided by accept_phone(); this just gets both sides of that comparison into
+    the same form, so a number typed as 0049 151… and one stored as +49151… are one number.
+    """
+    digits = re.sub(r"[\s.\-/()]", "", raw or "")
+    belgian = normalize_phone(digits)
+    if belgian:
+        return belgian
+    if digits.startswith("00"):
+        digits = "+" + digits[2:]
+    if not re.match(r"^\+[1-9][0-9]{7,14}$", digits):   # E.164: country code + up to 15 digits
+        return ""
+    return digits
+
+
+def accept_phone(raw, allowlist=None):
+    """The registration rule: a proper Belgian mobile, OR a number an admin has allowlisted.
+
+    The cohort is Belgian and the pilot rides on a Belgian mobile, so that stays the default and
+    the only thing a stranger can self-serve. The allowlist is the deliberate exception — a
+    team member abroad, a partner's foreign handset — and it is admin-entered, one number at a
+    time, never a pattern. A country-code wildcard would be the same hole with better manners.
+    """
+    e164 = to_e164(raw)
+    if not e164:
+        return ""
+    if normalize_phone(e164):
+        return e164
+    return e164 if e164 in set(allowlist or ()) else ""
+
+
 def name_is_plausible(value):
     """Reject keyboard mash without rejecting real Belgian names.
 
@@ -262,7 +298,7 @@ def _register(payload):
     first = _clean(payload.get("first_name"), 60)
     last = _clean(payload.get("last_name"), 60)
     email = _clean(payload.get("email"), 254).lower()
-    phone = normalize_phone(payload.get("phone"))
+    phone = accept_phone(payload.get("phone"), STORE.allowlist_numbers())
     locale = payload.get("locale") if payload.get("locale") in tester_store.LOCALES \
         else tester_store.DEFAULT_LOCALE
 
@@ -912,6 +948,40 @@ def _admin_settings(payload):
     return _resp(200, {"settings": STORE.save_settings(patch)})
 
 
+def _admin_allowlist(method, payload):
+    """Non-Belgian numbers admitted to registration, one at a time.
+
+    Served on its own route rather than folded into /admin/overview: these are real dialable
+    numbers, and the overview payload is polled on every refresh by a page whose other views
+    are built to show masked numbers only. Managing the list needs the number in full — an
+    admin cannot remove an entry they can only half-see — so it travels to exactly the one
+    screen that needs it, never alongside the roster.
+    """
+    if method == "GET":
+        return _resp(200, {"ok": True, "entries": STORE.allowlist()})
+
+    action = _clean(payload.get("action"), 20)
+    phone = to_e164(payload.get("phone"))
+    if not phone:
+        return _resp(400, {"error": "not_a_phone_number"})
+    if normalize_phone(phone):
+        # It would already register. Allowlisting it implies a permission it never needed, and
+        # removing it later would read as a revocation that never actually happens.
+        return _resp(400, {"error": "already_belgian"})
+
+    if action == "add":
+        entries = STORE.allowlist_add(phone, _clean(payload.get("note"), 120))
+    elif action == "remove":
+        entries = STORE.allowlist_remove(phone)
+    else:
+        return _resp(400, {"error": "unknown_action"})
+
+    # Masked in the log: the list is admin-visible, the log is not (§5).
+    print("TESTER admin allowlist %s %s (%d entries)"
+          % (action, tester_store.mask_phone(phone), len(entries)))
+    return _resp(200, {"ok": True, "entries": entries})
+
+
 def _admin_action(payload):
     """One switch for every roster action. Erasure is deliberately absent — phase 2."""
     action = _clean(payload.get("action"), 40)
@@ -964,7 +1034,7 @@ def _admin_action(payload):
         # Registration refuses a number that conflicts with an existing record, so a tester who
         # mistyped theirs cannot fix it alone. This is that escape hatch — and the only way a
         # number ever changes after sign-up.
-        new_phone = normalize_phone(payload.get("phone"))
+        new_phone = accept_phone(payload.get("phone"), STORE.allowlist_numbers())
         if not new_phone:
             return _resp(400, {"error": "not_belgian_mobile"})
         holder = STORE.find_by_phone(new_phone, exclude=tid)
@@ -1027,6 +1097,8 @@ def handler(event, context):
                 return _admin_testers()
             if parts == ["admin", "sessions"] and method == "GET":
                 return _admin_sessions(event)
+            if parts == ["admin", "allowlist"] and method in ("GET", "POST"):
+                return _admin_allowlist(method, _body(event) if method == "POST" else {})
             if parts == ["admin", "settings"] and method == "POST":
                 return _admin_settings(_body(event))
             if parts == ["admin", "action"] and method == "POST":

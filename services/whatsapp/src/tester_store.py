@@ -435,6 +435,35 @@ class TesterStore:
         self._put_json(self._settings_key(), merged)
         return merged
 
+    # ---------------------------------------------------------------- phone allowlist
+    #
+    # Registration accepts a proper Belgian mobile OR a number on this list. It is kept out of
+    # settings() on purpose: settings travel to the admin browser on every overview poll, and
+    # these are real dialable numbers. They are served only to the route that manages them.
+    def _allowlist_key(self) -> str:
+        return "%s/phone-allowlist.json" % self.console
+
+    def allowlist(self) -> list[dict[str, Any]]:
+        """Entries, newest first. Each: {phone, note, added_at}."""
+        entries = (self._get_json(self._allowlist_key()) or {}).get("entries") or []
+        return [e for e in entries if isinstance(e, dict) and e.get("phone")]
+
+    def allowlist_numbers(self) -> set[str]:
+        """Just the numbers — what the registration check actually compares against."""
+        return {e["phone"] for e in self.allowlist()}
+
+    def allowlist_add(self, phone: str, note: str = "") -> list[dict[str, Any]]:
+        """Idempotent: re-adding a number refreshes its note rather than duplicating the row."""
+        entries = [e for e in self.allowlist() if e["phone"] != phone]
+        entries.insert(0, {"phone": phone, "note": note, "added_at": store.iso_now()})
+        self._put_json(self._allowlist_key(), {"entries": entries})
+        return entries
+
+    def allowlist_remove(self, phone: str) -> list[dict[str, Any]]:
+        entries = [e for e in self.allowlist() if e["phone"] != phone]
+        self._put_json(self._allowlist_key(), {"entries": entries})
+        return entries
+
     # ---------------------------------------------------------------- feedback
     def _feedback_key(self, tid: str, track: str) -> str:
         return "%s/%s/feedback/%s.json" % (self.prefix, tid, track)

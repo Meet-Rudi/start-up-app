@@ -84,6 +84,39 @@
   </div>
 </div>
 
+<div class="shell" id="allow-shell" hidden style="max-width:82rem;margin-top:1rem">
+  <div class="cbar">
+    <div class="who">
+      <div class="av">+</div>
+      <div><b>Non-Belgian numbers allowed to register</b><span>everyone else needs a Belgian mobile</span></div>
+    </div>
+  </div>
+
+  <form class="toolbar" id="allow-form" autocomplete="off">
+    <input type="tel" id="allow-phone" placeholder="+49 151 …" style="max-width:14rem" required />
+    <input type="text" id="allow-note" placeholder="Who / why (optional)" maxlength="120" style="max-width:22rem" />
+    <button class="btn sm" type="submit" id="allow-add">Add to allowlist</button>
+    <span style="flex:1"></span>
+    <span class="hint" id="allow-count"></span>
+  </form>
+
+  <div class="tblwrap">
+    <table class="t">
+      <thead><tr><th>Number</th><th>Note</th><th>Added</th><th>Actions</th></tr></thead>
+      <tbody id="allow-rows"></tbody>
+    </table>
+  </div>
+
+  <div style="padding:.8rem 1rem;border-top:1px solid var(--border);background:var(--sunk)">
+    <span class="hint">
+      Registration accepts a proper Belgian mobile <b>or</b> an exact number listed here — never a
+      prefix or a country. Removing a number stops new sign-ups with it; a tester already
+      registered on it keeps their account. Admins can also move an existing tester onto a listed
+      number with <i>Change number</i>.
+    </span>
+  </div>
+</div>
+
 <div class="shell" id="log-shell" hidden style="max-width:82rem;margin-top:1rem">
   <div class="cbar">
     <div class="who">
@@ -169,6 +202,7 @@
         R.setToken(res.data.session);
         $("#gate").hidden = true;
         $("#shell").hidden = false;
+        $("#allow-shell").hidden = false;
         $("#log-shell").hidden = false;
         load();
         return;
@@ -193,6 +227,7 @@
       testers = res.data.testers || [];
       renderRows();
     });
+    loadAllowlist();
     loadLog();
   }
 
@@ -359,6 +394,74 @@
       .then(function () { load(); });
   });
 
+  // ---------------------------------------------------------------- phone allowlist
+  //
+  // Full numbers, on purpose and only here: an entry you can only half-see is one you cannot
+  // confidently remove. The roster above stays masked.
+  var ALLOW_ERRORS = {
+    not_a_phone_number: "That doesn't look like an international number. Use the +country format, e.g. +49 151 …",
+    already_belgian: "That's a Belgian mobile — it can register already, no need to list it.",
+    unknown_action: "The server didn't recognise that action."
+  };
+
+  function renderAllowlist(entries) {
+    $("#allow-count").textContent = entries.length + " number" + (entries.length === 1 ? "" : "s");
+    if (!entries.length) {
+      $("#allow-rows").innerHTML = '<tr><td colspan="4" class="hint" style="padding:1rem">' +
+        "No non-Belgian numbers allowed yet.</td></tr>";
+      return;
+    }
+    $("#allow-rows").innerHTML = entries.map(function (e) {
+      return "<tr>" +
+        '<td class="mono"><b>' + esc(e.phone) + "</b></td>" +
+        "<td>" + (e.note ? esc(e.note) : '<span class="hint">–</span>') + "</td>" +
+        '<td class="hint">' + esc(String(e.added_at || "").slice(0, 16).replace("T", " ")) + "</td>" +
+        '<td class="acts"><button class="btn danger xs" data-unallow="' + esc(e.phone) + '">Remove</button></td>' +
+        "</tr>";
+    }).join("");
+  }
+
+  function allowlistCall(body) {
+    // `undefined`, not null, for the GET: R.api only omits the body when it is undefined, and
+    // fetch refuses a GET that carries one — which would surface as a bare "network" error.
+    return R.api(body ? "POST" : "GET", "/admin/allowlist", body || undefined).then(function (res) {
+      if (!res.ok) {
+        var code = res.data && res.data.error;
+        R.banner($("#banner"), "bad", ALLOW_ERRORS[code] || ("Allowlist request failed: " + (code || res.status)));
+        return false;
+      }
+      renderAllowlist(res.data.entries || []);
+      return true;
+    });
+  }
+
+  function loadAllowlist() { allowlistCall(null); }
+
+  $("#allow-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("#allow-add");
+    btn.disabled = true;
+    allowlistCall({ action: "add", phone: $("#allow-phone").value, note: $("#allow-note").value })
+      .then(function (ok) {
+        btn.disabled = false;
+        if (!ok) return;
+        R.banner($("#banner"), "good", "Added — that number can register now.");
+        $("#allow-phone").value = "";
+        $("#allow-note").value = "";
+      });
+  });
+
+  $("#allow-rows").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-unallow]");
+    if (!btn) return;
+    if (!confirm("Remove " + btn.dataset.unallow + " from the allowlist?\n\n" +
+                 "New sign-ups with it will be refused. A tester already registered on it keeps their account.")) return;
+    btn.disabled = true;
+    allowlistCall({ action: "remove", phone: btn.dataset.unallow }).then(function (ok) {
+      if (ok) R.banner($("#banner"), "good", "Removed from the allowlist.");
+    });
+  });
+
   // ---------------------------------------------------------------- activity log
   //
   // Three tracks, one list. The server does the merging and the arithmetic; this only asks for a
@@ -510,6 +613,7 @@
       if (res.ok) {
         $("#gate").hidden = true;
         $("#shell").hidden = false;
+        $("#allow-shell").hidden = false;
         $("#log-shell").hidden = false;
         load();
       }
