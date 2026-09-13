@@ -35,6 +35,7 @@
       <div><b>Test cohort — control room</b><span id="sub">internal</span></div>
     </div>
     <div class="sess">
+      <span>Session ends in <span class="num" id="adm-clock">10:00</span></span>
       <button class="btn ghost sm" id="refresh">Refresh</button>
       <button class="btn ghost sm" id="export">Export feedback (CSV)</button>
       <button class="btn ghost sm" id="signout">Sign out</button>
@@ -179,6 +180,43 @@
   // must not be signed out of it by signing in here, and vice versa.
   R.useScope("admin");
 
+  // An admin session idles out after ten minutes exactly like a tester's. Left unhandled, the
+  // 401 that follows surfaced as whatever generic message the calling handler happened to carry
+  // — "Couldn't change the call goal" for a session that had simply expired, which sends you
+  // hunting for a bug in the thing you just clicked. Every admin call goes through these two.
+  //
+  // R.guard() is deliberately NOT used here: it redirects to index.html, which is the *tester*
+  // login. An admin belongs back at this page's own gate.
+  function expired(res) {
+    if (res.status !== 401) return false;
+    R.clearToken();
+    $("#shell").hidden = true;
+    $("#allow-shell").hidden = true;
+    $("#log-shell").hidden = true;
+    $("#gate").hidden = false;
+    R.banner($("#gate-banner"), "bad", "Your session timed out after 10 minutes of inactivity. Sign in again.");
+    return true;
+  }
+
+  /** The server's own reason, so a failure is actionable rather than a shrug. */
+  function reason(res) {
+    var d = (res && res.data) || {};
+    if (d.error) return String(d.error).replace(/_/g, " ");
+    return res.status ? "the server answered " + res.status : "the server could not be reached";
+  }
+
+  // Make the timeout visible rather than a surprise, as the tester console already does.
+  var IDLE = 600, idleLeft = IDLE;
+  setInterval(function () {
+    if ($("#shell").hidden) return;            // not signed in; nothing to count down
+    idleLeft--;
+    $("#adm-clock").textContent = R.hhmm(idleLeft);
+    if (idleLeft <= 0) { idleLeft = IDLE; expired({ status: 401 }); }
+  }, 1000);
+  ["click", "keydown"].forEach(function (evt) {
+    document.addEventListener(evt, function () { idleLeft = IDLE; }, true);
+  });
+
   var GOALS = ["GET_TO_KNOW", "SET_NEARTERM_GOAL", "GOAL_FOLLOWUP", "REINSTATE_TALK"];
   var STATE_COLOR = { active: "var(--ok)", pending: "var(--warn)",
                       locked: "var(--err)", revoked: "var(--err)" };
@@ -216,7 +254,7 @@
   // ---------------------------------------------------------------- load
   function load() {
     R.api("GET", "/admin/overview").then(function (res) {
-      if (res.status === 401) { R.clearToken(); location.reload(); return; }
+      if (expired(res)) return;   // a bare reload would throw the explanation away
       if (!res.ok) { R.banner($("#banner"), "bad", "Couldn't load the overview."); return; }
       settings = res.data.settings || {};
       renderKpis(res.data.kpis || {}, res.data.quiet_now);
@@ -362,7 +400,12 @@
           Object.assign({ action: act, tester_id: btn.dataset.tid, calls: 5 }, extra))
       .then(function (res) {
         btn.disabled = false;
-        if (!res.ok) { R.banner($("#banner"), "bad", "Action failed: " + (res.data.error || res.status)); return; }
+        if (expired(res)) return;
+        if (!res.ok) {
+          R.banner($("#banner"), "bad",
+                   "Couldn't " + act.replace(/_/g, " ") + " — " + reason(res));
+          return;
+        }
         var msg = act + " done";
         if (res.data.result && res.data.result.mail_sent === false) {
           msg = act + " done, but the mail could not be sent — check the SES sender identity.";
@@ -375,23 +418,43 @@
   $("#rows").addEventListener("change", function (e) {
     var sel = e.target.closest("[data-goal]");
     if (!sel) return;
+    var chosen = sel.value;
     R.api("POST", "/admin/action", {
-      action: "set_call_goal", tester_id: sel.dataset.goal, call_goal: sel.value
+      action: "set_call_goal", tester_id: sel.dataset.goal, call_goal: chosen
     }).then(function (res) {
-      R.banner($("#banner"), res.ok ? "good" : "bad",
-        res.ok ? "Call goal set to " + sel.value : "Couldn't change the call goal.");
+      if (expired(res)) return;
+      if (!res.ok) {
+        R.banner($("#banner"), "bad", "Couldn't change the call goal — " + reason(res));
+        load();                      // put the dropdown back to what the server actually holds
+        return;
+      }
+      R.banner($("#banner"), "good", "Call goal set to " + chosen);
     });
   });
 
   $("#reg-toggle").addEventListener("click", function () {
     var open = settings.registration_open !== false;
     if (open && !confirm("Close registration? The sign-up page stops accepting new testers.")) return;
-    R.api("POST", "/admin/settings", { registration_open: !open }).then(function () { load(); });
+    R.api("POST", "/admin/settings", { registration_open: !open }).then(function (res) {
+      if (expired(res)) return;
+      if (!res.ok) {
+        R.banner($("#banner"), "bad", "Couldn't change registration — " + reason(res));
+        return;
+      }
+      load();
+    });
   });
 
   $("#call-toggle").addEventListener("click", function () {
     R.api("POST", "/admin/settings", { calling_paused: settings.calling_paused !== true })
-      .then(function () { load(); });
+      .then(function (res) {
+        if (expired(res)) return;
+        if (!res.ok) {
+          R.banner($("#banner"), "bad", "Couldn't change calling — " + reason(res));
+          return;
+        }
+        load();
+      });
   });
 
   // ---------------------------------------------------------------- phone allowlist
