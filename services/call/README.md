@@ -53,10 +53,16 @@ Set per language in `relay.VOICE_PROFILES`, as an **ordered cascade** rather tha
 | Language | Locale | Voice |
 |---|---|---|
 | `en` (default) | `en-US` | `en-US-Journey-D` (Google, male) |
-| **`nl`, `nl_BE`** | **`nl-BE`** | **Luk Belcer — `ppGIZI01uUlIWI734dUU` (ElevenLabs, male)** |
-| `nl_NL` | `nl-NL` | Twilio default |
+| **`nl`, `nl_BE`** | **`nl-BE`** | **Luk Belcer — `ppGIZI01uUlIWI734dUU` (ElevenLabs, male) — pinned** |
+| **`nl_NL`** | **`nl-NL`** | **Luk Belcer — same voice, pinned** |
 | `fr` | `fr-BE` | Twilio default (Wallonia, not `fr-FR`) |
 | `de` | `de-DE` | Twilio default |
+
+**Every Dutch-speaking locale is pinned to Luk Belcer and has no cascade tail.** He was
+hand-picked and listened to, so no other voice may stand in for him: a silent substitution would
+put an unvetted voice in front of a patient, and the pilot would end up measuring a voice nobody
+chose. Only the *locale* differs between `nl-BE` and `nl-NL` — that drives Deepgram's
+transcription and the TTS language hint, not the timbre.
 
 > **If a FEMALE Dutch voice is ever needed** — a second persona, an operator preference, or a
 > patient who reacts better to one — the selected option is **Amazon Polly "Lisa" (`nl-BE`)**,
@@ -87,8 +93,14 @@ So a misconfigured voice costs **one** call rather than all of them, and recover
 Unrelated errors never blame the voice. To force a retry of a demoted voice, delete its entry
 from `health.json`.
 
-Every cascade ends in `{}` — no provider, no voice — because the last resort must be something
-that cannot itself be misconfigured.
+Cascades that have a tail end in `{}` — no provider, no voice — because the last resort must be
+something that cannot itself be misconfigured.
+
+**Dutch is the exception: it is pinned, so it has no tail and no failover.** A single-entry
+cascade is exhausted by the loop and returned anyway, so Luk is dialled however sick he looks.
+The health record is still written — it stays the place to find out he has stopped working — but
+nothing acts on it. The trade is deliberate: if ElevenLabs breaks, Dutch calls go **silent**
+rather than quietly switching voice, and dead air is the failure somebody actually notices.
 
 ## The join key
 

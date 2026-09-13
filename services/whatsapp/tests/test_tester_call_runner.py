@@ -119,6 +119,20 @@ class RunnerTests(unittest.TestCase):
         runner.reconcile(NOW)
         self.assertEqual(runner.STORE.get("tst_a").calls_used, 0)
 
+    def test_our_own_outage_is_not_charged_to_the_tester(self):
+        """A call abandoned with ai-unavailable is marked completed and carries a turn, so the
+        turn count alone would score it as a conversation and bill them for our outage."""
+        self._tester()
+        manifest = self._finished_call(call_id="c_dead", turns=1, goal_domain=None)
+        manifest["end_reason"] = "ai-unavailable"
+        manifest["telephony"]["error"] = "ai-unavailable"
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/c_dead/manifest.json",
+                            Body=json.dumps(manifest).encode())
+        runner.reconcile(NOW)
+        t = runner.STORE.get("tst_a")
+        self.assertEqual(t.calls_used, 0)
+        self.assertEqual(t.last_call_outcome, "failed")
+
     def test_reconciling_twice_does_not_double_count(self):
         self._tester()
         self._finished_call()

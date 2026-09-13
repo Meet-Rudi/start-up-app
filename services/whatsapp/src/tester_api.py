@@ -114,6 +114,8 @@ CALL_LANGUAGE = {"nl-BE": os.environ.get("TESTER_CALL_LANG_NL", "nl-BE"),
 MACHINE_ANSWERS = {"machine_start", "machine_end_beep", "machine_end_silence",
                    "machine_end_other", "fax"}
 DEAD_STATUSES = {"no-answer", "busy", "failed", "canceled"}
+# Endings that are our fault, not the tester's experience. Never scored as a conversation.
+OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call"}
 
 
 # --------------------------------------------------------------------------- http plumbing
@@ -586,11 +588,14 @@ def _outcome_of(manifest):
         return "voicemail", True
     if call_status in DEAD_STATUSES:
         return ("no_answer" if call_status in ("no-answer", "busy") else "failed"), True
+    # Our own failures are checked BEFORE the turn count. A call abandoned with ai-unavailable
+    # is marked completed and may have one turn on it, so the turns rule alone scored it as a
+    # real conversation — which is how a tester got billed for our outage.
+    if tel.get("error") or str(manifest.get("end_reason") or "") in OUR_FAULT_ENDINGS:
+        return "failed", True
     if manifest.get("status") == "completed" or call_status == "completed":
         turns = int((manifest.get("totals") or {}).get("turns") or 0)
         return ("connected" if turns > 0 else "no_answer"), True
-    if tel.get("error"):
-        return "failed", True
     return "in_progress", False
 
 
@@ -701,10 +706,14 @@ def _call_status(tester):
     if not finished:
         return _resp(200, {"state": "on_call", "call_id": call_id})
 
-    # Terminal. Deduct ONLY a connected call, then free the line for whoever is next.
+    # Terminal. Report it and free the line — but do NOT touch the ledger here.
+    #
+    # meetrudi-tester-call-runner is the single writer of calls_used, reconciling from the call
+    # manifest. It has to be, because it is the only path that sees calls Rudi placed himself.
+    # While both incremented, a call the browser counted and the runner later reconciled was
+    # charged twice, and whether that happened depended on whether the tester left the page open.
     if tester.last_call_outcome != outcome:
         if outcome == "connected":
-            tester.calls_used = min(tester.calls_max, tester.calls_used + 1)
             _track(tester, "call", "done")
         tester.last_call_outcome = outcome
         STORE.put(tester)

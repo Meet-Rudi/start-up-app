@@ -155,9 +155,16 @@ MACHINE_ANSWERS = {"machine_start", "machine_end_beep", "machine_end_silence",
                    "machine_end_other", "fax"}
 
 
+# A call that ended because OUR side broke is not a call the person had. Charging it to their
+# ledger bills them for our outage: the 12:48 incident died on turn one with ai-unavailable,
+# which "turns > 0" alone would have scored as a completed conversation.
+OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call", "voicemail"}
+
+
 def _outcome_of(manifest):
-    """What actually happened, in the console's vocabulary. Mirrors tester_api._outcome_of."""
-    tel = (manifest or {}).get("telephony") or {}
+    """What actually happened, in the console's vocabulary."""
+    manifest = manifest or {}
+    tel = manifest.get("telephony") or {}
     if str(tel.get("answered_by") or "") in MACHINE_ANSWERS:
         return "voicemail"
     status = str(tel.get("call_status") or "")
@@ -165,6 +172,8 @@ def _outcome_of(manifest):
         return "no_answer"
     if status in ("failed", "canceled") or tel.get("error"):
         return "failed"
+    if str(manifest.get("end_reason") or "") in OUR_FAULT_ENDINGS:
+        return "voicemail" if manifest.get("end_reason") == "voicemail" else "failed"
     turns = int((manifest.get("totals") or {}).get("turns") or 0)
     return "connected" if turns > 0 else "no_answer"
 

@@ -190,11 +190,12 @@ def register_and_activate(email="marieke@example.be", password="Test1234", phone
     return tid, data["session"]
 
 
-def finish_call(call_id, answered_by="human", call_status="completed", turns=3):
+def finish_call(call_id, answered_by="human", call_status="completed", turns=3, end_reason=""):
     """Write the manifest the call service would have written, so /call/status can settle."""
     _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/%s/manifest.json" % call_id,
                         Body=json.dumps({
                             "call_id": call_id, "status": "completed",
+                            "end_reason": end_reason,
                             "totals": {"turns": turns},
                             "telephony": {"answered_by": answered_by, "call_status": call_status},
                         }).encode())
@@ -537,7 +538,13 @@ class TestCallGates(unittest.TestCase):
 
 
 class TestCallLedger(unittest.TestCase):
-    """The rule the user set explicitly: only a connected call is deducted."""
+    """Only a connected call is deducted — and this API is not the thing that deducts it.
+
+    meetrudi-tester-call-runner owns calls_used, reconciling from the call manifest, because it
+    is the only path that also sees calls Rudi placed himself. While both wrote to it, a call the
+    browser counted and the runner later reconciled was charged twice, and whether that happened
+    depended on whether the tester happened to leave the page open.
+    """
 
     def setUp(self):
         reset_world()
@@ -552,11 +559,19 @@ class TestCallLedger(unittest.TestCase):
         finish_call(data["call_id"], **manifest)
         return call("GET", "/call/status", token=self.session)[1]
 
-    def test_connected_call_is_deducted_once(self):
+    def test_a_connected_call_is_reported_but_not_charged_here(self):
         data = self._place_and_finish(answered_by="human", turns=4)
         self.assertEqual(data["outcome"], "connected")
-        self.assertEqual(data["calls_used"], 1)
         self.assertEqual(api.STORE.get(self.tid).track_call, "done")
+        self.assertEqual(api.STORE.get(self.tid).calls_used, 0,
+                         "the runner charges the ledger; charging here too double-counts")
+
+    def test_our_own_outage_is_not_scored_as_a_conversation(self):
+        """A call abandoned with ai-unavailable is marked completed and can carry one turn, so
+        the turn count alone scored it as a real conversation — and billed the tester for it."""
+        data = self._place_and_finish(answered_by="human", turns=1, end_reason="ai-unavailable")
+        self.assertEqual(data["outcome"], "failed")
+        self.assertEqual(api.STORE.get(self.tid).calls_used, 0)
 
     def test_voicemail_is_not_deducted(self):
         data = self._place_and_finish(answered_by="machine_start", turns=0)
@@ -582,12 +597,13 @@ class TestCallLedger(unittest.TestCase):
         call("GET", "/call/status", token=self.session)
         self.assertEqual(api.STORE.position(ts.tester_id("joris@example.be", "test-salt")), 0)
 
-    def test_polling_twice_does_not_double_deduct(self):
+    def test_polling_never_moves_the_ledger(self):
         _, data = call("POST", "/call", {}, token=self.session)
         finish_call(data["call_id"])
         call("GET", "/call/status", token=self.session)
         call("GET", "/call/status", token=self.session)
-        self.assertEqual(api.STORE.get(self.tid).calls_used, 1)
+        self.assertEqual(api.STORE.get(self.tid).calls_used, 0,
+                         "however many times the page polls, only the runner charges")
 
     def test_an_unfinished_call_reports_on_call(self):
         _, data = call("POST", "/call", {}, token=self.session)
