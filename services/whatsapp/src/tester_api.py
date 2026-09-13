@@ -114,8 +114,9 @@ CALL_LANGUAGE = {"nl-BE": os.environ.get("TESTER_CALL_LANG_NL", "nl-BE"),
 MACHINE_ANSWERS = {"machine_start", "machine_end_beep", "machine_end_silence",
                    "machine_end_other", "fax"}
 DEAD_STATUSES = {"no-answer", "busy", "failed", "canceled"}
-# Endings that are our fault, not the tester's experience. Never scored as a conversation.
-OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call"}
+# Endings that are our fault, not the tester's experience. Never scored as a conversation —
+# "speak-only" included, since that call only happened because we had no AI headroom.
+OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call", "speak-only"}
 
 
 # --------------------------------------------------------------------------- http plumbing

@@ -229,6 +229,22 @@ class TestDispatcherWiring(unittest.TestCase):
         self.dispatcher.place_call(self._config())
         self.assertNotIn("MachineDetection", self.posted[0])
 
+    def test_a_speak_only_call_still_uses_rudis_own_voice(self):
+        """The fallback must not arrive in a stranger's voice.
+
+        <Say> cannot use an ElevenLabs voice, so a speak-only call goes out over the same
+        ConversationRelay TwiML as a real one and the line is spoken through the socket.
+        """
+        payload, code = self.dispatcher.place_call(
+            self._config(language="nl", speak_only="Ik wacht op je op WhatsApp."))
+        self.assertEqual(code, 200)
+        twiml = self.posted[0]["Twiml"]
+        self.assertIn("ConversationRelay", twiml)
+        self.assertNotIn("<Say", twiml)
+        import relay
+        self.assertIn(relay.FLEMISH_VOICE, twiml,
+                      "Dutch is pinned to Luk Belcer, fallback included")
+
 
 if __name__ == "__main__":
     unittest.main()

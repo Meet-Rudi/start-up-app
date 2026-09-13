@@ -158,7 +158,10 @@ MACHINE_ANSWERS = {"machine_start", "machine_end_beep", "machine_end_silence",
 # A call that ended because OUR side broke is not a call the person had. Charging it to their
 # ledger bills them for our outage: the 12:48 incident died on turn one with ai-unavailable,
 # which "turns > 0" alone would have scored as a completed conversation.
-OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call", "voicemail"}
+# "speak-only" belongs here for the same reason: that call happened *because* we had no AI
+# headroom, and it delivered one sentence rather than the conversation they were owed. Charging
+# it to their five would bill them for our shortage.
+OUR_FAULT_ENDINGS = {"ai-unavailable", "rate-limited", "unknown-call", "voicemail", "speak-only"}
 
 
 def _outcome_of(manifest):

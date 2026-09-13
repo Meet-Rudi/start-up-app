@@ -277,16 +277,15 @@ def place_call(config, dry_run=False, now=None):
     # call is live, so this is the only moment the choice can be made.
     health = calllog.voice_health()
     language = config.get("language", "en")
+    option, vkey = relay.pick_voice(language, health)
+    twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config),
+                              language=language, health=health)
     if config.get("speak_only"):
-        # One spoken line, then hang up. Used when there is no AI headroom for a conversation —
-        # see the runner's budget probe. No socket is opened, so ws.py never sees this call.
-        twiml = relay.build_say_twiml(config.get("speak_only"), language=language)
+        # Still a full ConversationRelay call, deliberately. The fallback has to sound like Rudi,
+        # and <Say> cannot use an ElevenLabs voice — so the voice cascade is picked exactly as it
+        # is for a real call. ws.py finds speak_only on the manifest config, speaks the single
+        # line through the socket and hangs up, without ever calling the model.
         manifest.setdefault("telephony", {})["mode"] = "speak_only"
-        vkey, option = "(say)", {}
-    else:
-        option, vkey = relay.pick_voice(language, health)
-        twiml = relay.build_twiml(WS_URL, call_id, config.get("voice_attrs"), _hints(config),
-                                  language=language, health=health)
     manifest.setdefault("telephony", {})["voice_key"] = vkey
     manifest["telephony"]["voice"] = option.get("voice") or "(provider default)"
     manifest.setdefault("telephony", {}).update({"twiml": twiml, "to": config["to"]})

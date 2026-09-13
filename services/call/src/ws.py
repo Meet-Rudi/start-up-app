@@ -184,6 +184,24 @@ def _on_setup(connection_id, message):
     })
 
     config = manifest.get("config") or {}
+
+    # A speak-only call: one line in Rudi's own voice, then hang up. Placed when there was no AI
+    # headroom to hold a conversation, so it must not touch the model — but it rides the normal
+    # ConversationRelay TwiML precisely so the voice is the one this person already knows.
+    # Twilio speaks a queued token before acting on `end`, which is what lets the line finish;
+    # the same mechanism carries the goodbye in _abandon.
+    line = (config.get("speak_only") or "").strip()
+    if line:
+        if _send(connection_id, relay.say(line)):
+            vkey = (manifest.get("telephony") or {}).get("voice_key")
+            if vkey and calllog.voice_health().get(vkey, {}).get("ok") is not True:
+                calllog.mark_voice(vkey, True)
+        _send(connection_id, relay.hang_up("speak-only"))
+        _forget_vault(manifest)
+        calllog.finish(manifest, "speak-only")
+        print("CALL %s spoke the fallback line and hung up" % manifest["call_id"])
+        return _ok()
+
     started = time.time()
     try:
         reply, state, info = brain.open_call(config)

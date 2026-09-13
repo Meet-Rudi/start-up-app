@@ -163,22 +163,10 @@ def build_twiml(ws_url, call_id, attrs=None, hints="", language="en", health=Non
     ) % (_attr(ws_url), rendered, _attr(call_id))
 
 
-def build_say_twiml(text, language="en"):
-    """A call that only speaks one line and hangs up — no socket, no model, no tokens.
-
-    This is the fallback when there isn't AI headroom to hold a real conversation: better to
-    deliver the one sentence that matters than to ring someone and abandon them mid-call.
-
-    It deliberately does NOT use the ConversationRelay voice cascade: those are ElevenLabs and
-    Google voice ids, which `<Say>` does not accept. Twilio picks its own default voice for the
-    locale, so this sounds different from Rudi — acceptable for a one-line reminder, and the
-    reason this is a fallback rather than a feature.
-    """
-    profile = profile_for(language)
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<Response><Say language="%s">%s</Say></Response>'
-    ) % (_attr(profile["language"]), _attr(text))
+# There is deliberately no <Say>-based TwiML here. A speak-only call still goes out over
+# ConversationRelay, because <Say> cannot reach an ElevenLabs voice at all — it would have put
+# Twilio's default speaker in front of a patient who knows Rudi's. The one line is spoken through
+# the socket instead (see ws.py), which costs no model call and keeps the voice the cohort knows.
 
 
 def say(text, last=True, interruptible=True):
