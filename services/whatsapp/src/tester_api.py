@@ -66,6 +66,7 @@ import boto3
 
 import store
 import i18n
+import provider
 import responder
 import personality
 import gateway
@@ -992,6 +993,58 @@ def _admin_allowlist(method, payload):
     return _resp(200, {"ok": True, "entries": entries})
 
 
+def _wipe_commitments(tester):
+    """Drop every pending commitment for a tester, then re-open the conversation.
+
+    WhatsApp's 24h free-form window decides how. Inside it Rudi can simply ask again, which is
+    by far the gentler way back in. Outside it there is no free-form message to send at all, so
+    the only route is a call — placed at the next social hour, never during quiet time.
+
+    The automatic reach-back allowance is restored too: this is a deliberate fresh start by the
+    team, not Rudi chasing someone who went quiet.
+    """
+    tid = tester.tester_id
+    dropped = STORE.cancel_calls(tid)          # promise, whatsapp_reminder, recommit alike
+    tester.followup_call_at = ""
+
+    meta = WA.get_meta(tester.wa_user_id) if tester.wa_user_id else None
+    had = bool(meta and meta.commitment_at)
+    if meta is not None:
+        meta.commitment_at = ""
+        meta.commitment_note = ""
+        # Back to goal-setting. Resuming the phase that was holding the old commitment would be
+        # the one thing this action exists to undo.
+        prev = dict(meta.ai_state or {})
+        meta.ai_state = responder.new_session(prev.get("session_id", 0),
+                                              goal=prev.get("goal"),
+                                              goal_domain=prev.get("goal_domain"))
+        meta.ai_state["phase"] = "goal"
+        WA.put_meta(meta)
+
+    if meta is not None and meta.phone and meta.is_in_window():
+        try:
+            text, ai_state, _ = responder.reach_out(
+                meta.ai_state, meta.locale or _engine_locale(tester.locale),
+                goal=(meta.ai_state or {}).get("goal"),
+                personality_block=personality.resolve_block(meta.persona),
+                purpose="recommit")
+            provider.send_text(meta.phone, text)
+            WA.record_outbound(tester.wa_user_id,
+                               store.Message(id=store.new_message_id(), direction="out",
+                                             type="text", text=text, operator_id="ai:recommit"),
+                               proactive_kind="nudge", ai_state=ai_state)
+            print("TESTER wipe tid=%s -> asked again on WhatsApp" % tid)
+            return {"cleared": had, "calls_dropped": dropped, "channel": "whatsapp"}
+        except Exception as e:  # noqa: BLE001 - fall back to a call rather than fail the wipe
+            print("WARN wipe tid=%s WhatsApp send failed (%s); falling back to a call"
+                  % (tid, type(e).__name__))
+
+    at = _next_morning_slot()
+    STORE.schedule_call(tid, at, "recommit", note="agree one new thing to work on")
+    print("TESTER wipe tid=%s -> call scheduled for %s" % (tid, at))
+    return {"cleared": had, "calls_dropped": dropped, "channel": "call", "at": at}
+
+
 def _admin_action(payload):
     """One switch for every roster action. Erasure is deliberately absent — phase 2."""
     action = _clean(payload.get("action"), 40)
@@ -1053,6 +1106,8 @@ def _admin_action(payload):
         tester.phone = new_phone
         tester.wa_user_id = store.user_id(new_phone, SALT)   # Track C follows the number
         result = {"phone_masked": tester_store.mask_phone(new_phone)}
+    elif action == "wipe_commitments":
+        result = _wipe_commitments(tester)
     elif action == "set_call_goal":
         goal = _clean(payload.get("call_goal"), 40)
         if goal not in tester_store.CALL_GOALS:

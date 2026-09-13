@@ -278,9 +278,17 @@ REACHOUT = (
 )
 
 
+RECOMMIT = (
+    "\n\nThe team has just cleared this conversation's open commitments and asked you to start "
+    "that part again. Do NOT refer to anything they previously agreed to — as far as this "
+    "message is concerned, there is no outstanding promise. Ask them warmly what ONE thing they "
+    "want to commit to next, in a single short question."
+)
+
+
 def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
               goal: str = None, development: str = None, personality_block: str = "",
-              commitment: str = None) -> tuple:
+              commitment: str = None, purpose: str = None) -> tuple:
     """Generate a proactive, context-aware keep-warm message → (text, new_state, info).
 
     Uses the person's goal + most-recent-development (from their profile) plus recent history so
@@ -302,6 +310,8 @@ def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
     if commitment:
         ctx += (' You promised to come back to them specifically about: "%s". Ask about THAT, '
                 'directly and warmly, as the reason you are messaging now.' % commitment)
+    if purpose == "recommit":
+        ctx += RECOMMIT
     lang = "[Language: write your message in the user's language (code: %s).]" % (locale or "en")
     pblock = ("\n\n" + personality_block) if personality_block else ""
     system = (_get_s3_text(GUARDRAILS_KEY) + pblock + "\n\n" + REACHOUT + "\n\n[Context] " + ctx

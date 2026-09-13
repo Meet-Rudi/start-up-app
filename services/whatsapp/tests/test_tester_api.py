@@ -85,12 +85,37 @@ import tester_api as api  # noqa: E402
 # `responder`/`gateway` modules stay untouched for every other test file in the suite, and the
 # engine is exercised by its own tests — here it only has to be deterministic.
 class _FakeResponder:
+    fail_reach_out = False
+
     @staticmethod
     def respond(state, user_text, locale="en", personality_block=""):
         if not state:
             return ("Hi, Rudi here. I'm an AI, not a person.", {"phase": "learn"},
                     {"phase": "learn", "lang": locale})
         return ("You said: " + user_text, {"phase": "goal"}, {"phase": "goal", "lang": locale})
+
+    @staticmethod
+    def new_session(prev_session_id=0, goal=None, goal_domain=None):
+        return {"phase": "learn", "session_id": prev_session_id + 1, "history": [],
+                "goal": goal, "goal_domain": goal_domain}
+
+    @staticmethod
+    def reach_out(state, locale="en", goal=None, development=None, personality_block="",
+                  commitment=None, purpose=None):
+        if _FakeResponder.fail_reach_out:
+            raise RuntimeError("engine down")
+        return ("What's one thing you want to work on next? (%s)" % purpose,
+                dict(state or {}, reached_out=purpose), {"lang": locale})
+
+
+_SENT_WA: list = []
+
+
+class _FakeProvider:
+    @staticmethod
+    def send_text(to_phone, body):
+        _SENT_WA.append((to_phone, body))
+        return "SM_fake"
 
 
 class _FakePersonality:
@@ -106,6 +131,7 @@ api._secrets = _FakeSecrets()
 api._ses = _FakeSes()
 api.responder = _FakeResponder
 api.personality = _FakePersonality
+api.provider = _FakeProvider
 
 
 # --------------------------------------------------------------------------- helpers
@@ -135,6 +161,8 @@ def reset_world():
     _MAILS.clear()
     _DIALED.clear()
     _PHONES.clear()
+    _SENT_WA.clear()
+    _FakeResponder.fail_reach_out = False
     api._cache.clear()
     api.STORE = ts.TesterStore(_FAKE_S3, BUCKET)
     api.CHAT = store.ConversationStore(_FAKE_S3, BUCKET, prefix="tester-conversations")
@@ -704,6 +732,79 @@ class TestAdmin(unittest.TestCase):
         self.assertEqual(tester.phone, "+32486112233")
         self.assertEqual(tester.wa_user_id, store.user_id("+32486112233", "test-salt"),
                          "Track C is keyed by the phone, so it has to follow the change")
+
+    # ------------------------------------------------------------------ wipe commitments
+    def _with_commitment(self, inbound_hours_ago=1.0):
+        """Give the tester a live WhatsApp thread holding an open promise."""
+        tester = api.STORE.get(self.tid)
+        now = store.now_dt()
+        inbound = store.to_iso(now - datetime.timedelta(hours=inbound_hours_ago))
+        meta = store.ContactMeta(
+            user_id=tester.wa_user_id, phone=tester.phone, locale="nl",
+            last_inbound_at=inbound, window_open_until=store.window_open_until(inbound),
+            commitment_at=store.to_iso(now + datetime.timedelta(hours=3)),
+            commitment_note="walk after dinner",
+            ai_state={"phase": "committed", "session_id": 4, "goal": "Walk 30 minutes a day"})
+        api.WA.put_meta(meta)
+        api.STORE.schedule_call(self.tid, store.to_iso(now + datetime.timedelta(hours=4)),
+                                "promise", note="walk after dinner")
+        tester.followup_call_at = store.iso_now()
+        api.STORE.put(tester)
+        return meta
+
+    def _wipe(self):
+        return call("POST", "/admin/action",
+                    {"action": "wipe_commitments", "tester_id": self.tid}, token=self.admin)
+
+    def test_wipe_in_window_clears_the_promise_and_asks_again_on_whatsapp(self):
+        self._with_commitment(inbound_hours_ago=1)
+        status, data = self._wipe()
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["result"]["channel"], "whatsapp")
+        self.assertEqual(len(_SENT_WA), 1, "the free-form window was open, so Rudi just asks")
+
+        meta = api.WA.get_meta(api.STORE.get(self.tid).wa_user_id)
+        self.assertEqual(meta.commitment_at, "")
+        self.assertEqual(meta.commitment_note, "")
+        self.assertEqual(meta.ai_state["phase"], "goal",
+                         "staying in 'committed' would leave Rudi chasing the promise we deleted")
+        self.assertEqual(meta.ai_state["goal"], "Walk 30 minutes a day",
+                         "the global goal is not a commitment and must survive")
+
+    def test_wipe_drops_pending_calls_and_restores_the_one_reach_back(self):
+        self._with_commitment()
+        status, data = self._wipe()
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["result"]["calls_dropped"], 1)
+        self.assertEqual(api.STORE.scheduled_calls(), [])
+        self.assertEqual(api.STORE.get(self.tid).followup_call_at, "",
+                         "a deliberate restart is not Rudi cycling — give the reach-back back")
+
+    def test_wipe_out_of_window_books_a_call_in_a_non_quiet_hour(self):
+        self._with_commitment(inbound_hours_ago=30)
+        status, data = self._wipe()
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["result"]["channel"], "call")
+        self.assertEqual(_SENT_WA, [], "no free-form message exists once the window has closed")
+
+        pending = api.STORE.scheduled_calls()
+        self.assertEqual([e["reason"] for e in pending], ["recommit"])
+        self.assertEqual(pending[0]["at"], data["result"]["at"])
+        self.assertFalse(api._is_quiet_now(store.parse_iso(pending[0]["at"])))
+
+    def test_wipe_falls_back_to_a_call_when_the_engine_is_down(self):
+        self._with_commitment(inbound_hours_ago=1)
+        _FakeResponder.fail_reach_out = True
+        status, data = self._wipe()
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["result"]["channel"], "call")
+        self.assertEqual([e["reason"] for e in api.STORE.scheduled_calls()], ["recommit"],
+                         "the commitments are already gone — the wipe must not half-finish")
+
+    def test_wipe_is_harmless_when_there_is_nothing_to_wipe(self):
+        status, data = self._wipe()
+        self.assertEqual(status, 200, data)
+        self.assertFalse(data["result"]["cleared"])
 
     def test_admin_cannot_move_a_number_onto_two_testers(self):
         _, _ = register_and_activate(email="joris@example.be")

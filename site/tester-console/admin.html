@@ -337,6 +337,7 @@
     if (t.calls_used > 0) acts.push(["reset_call_limit", "Reset call limit", "btn ghost xs"]);
     if (t.calls_used >= t.calls_max) acts.push(["grant_calls", "+5 calls", "btn ghost xs"]);
     if (t.queue_position >= 0) acts.push(["drop_from_queue", "Drop from queue", "btn ghost xs"]);
+    acts.push(["wipe_commitments", "Wipe commitments", "btn ghost xs"]);
     acts.push(["set_phone", "Change number", "btn ghost xs"]);
     acts.push(["kill_session", "Kill session", "btn ghost xs"]);
     acts.push(t.status === "revoked"
@@ -384,6 +385,11 @@
     if (!btn) return;
     var act = btn.dataset.act;
     if (act === "revoke" && !confirm("Revoke this tester? Their sessions end immediately and they can't log back in.")) return;
+    if (act === "wipe_commitments" && !confirm(
+          "Forget everything this tester promised, and ask them for a new commitment?\n\n" +
+          "Pending follow-up calls are dropped. Rudi then messages them on WhatsApp straight " +
+          "away if the 24h window is still open, or books a call for the next non-quiet hour " +
+          "if it has closed.")) return;
 
     var extra = {};
     if (act === "set_phone") {
@@ -406,9 +412,16 @@
                    "Couldn't " + act.replace(/_/g, " ") + " — " + reason(res));
           return;
         }
+        var out = res.data.result || {};
         var msg = act + " done";
-        if (res.data.result && res.data.result.mail_sent === false) {
+        if (out.mail_sent === false) {
           msg = act + " done, but the mail could not be sent — check the SES sender identity.";
+        } else if (act === "wipe_commitments") {
+          msg = out.channel === "whatsapp"
+            ? "Commitments wiped — Rudi has asked for a new one on WhatsApp."
+            : "Commitments wiped — the window had closed, so Rudi calls at " +
+              String(out.at || "").slice(0, 16).replace("T", " ") + ".";
+          if (out.calls_dropped) msg += " " + out.calls_dropped + " pending call(s) dropped.";
         }
         R.banner($("#banner"), res.data.result && res.data.result.mail_sent === false ? "warn" : "good", msg);
         load();

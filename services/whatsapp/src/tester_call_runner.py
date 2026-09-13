@@ -293,6 +293,10 @@ def _config_for(entry, tester, speak_only=""):
                  "not sent a message yet. Help them set one small near-term goal, and before you "
                  "say goodbye ask them again to send you any WhatsApp message so the two of you "
                  "can carry on there." % (entry.get("note") or "their goal"))
+    elif entry.get("reason") == "recommit":
+        notes = ("The team has cleared this person's open commitments. Do not refer to anything "
+                 "they agreed to before — start clean. Help them settle on one thing they want "
+                 "to work on next and agree a first small step.")
     elif entry.get("note"):
         notes = "You promised to call back about: %s. Ask about that first." % entry["note"]
 
