@@ -484,10 +484,11 @@ class ConversationStore:
         meta.nudge_sent_for_window = ""
         meta.reengage_count = 0
         meta.quiet_since = ""
-        # A new user turn supersedes the old promise: the conversation has moved on, and if Rudi
-        # promises again he does so in the reply that follows this call.
-        meta.commitment_at = ""
-        meta.commitment_note = ""
+        # The commitment deliberately SURVIVES an inbound. Clearing it here meant a promise died
+        # the moment the person acknowledged it: Rudi said "I'll check in 30 minutes", the tester
+        # replied "Top!", and that reply cancelled the check-in. A commitment is about an activity
+        # with its own clock, not about who spoke last. It ends when it is kept, or when Rudi
+        # promises something newer in its place.
         _reschedule(meta, parse_iso(msg.at))
         self.put_meta(meta)
         return meta

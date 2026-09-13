@@ -215,14 +215,31 @@ class CommitmentTests(unittest.TestCase):
         self.assertEqual(meta.commitment_at, "", "a kept promise must not fire again")
         self.assertEqual(meta.commitment_note, "")
 
-    def test_a_new_user_turn_supersedes_the_old_promise(self):
+    def test_acknowledging_a_promise_does_not_cancel_it(self):
+        """Straight from a tester transcript: Rudi said "I'll check in 30 minutes", they replied
+        "Top!", and that reply wiped the check-in. Saying thanks is not changing the plan."""
         st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
         st.put_meta(self._meta(commitment_at="2026-09-13T12:15:00+00:00",
                                commitment_note="the bike ride"))
         st.record_inbound("wa_c", "+320000000000",
-                          store.Message(id="m2", direction="in", text="already done!",
+                          store.Message(id="m2", direction="in", text="Top!",
                                         at="2026-09-13T12:05:00+00:00"))
-        self.assertEqual(st.get_meta("wa_c").commitment_at, "")
+        meta = st.get_meta("wa_c")
+        self.assertEqual(meta.commitment_at, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(meta.next_proactive_at, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(meta.next_proactive_kind, "nudge")
+
+    def test_a_newer_promise_replaces_the_older_one(self):
+        st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
+        st.put_meta(self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                               commitment_note="the bike ride"))
+        st.record_outbound("wa_c", store.Message(id="m3", direction="out", text="tomorrow then",
+                                                 at="2026-09-13T12:06:00+00:00"),
+                           commitment_at="2026-09-13T18:00:00+00:00",
+                           commitment_note="the evening stretch")
+        meta = st.get_meta("wa_c")
+        self.assertEqual(meta.commitment_at, "2026-09-13T18:00:00+00:00")
+        self.assertEqual(meta.commitment_note, "the evening stretch")
 
     def test_outbound_records_a_new_promise(self):
         st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
