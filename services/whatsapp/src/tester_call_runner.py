@@ -182,7 +182,16 @@ def _outcome_of(manifest):
 
 
 def _follow_up_from(manifest, tester, ended_at):
-    """Turn a finished call into the call it earned, if any."""
+    """Turn a finished call into the call it earned, if any.
+
+    At most one, ever. A follow-up call that goes well would otherwise earn a follow-up of its
+    own, and so on — Rudi ringing someone repeatedly because each call succeeded. After the one
+    reach-back the next move is theirs, on WhatsApp.
+    """
+    if tester.followup_call_at:
+        print("RUNNER no further follow-up tid=%s (one already used %s)"
+              % (tester.tester_id, tester.followup_call_at))
+        return ""
     outcome = manifest.get("outcome") or {}
     config = manifest.get("config") or {}
     goal = str(config.get("call_goal") or "").upper()
@@ -363,12 +372,20 @@ def place_due(now):
                                     note=entry.get("note", ""), since=entry.get("since", ""))
                 _skip(entry, "quiet hours; moved to %s" % store.to_iso(when))
             else:
-                _skip(entry, "dispatch refused: %s" % result)
+                # Not a retry case. Quiet hours are a "not yet"; everything else — no consent,
+                # an archived contact, a dispatcher that refused — is a "no", and leaving the
+                # entry in place would re-attempt it every five minutes indefinitely.
+                STORE.cancel_calls(tid, entry.get("reason", ""))
+                _skip(entry, "dispatch refused: %s (dropped, not retried)" % result)
             skipped += 1
             continue
 
         STORE.cancel_calls(tid, entry.get("reason", ""))
         STORE.bump_calls_today()
+        # The one reach-back is now spent, whatever happens on the call. An unanswered or
+        # abandoned call does NOT buy another one.
+        tester.followup_call_at = store.iso_now()
+        STORE.put(tester)
         placed += 1
         print("RUNNER placed tid=%s reason=%s call=%s mode=%s"
               % (tid, entry.get("reason"), result.get("call_id"),
@@ -377,9 +394,39 @@ def place_due(now):
 
 
 # --------------------------------------------------------------------------- entry point
+def restore_followups():
+    """Give the reach-back back to anyone who has since written on WhatsApp.
+
+    The cap exists to stop Rudi ringing someone who has gone quiet. Once they pick the
+    conversation back up, the relationship is live again and a future promise should be
+    keepable — so the allowance resets on their message, and only on their message.
+    """
+    restored = 0
+    for tester in STORE.list_all():
+        if not tester.followup_call_at or not tester.wa_user_id:
+            continue
+        meta = WA.get_meta(tester.wa_user_id)
+        if meta is None or not meta.last_inbound_at:
+            continue
+        try:
+            if store.parse_iso(meta.last_inbound_at) > store.parse_iso(tester.followup_call_at):
+                tester.followup_call_at = ""
+                STORE.put(tester)
+                restored += 1
+                print("RUNNER follow-up allowance restored tid=%s (they wrote back)"
+                      % tester.tester_id)
+        except (ValueError, TypeError):
+            continue
+    return restored
+
+
 def handler(event, context):
     now = store.now_dt()
     counted = scheduled = placed = skipped = 0
+    try:
+        restore_followups()
+    except Exception as e:  # noqa: BLE001 - never let this block the rest of the tick
+        print("ERROR restore_followups: %s" % e)
     try:
         counted, scheduled = reconcile(now)
     except Exception as e:  # noqa: BLE001 - reconciliation must not block dialling

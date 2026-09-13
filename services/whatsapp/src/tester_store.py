@@ -141,6 +141,11 @@ class Tester:
     calls_max: int = MAX_CALLS_PER_TESTER
     last_call_at: str = ""
     last_call_outcome: str = ""           # connected | voicemail | no_answer | failed
+    # Rudi gets ONE reach-back, ever — set the moment it is dialled, whatever the outcome.
+    # Cleared only when the person writes on WhatsApp. Without this a follow-up call can earn
+    # another follow-up, and an unanswered one just gets retried: either way the person is rung
+    # over and over by a system that thinks it is being helpful.
+    followup_call_at: str = ""
     # --- track progress: not_started | in_progress | done ---
     track_chat: str = "not_started"
     track_call: str = "not_started"

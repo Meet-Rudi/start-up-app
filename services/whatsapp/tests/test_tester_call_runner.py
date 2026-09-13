@@ -251,6 +251,56 @@ class RunnerTests(unittest.TestCase):
         self._tester()
         self.assertEqual(runner.place_due(NOW), (0, 0))
 
+    # ---------------------------------------------------------------- one reach-back, ever
+    def test_placing_the_follow_up_spends_the_one_allowance(self):
+        self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise")
+        runner.place_due(NOW)
+        self.assertTrue(runner.STORE.get("tst_a").followup_call_at)
+
+    def test_a_follow_up_call_never_earns_another_follow_up(self):
+        """Otherwise each successful call schedules the next one and Rudi rings forever."""
+        self._tester(followup_call_at="2026-09-14T08:00:00+00:00")
+        self._finished_call(call_goal="GOAL_FOLLOWUP", check_in_minutes=60, goal_domain=None)
+        runner.reconcile(NOW)
+        self.assertEqual(runner.STORE.scheduled_calls(), [])
+
+    def test_an_unanswered_follow_up_does_not_buy_another(self):
+        self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "whatsapp_reminder",
+                                   since="2026-09-14T09:00:00+00:00")
+        runner.place_due(NOW)
+        spent = runner.STORE.get("tst_a").followup_call_at
+        self.assertTrue(spent)
+        self._finished_call(call_id="c_noans", answered_by="", turns=0, goal_domain="fitness")
+        runner.reconcile(NOW)
+        self.assertEqual(runner.STORE.scheduled_calls(), [])
+        self.assertEqual(runner.STORE.get("tst_a").followup_call_at, spent,
+                         "an unanswered reach-back is still the reach-back")
+
+    def test_a_refused_dispatch_is_dropped_not_retried_every_tick(self):
+        self._tester()
+        self.dispatch.ok, self.dispatch.reason = False, "consent-not-granted"
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise")
+        runner.place_due(NOW)
+        self.assertEqual(runner.STORE.scheduled_calls(), [],
+                         "only quiet hours is a 'not yet'; a refusal must not re-attempt forever")
+
+    def test_writing_on_whatsapp_returns_the_reach_back(self):
+        t = self._tester(followup_call_at="2026-09-14T08:00:00+00:00")
+        runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                             last_inbound_at="2026-09-14T09:00:00+00:00"))
+        runner.restore_followups()
+        self.assertEqual(runner.STORE.get("tst_a").followup_call_at, "")
+
+    def test_continued_silence_does_not_return_it(self):
+        t = self._tester(followup_call_at="2026-09-14T08:00:00+00:00")
+        runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                             last_inbound_at="2026-09-14T07:00:00+00:00"))
+        runner.restore_followups()
+        self.assertTrue(runner.STORE.get("tst_a").followup_call_at,
+                        "going quiet is exactly when Rudi must stop calling")
+
 
 if __name__ == "__main__":
     unittest.main()
