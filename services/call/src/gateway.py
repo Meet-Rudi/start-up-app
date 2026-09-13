@@ -148,3 +148,22 @@ def generate(messages, json_mode=False):
     if attempts > 0 and rate_limited == attempts:
         raise AllRateLimited("All models rate-limited -> " + " | ".join(errors))
     raise AIError("All endpoints failed -> " + " | ".join(errors))
+
+
+def has_headroom():
+    """Can we hold a real conversation right now? One cheap generation answers it honestly.
+
+    There is no quota API to ask. The binding limit is Groq's tokens-per-minute, which is a
+    moving target that depends on what every other call just spent — so the only truthful test
+    is to actually ask the model something and see whether it answers.
+
+    Used before placing a proactive call: a five-minute conversation that dies on turn one is
+    worse than a one-line spoken message, so the caller falls back to speak-only on False.
+    """
+    try:
+        generate([{"role": "system", "content": "Reply with the single word: ok"},
+                  {"role": "user", "content": "ok"}])
+        return True
+    except AIError as e:
+        print("INFO: no AI headroom for a conversational call (%s)" % type(e).__name__)
+        return False

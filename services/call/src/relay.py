@@ -55,12 +55,22 @@ DEFAULT_VOICE_ATTRS = {
 # So there is no way to fail over to another voice once someone has answered; the choice has to
 # be right before the phone rings. See pick_voice() for how that choice is made.
 #
-# `nl` resolves to FLEMISH, matching meetrudi-tts's short keys: the pilot cohort is Belgian and
-# a Netherlands-Dutch voice reads as audibly foreign to them.
-#
 # An entry with no `voice` means "let the provider pick its default for this locale", and an
 # empty entry means "let Twilio pick" — each step is strictly more conservative than the last,
-# so the tail of a cascade is always something that cannot itself be misconfigured.
+# so where a cascade has a tail it is something that cannot itself be misconfigured.
+#
+# DUTCH IS DELIBERATELY DIFFERENT: it has no tail. Luk Belcer was hand-picked and listened to,
+# and every Dutch-speaking locale gets him or nothing — nl, nl-BE and nl-NL alike. A silent
+# substitution would put an unvetted voice in front of a patient and, worse, would do it
+# invisibly: the pilot would be measuring a voice nobody chose. A dead-air call is a louder
+# failure than a wrong-voice call, and a louder failure is the one we want here. See pick_voice.
+#
+# nl-NL keeps its own locale — that drives Deepgram's transcription and the TTS language hint,
+# where Netherlands-Dutch is genuinely the better match — while the voice stays Flemish. The
+# accent is Luk's either way; the pilot cohort is Belgian and he is the voice we tested.
+FLEMISH_VOICE = "ppGIZI01uUlIWI734dUU"     # Luk Belcer — hand-picked, never substituted
+_FLEMISH_ONLY = [{"ttsProvider": "ElevenLabs", "voice": FLEMISH_VOICE}]
+
 VOICE_PROFILES = {
     "en": {
         "language": "en-US",
@@ -69,22 +79,12 @@ VOICE_PROFILES = {
             {},
         ],
     },
-    "nl": {
-        "language": "nl-BE",
-        "cascade": [
-            # Luk Belcer — the chosen Flemish voice.
-            {"ttsProvider": "ElevenLabs", "voice": "ppGIZI01uUlIWI734dUU"},
-            # ElevenLabs' own default for the locale.
-            {"ttsProvider": "ElevenLabs"},
-            # Whatever Twilio picks for nl-BE. Cannot be misconfigured, so it ends the chain.
-            {},
-        ],
-    },
+    "nl": {"language": "nl-BE", "cascade": list(_FLEMISH_ONLY)},
     "fr": {"language": "fr-BE", "cascade": [{}]},        # Wallonia, not fr-FR
     "de": {"language": "de-DE", "cascade": [{}]},
 }
 VOICE_PROFILES["nl-be"] = VOICE_PROFILES["nl"]
-VOICE_PROFILES["nl-nl"] = {"language": "nl-NL", "cascade": [{}]}
+VOICE_PROFILES["nl-nl"] = {"language": "nl-NL", "cascade": list(_FLEMISH_ONLY)}
 
 
 def profile_for(language):
@@ -107,6 +107,11 @@ def pick_voice(language, health=None):
     available. This is the closest honest equivalent: a voice that has demonstrably failed is
     skipped on every subsequent call, so a misconfigured voice costs one call rather than all
     of them.
+
+    A single-entry cascade is therefore a PIN, not a preference: every step is exhausted, the
+    loop falls through, and the one voice is returned however sick it looks. That is what Dutch
+    wants — Luk Belcer or nothing. The health record still gets written either way, so the
+    failure stays visible in `calls/_voices/health.json` even though nothing acts on it.
     """
     health = health or {}
     cascade = profile_for(language).get("cascade") or [{}]
@@ -156,6 +161,24 @@ def build_twiml(ws_url, call_id, attrs=None, hints="", language="en", health=Non
         '</ConversationRelay>'
         '</Connect></Response>'
     ) % (_attr(ws_url), rendered, _attr(call_id))
+
+
+def build_say_twiml(text, language="en"):
+    """A call that only speaks one line and hangs up — no socket, no model, no tokens.
+
+    This is the fallback when there isn't AI headroom to hold a real conversation: better to
+    deliver the one sentence that matters than to ring someone and abandon them mid-call.
+
+    It deliberately does NOT use the ConversationRelay voice cascade: those are ElevenLabs and
+    Google voice ids, which `<Say>` does not accept. Twilio picks its own default voice for the
+    locale, so this sounds different from Rudi — acceptable for a one-line reminder, and the
+    reason this is a fallback rather than a feature.
+    """
+    profile = profile_for(language)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Response><Say language="%s">%s</Say></Response>'
+    ) % (_attr(profile["language"]), _attr(text))
 
 
 def say(text, last=True, interruptible=True):

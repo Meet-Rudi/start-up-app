@@ -1,0 +1,242 @@
+"""
+meetrudi-tester-call-runner tests — no boto3, no network, synthetic data only.
+
+What these pin down is the behaviour that costs someone something when it breaks: a call that
+is counted twice, a promise that is never kept, and a reminder call placed at someone who
+already did the thing it was going to remind them about.
+
+Run:  python -m unittest discover -s services/whatsapp/tests -v
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import json
+import types
+import datetime
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "src"))
+sys.path.insert(0, HERE)
+
+from fake_s3 import FakeS3  # noqa: E402
+
+BUCKET = "meetrudi-ai-data-test"
+_FAKE_S3 = FakeS3()
+
+# Only install a boto3 double if a sibling test module hasn't already; replacing theirs would
+# hand their subjects a client their assertions never see.
+if "boto3" not in sys.modules:
+    _boto3 = types.ModuleType("boto3")
+    _boto3.client = lambda *a, **k: _FAKE_S3
+    sys.modules["boto3"] = _boto3
+
+os.environ["DATA_BUCKET"] = BUCKET
+os.environ["PSEUDONYMIZE_SALT"] = "test-salt"
+os.environ["TESTER_PBKDF2_ROUNDS"] = "1000"
+os.environ["CALL_DISPATCH_URL"] = "https://dispatch.test/"
+
+import store  # noqa: E402
+import tester_store as ts  # noqa: E402
+import tester_call_runner as runner  # noqa: E402
+
+NOW = store.parse_iso("2026-09-14T10:00:00+00:00")   # 12:00 Brussels — social hours
+
+
+class _Dispatcher:
+    """Captures what the runner asked the dispatcher to dial."""
+
+    def __init__(self):
+        self.calls = []
+        self.ok = True
+        self.reason = "quiet-hours"
+
+    def __call__(self, config):
+        self.calls.append(config)
+        if self.ok:
+            return True, {"ok": True, "call_id": "call_new_1"}
+        return False, self.reason
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        _FAKE_S3.__init__()
+        runner._s3 = _FAKE_S3
+        runner.STORE = ts.TesterStore(_FAKE_S3, BUCKET)
+        runner.WA = store.ConversationStore(_FAKE_S3, BUCKET)
+        runner._cache.clear()
+        self.dispatch = _Dispatcher()
+        runner._dispatch = self.dispatch
+        runner.gateway = types.SimpleNamespace(has_headroom=lambda: True)
+
+    # ---------------------------------------------------------------- fixtures
+    def _tester(self, tid="tst_a", **kw):
+        base = dict(tester_id=tid, first_name="Marieke", phone="+32479123456",
+                    locale="en", consent_health=True, status="active",
+                    goal="Move more", wa_user_id="wa_marieke")
+        base.update(kw)
+        t = ts.Tester(**base)
+        runner.STORE.put(t)
+        return t
+
+    def _finished_call(self, call_id="call_1", tid="tst_a", call_goal="GET_TO_KNOW",
+                       turns=6, answered_by="human", goal_domain="fitness",
+                       check_in_minutes=None, ended="2026-09-14T09:00:00+00:00"):
+        manifest = {
+            "call_id": call_id, "status": "completed", "ended_at": ended,
+            "totals": {"turns": turns},
+            "telephony": {"answered_by": answered_by, "call_status": "completed"},
+            "config": {"call_goal": call_goal, "tester_id": tid},
+            "outcome": {"goal": "Move more", "goal_domain": goal_domain,
+                        "check_in_minutes": check_in_minutes,
+                        "check_in_about": "how the ride went" if check_in_minutes else None},
+        }
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/%s/manifest.json" % call_id,
+                            Body=json.dumps(manifest).encode())
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/_index/2026-09-14/%s.json" % call_id,
+                            Body=json.dumps({"call_id": call_id, "tester_id": tid,
+                                             "status": "completed"}).encode())
+        return manifest
+
+    # ---------------------------------------------------------------- the ledger
+    def test_a_connected_call_is_counted_whoever_placed_it(self):
+        """The console only counted calls its own browser polled, so Rudi-initiated calls were
+        invisible to the ledger."""
+        self._tester()
+        self._finished_call()
+        runner.reconcile(NOW)
+        t = runner.STORE.get("tst_a")
+        self.assertEqual(t.calls_used, 1)
+        self.assertEqual(t.last_call_outcome, "connected")
+        self.assertEqual(t.track_call, "done")
+
+    def test_voicemail_and_no_answer_are_not_counted(self):
+        self._tester()
+        self._finished_call(call_id="c_vm", answered_by="machine_start", turns=0)
+        self._finished_call(call_id="c_na", answered_by="", turns=0)
+        runner.reconcile(NOW)
+        self.assertEqual(runner.STORE.get("tst_a").calls_used, 0)
+
+    def test_reconciling_twice_does_not_double_count(self):
+        self._tester()
+        self._finished_call()
+        runner.reconcile(NOW)
+        runner.reconcile(NOW)
+        self.assertEqual(runner.STORE.get("tst_a").calls_used, 1)
+
+    # ---------------------------------------------------------------- follow-ups earned
+    def test_a_promise_on_a_call_schedules_the_redial(self):
+        self._tester()
+        self._finished_call(call_goal="GOAL_FOLLOWUP", check_in_minutes=90, goal_domain=None)
+        runner.reconcile(NOW)
+        entries = runner.STORE.scheduled_calls()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["reason"], "promise")
+        self.assertEqual(entries[0]["note"], "how the ride went")
+
+    def test_get_to_know_with_a_domain_schedules_the_whatsapp_reminder(self):
+        self._tester()
+        self._finished_call(call_goal="GET_TO_KNOW", goal_domain="fitness")
+        runner.reconcile(NOW)
+        entries = runner.STORE.scheduled_calls()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["reason"], "whatsapp_reminder")
+        gap = (store.parse_iso(entries[0]["at"])
+               - store.parse_iso("2026-09-14T09:00:00+00:00")).total_seconds() / 3600
+        self.assertAlmostEqual(gap, 22.0, places=2)
+
+    def test_get_to_know_without_a_domain_schedules_nothing(self):
+        """No focus area means the call didn't achieve what it was for — there is nothing to
+        hand over to WhatsApp, so ringing them again would just be noise."""
+        self._tester()
+        self._finished_call(call_goal="GET_TO_KNOW", goal_domain=None)
+        runner.reconcile(NOW)
+        self.assertEqual(runner.STORE.scheduled_calls(), [])
+
+    # ---------------------------------------------------------------- placing the calls
+    def test_a_due_call_is_placed_with_the_locked_number(self):
+        self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise", note="the bike ride")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 1)
+        cfg = self.dispatch.calls[0]
+        self.assertEqual(cfg["to"], "+32479123456")
+        self.assertEqual(cfg["call_goal"], "GOAL_FOLLOWUP")
+        self.assertIn("the bike ride", cfg["notes"])
+        self.assertNotIn("speak_only", cfg)
+        self.assertEqual(runner.STORE.scheduled_calls(), [], "a placed call leaves the queue")
+
+    def test_the_reminder_is_cancelled_if_they_already_messaged(self):
+        t = self._tester()
+        runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                             last_inbound_at="2026-09-14T09:30:00+00:00"))
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "whatsapp_reminder",
+                                   since="2026-09-14T09:00:00+00:00")
+        placed, skipped = runner.place_due(NOW)
+        self.assertEqual((placed, skipped), (0, 1))
+        self.assertEqual(self.dispatch.calls, [], "nobody should be rung about a thing they did")
+        self.assertEqual(runner.STORE.scheduled_calls(), [])
+
+    def test_the_reminder_is_placed_if_they_stayed_silent(self):
+        t = self._tester()
+        runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                             last_inbound_at="2026-09-14T08:00:00+00:00"))
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "whatsapp_reminder",
+                                   note="fitness", since="2026-09-14T09:00:00+00:00")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 1)
+        self.assertIn("WhatsApp", self.dispatch.calls[0]["notes"])
+
+    def test_without_ai_headroom_it_speaks_one_line_instead(self):
+        """Ringing someone and dying on turn one is worse than one clear sentence."""
+        runner.gateway = types.SimpleNamespace(has_headroom=lambda: False)
+        self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "whatsapp_reminder",
+                                   since="2026-09-14T09:00:00+00:00")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 1)
+        cfg = self.dispatch.calls[0]
+        self.assertIn("WhatsApp", cfg["speak_only"])
+        self.assertTrue(cfg["speak_only"].strip())
+
+    def test_a_tester_with_no_calls_left_is_not_rung(self):
+        self._tester(calls_used=5, calls_max=5)
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise")
+        placed, skipped = runner.place_due(NOW)
+        self.assertEqual((placed, skipped), (0, 1))
+        self.assertEqual(self.dispatch.calls, [])
+
+    def test_paused_calling_holds_everything(self):
+        self._tester()
+        runner.STORE.save_settings({"calling_paused": True})
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 0)
+        self.assertEqual(self.dispatch.calls, [])
+        self.assertEqual(len(runner.STORE.scheduled_calls()), 1, "held, not dropped")
+
+    def test_quiet_hours_move_the_call_rather_than_dropping_it(self):
+        self._tester()
+        self.dispatch.ok, self.dispatch.reason = False, "quiet-hours"
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise", note="the ride")
+        runner.place_due(NOW)
+        entries = runner.STORE.scheduled_calls()
+        self.assertEqual(len(entries), 1, "a quiet-hours refusal must reschedule, not discard")
+        self.assertEqual(entries[0]["note"], "the ride")
+
+    def test_a_revoked_tester_is_never_rung(self):
+        self._tester(status="revoked")
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 0)
+        self.assertEqual(self.dispatch.calls, [])
+
+    def test_nothing_due_is_a_quiet_no_op(self):
+        self._tester()
+        self.assertEqual(runner.place_due(NOW), (0, 0))
+
+
+if __name__ == "__main__":
+    unittest.main()

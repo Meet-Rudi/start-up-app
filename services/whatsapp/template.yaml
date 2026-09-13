@@ -132,6 +132,12 @@ Resources:
       LogGroupName: /aws/lambda/meetrudi-tester-api
       RetentionInDays: 30
 
+  TesterCallRunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-tester-call-runner
+      RetentionInDays: 30
+
   WaWebhookFunction:
     Type: AWS::Serverless::Function
     DependsOn: WaWebhookLogGroup
@@ -342,6 +348,46 @@ Resources:
           AllowOrigins: [!Ref TesterConsoleOrigin]
           AllowMethods: ["GET", "POST"]
           AllowHeaders: ["content-type", "x-tester-token"]
+
+  # Rudi-initiated calls for the cohort: reconciles finished calls into the ledger, then places
+  # the calls Rudi owes (a promise he made aloud, or a WhatsApp hand-off that never happened).
+  # Lives here rather than in meetrudi-call because it needs TesterStore and the WhatsApp
+  # conversation store — the call service has neither.
+  TesterCallRunnerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TesterCallRunnerLogGroup
+    Properties:
+      FunctionName: meetrudi-tester-call-runner
+      Description: Reconciles finished tester calls and places promised / hand-off reminder calls.
+      Handler: tester_call_runner.handler
+      CodeUri: src/
+      Timeout: 120
+      MemorySize: 512
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          PSEUDONYMIZE_SALT: meetrudi-pilot-salt-change-me
+          CALL_PREFIX: calls
+          CALL_DISPATCH_URL: !Ref CallDispatchUrl
+          CALL_DISPATCH_SECRET: meetrudi/call/dispatch-token
+          TESTER_CALL_MAX_SECONDS: "300"
+          TESTER_WHATSAPP_GRACE_HOURS: "22"
+          QUIET_START: "21:30"
+          QUIET_END: "06:30"
+          DEFAULT_TZ: Europe/Brussels
+          # Needed for the headroom probe before a conversational call.
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: openai/gpt-oss-20b
+          GROQ_SECRET: meetrudi-groq-firstkey
+      Events:
+        Tick:
+          Type: Schedule
+          Properties:
+            # Five minutes is close enough for a promise measured in tens of minutes, and keeps
+            # the reconciliation pass cheap.
+            Schedule: rate(5 minutes)
 
   # Throwaway outbound tester (token-gated). Remove once WhatsApp sending is confirmed.
   WaSendTestFunction:

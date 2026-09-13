@@ -207,9 +207,9 @@ class Languages(unittest.TestCase):
 
     def test_locales_without_a_chosen_voice_defer_to_twilio(self):
         """Guessing a provider voice ID fails at dial time, so only locales whose voice has
-        actually been chosen and heard name one. Flemish now does (Luk Belcer); fr and de do
-        not, and must stay unset rather than acquire a guess."""
-        for lang in ("fr", "de", "nl-NL"):
+        actually been chosen and heard name one. Dutch now does (Luk Belcer, every variant);
+        fr and de do not, and must stay unset rather than acquire a guess."""
+        for lang in ("fr", "de"):
             self.assertNotIn("voice=", relay.build_twiml("wss://x/live", "c1", language=lang), lang)
 
     def test_endpointing_is_eager_because_barge_in_covers_it(self):
@@ -250,24 +250,32 @@ class VoiceCascade(unittest.TestCase):
         self.assertIn('ttsProvider="ElevenLabs"', twiml)
         self.assertIn('language="nl-BE"', twiml)
 
-    def test_falls_back_to_elevenlabs_default_when_luk_fails(self):
-        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": False}}
-        twiml = relay.build_twiml("wss://x/live", "c1", language="nl", health=health)
-        self.assertNotIn("ppGIZI01uUlIWI734dUU", twiml)
-        self.assertIn('ttsProvider="ElevenLabs"', twiml)
-        self.assertNotIn("voice=", twiml)
+    def test_every_dutch_variant_gets_luk_belcer(self):
+        """He was hand-picked and listened to. nl, nl-BE and nl-NL all get him — only the
+        locale differs, because that drives transcription rather than timbre."""
+        for lang, locale in (("nl", "nl-BE"), ("nl-BE", "nl-BE"), ("nl-NL", "nl-NL")):
+            twiml = relay.build_twiml("wss://x/live", "c1", language=lang)
+            self.assertIn('voice="ppGIZI01uUlIWI734dUU"', twiml, lang)
+            self.assertIn('ttsProvider="ElevenLabs"', twiml, lang)
+            self.assertIn('language="%s"' % locale, twiml, lang)
 
-    def test_falls_back_to_twilio_when_elevenlabs_fails_too(self):
-        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": False},
-                  "ElevenLabs:default": {"ok": False}}
-        twiml = relay.build_twiml("wss://x/live", "c1", language="nl", health=health)
-        self.assertNotIn("ttsProvider=", twiml)
-        self.assertIn('language="nl-BE"', twiml)
+    def test_luk_is_never_substituted_even_after_he_fails(self):
+        """The whole point of pinning. A silent swap would put an unvetted voice in front of a
+        patient and make the pilot measure a voice nobody chose — dead air is the better
+        failure, because it is the one somebody notices."""
+        health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": False}}
+        for lang in ("nl", "nl-BE", "nl-NL"):
+            twiml = relay.build_twiml("wss://x/live", "c1", language=lang, health=health)
+            self.assertIn('voice="ppGIZI01uUlIWI734dUU"', twiml, lang)
+            self.assertIn('ttsProvider="ElevenLabs"', twiml, lang)
 
     def test_the_tail_of_a_cascade_cannot_be_misconfigured(self):
-        """Every chain must end in something with no voice or provider to get wrong."""
-        for lang in ("en", "nl", "fr", "de", "nl-NL"):
+        """Where a chain has a tail it must end in something with no voice or provider to get
+        wrong. Dutch is exempt by design: it is pinned, so it has no tail at all."""
+        for lang in ("en", "fr", "de"):
             self.assertEqual(relay.profile_for(lang)["cascade"][-1], {}, lang)
+        for lang in ("nl", "nl-BE", "nl-NL"):
+            self.assertEqual(len(relay.profile_for(lang)["cascade"]), 1, lang)
 
     def test_a_healthy_voice_is_not_skipped(self):
         health = {"ElevenLabs:ppGIZI01uUlIWI734dUU": {"ok": True}}
@@ -275,13 +283,22 @@ class VoiceCascade(unittest.TestCase):
         self.assertEqual(option.get("voice"), "ppGIZI01uUlIWI734dUU")
         self.assertEqual(key, "ElevenLabs:ppGIZI01uUlIWI734dUU")
 
-    def test_failure_is_remembered_so_the_next_call_skips_it(self):
+    def test_a_failure_is_still_recorded_even_though_nothing_acts_on_it(self):
+        """Pinning removes the failover, not the diagnosis. The health file stays the place
+        someone looks to find out that Luk has stopped working."""
         calllog.mark_voice("ElevenLabs:ppGIZI01uUlIWI734dUU", False, "64111 TTS provider error")
         option, _ = relay.pick_voice("nl", calllog.voice_health())
-        self.assertIsNone(option.get("voice"))
+        self.assertEqual(option.get("voice"), "ppGIZI01uUlIWI734dUU")
         entry = calllog.voice_health()["ElevenLabs:ppGIZI01uUlIWI734dUU"]
         self.assertEqual(entry["failures"], 1)
         self.assertIn("64111", entry["reason"])
+
+    def test_english_still_falls_back_because_its_voice_is_not_pinned(self):
+        """Only Dutch is pinned. English keeps the cascade it always had."""
+        health = {"Google:en-US-Journey-D": {"ok": False}}
+        twiml = relay.build_twiml("wss://x/live", "c1", language="en", health=health)
+        self.assertNotIn("voice=", twiml)
+        self.assertIn('language="en-US"', twiml)
 
     def test_a_tts_error_on_a_call_marks_the_voice(self):
         _REPLIES[:] = [("Hallo.", {})]

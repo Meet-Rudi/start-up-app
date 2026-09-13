@@ -508,6 +508,69 @@ class TesterStore:
         self._put_json(key, rec)
         return rec["count"]
 
+    # ---------------------------------------------------------------- scheduled calls
+    # Rudi-initiated calls, each with a reason. Two kinds today:
+    #   promise            he said on a call that he'd ring back at a time
+    #   whatsapp_reminder  a get-to-know call found the focus area, but no WhatsApp message
+    #                      followed within 22h, so the thread never actually started
+    # One entry per (tester, reason): a fresh promise replaces the older one rather than
+    # queueing a second call to the same person about the same thing.
+    def _schedule_key(self) -> str:
+        return "%s/call-schedule.json" % self.console
+
+    def scheduled_calls(self) -> list[dict[str, Any]]:
+        return list((self._get_json(self._schedule_key()) or {}).get("entries") or [])
+
+    def _save_schedule(self, entries: list[dict[str, Any]]) -> None:
+        self._put_json(self._schedule_key(), {"entries": entries})
+
+    def schedule_call(self, tid: str, at: str, reason: str, note: str = "",
+                      since: str = "") -> list[dict[str, Any]]:
+        """`since` is the instant the reason started, so a condition can still be re-checked when
+        the call comes due — a WhatsApp reminder is cancelled if they messaged after that time."""
+        entries = [e for e in self.scheduled_calls()
+                   if not (e.get("tester_id") == tid and e.get("reason") == reason)]
+        entries.append({"tester_id": tid, "at": at, "reason": reason, "note": note[:200],
+                        "since": since, "created_at": store.iso_now()})
+        self._save_schedule(entries)
+        return entries
+
+    # Which finished calls have already been folded into the ledger. Without this the runner
+    # would deduct the same call on every tick.
+    def _reconciled_key(self) -> str:
+        return "%s/calls-reconciled.json" % self.console
+
+    def reconciled_calls(self) -> set[str]:
+        return set((self._get_json(self._reconciled_key()) or {}).get("call_ids") or [])
+
+    def mark_reconciled(self, call_id: str) -> None:
+        ids = list((self._get_json(self._reconciled_key()) or {}).get("call_ids") or [])
+        if call_id in ids:
+            return
+        ids.append(call_id)
+        self._put_json(self._reconciled_key(), {"call_ids": ids[-500:]})   # bounded, not forever
+
+    def cancel_calls(self, tid: str, reason: str = "") -> int:
+        """Drop pending calls for a tester. Used when the reason evaporates — they finally sent
+        that WhatsApp message, or an admin revoked them."""
+        entries = self.scheduled_calls()
+        keep = [e for e in entries
+                if not (e.get("tester_id") == tid and (not reason or e.get("reason") == reason))]
+        if len(keep) != len(entries):
+            self._save_schedule(keep)
+        return len(entries) - len(keep)
+
+    def due_calls(self, now: Optional[datetime.datetime] = None) -> list[dict[str, Any]]:
+        now = now or store.now_dt()
+        due = []
+        for e in self.scheduled_calls():
+            try:
+                if store.parse_iso(e.get("at") or "") <= now:
+                    due.append(e)
+            except (ValueError, TypeError):
+                continue        # an unparseable entry must not stall every other call
+        return due
+
     # ---------------------------------------------------------------- call queue
     def _queue_key(self) -> str:
         return "%s/call-queue.json" % self.console

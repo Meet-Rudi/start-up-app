@@ -137,6 +137,10 @@ def record_turn(manifest, seq, record):
         "goal": manifest["state"].get("goal"),
         "goal_domain": manifest["state"].get("goal_domain"),
         "final_phase": manifest["state"].get("phase"),
+        # A call-back Rudi promised aloud. Read after the call by the follow-up runner, which is
+        # why it belongs on the outcome rather than only inside a turn record.
+        "check_in_minutes": manifest["state"].get("check_in_minutes"),
+        "check_in_about": manifest["state"].get("check_in_about"),
     }
     _put_json(_manifest_key(call_id), manifest)
     return manifest

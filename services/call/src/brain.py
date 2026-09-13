@@ -131,6 +131,43 @@ DISCLOSURE = (
 )
 
 
+# What the call is FOR changes how it must end. These are keyed off config["call_goal"], the
+# system-set goal the tester never sees.
+#
+# A promise made out loud on a call is exactly as binding as one made on WhatsApp — more so,
+# because the person heard a voice say it. So the two goal-setting calls report their promise the
+# same way the WhatsApp responder does, and meetrudi-tester-call-runner redials on it.
+CALL_CHECKIN_NOTE = (
+    "# Coming back to them\n\n"
+    "If you tell them you will call back at a particular time, you MUST report it in the JSON "
+    "signals as \"check_in_minutes\": <whole minutes from now> and \"check_in_about\": \"<short "
+    "phrase for what you'll ask about>\". Choose a time within the next 24 hours that does not "
+    "fall between 21:30 and 06:30, which is their quiet time. Never name a time you have not "
+    "reported."
+)
+
+# A get-to-know call exists to find the focus area and then hand the person to WhatsApp, which is
+# where the coaching actually lives. Ending it with a warm goodbye and no handoff strands them.
+CALL_WHATSAPP_HANDOFF = (
+    "# Handing over to WhatsApp\n\n"
+    "Once you understand the area they want to work on, your job on this call is to move them to "
+    "WhatsApp, where the day-to-day coaching happens. Before you say goodbye, ask them plainly to "
+    "send you a WhatsApp message — any message at all — so the two of you can carry on there, and "
+    "tell them you'll follow up if they don't get round to it. Say it once, warmly, and do not "
+    "make it sound like homework."
+)
+
+
+def _goal_note(config):
+    """The per-call-goal ending instruction, or "" when the goal implies none."""
+    goal = (config.get("call_goal") or "").strip().upper()
+    if goal in ("SET_NEARTERM_GOAL", "GOAL_FOLLOWUP"):
+        return CALL_CHECKIN_NOTE
+    if goal == "GET_TO_KNOW":
+        return CALL_WHATSAPP_HANDOFF
+    return ""
+
+
 def _time_note(elapsed_s, max_minutes):
     """Wall-clock pressure, expressed the way the commit prompt already understands."""
     budget = max(1, int(max_minutes or 12)) * 60
@@ -187,7 +224,7 @@ def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose
     if phase == "learn":
         base = (_get_s3_text(LEARN_KEY) + "\n\n# About me (context)\n\n"
                 + _get_s3_text(RUDI_CONTEXT_KEY))
-        parts = [base, VOICE_STYLE, _call_brief(config, opening)]
+        parts = [base, VOICE_STYLE, _call_brief(config, opening), _goal_note(config)]
         return "\n\n".join(p for p in parts if p)
 
     guardrails = _get_s3_text(GUARDRAILS_KEY)
@@ -206,7 +243,7 @@ def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose
         raise ValueError("Unknown phase: %r" % phase)
 
     parts = [guardrails, VOICE_STYLE, body, _call_brief(config, opening),
-             DISCLOSURE if disclose else "",
+             DISCLOSURE if disclose else "", _goal_note(config),
              _runtime_note(phase, note_state), _time_note(elapsed_s, config.get("max_minutes"))]
     return "\n\n".join(p for p in parts if p)
 
@@ -256,8 +293,24 @@ def new_state(config):
     }
 
 
+def _capture_checkin(state, signals):
+    """Carry a promised call-back into the state, so it survives into the manifest.
+
+    Kept on `state` rather than only in the turn record because calllog folds state into
+    manifest["outcome"], which is what the follow-up runner reads after the call has ended.
+    """
+    try:
+        minutes = int(signals.get("check_in_minutes"))
+    except (TypeError, ValueError):
+        return
+    if 0 < minutes <= 24 * 60:
+        state["check_in_minutes"] = minutes
+        state["check_in_about"] = str(signals.get("check_in_about") or "").strip()[:200]
+
+
 def advance(state, signals, last_user, clarifiers_left):
     """Port of the WhatsApp responder's _advance(): mutate `state` per phase + signals."""
+    _capture_checkin(state, signals)
     phase = state["phase"]
     if phase == "learn":
         if signals.get("want_to_try") is True:
