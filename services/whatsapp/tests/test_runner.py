@@ -236,6 +236,21 @@ class CommitmentTests(unittest.TestCase):
         self.assertEqual(meta.next_proactive_at, "2026-09-13T12:15:00+00:00")
         self.assertEqual(meta.next_proactive_kind, "nudge")
 
+    # ---------------------------------------------------------------- the default keep-warm
+    def test_with_no_promise_the_thread_is_kept_warm_at_22h(self):
+        """No commitment must still mean a free-form check-in INSIDE the window.
+
+        With PROACTIVE_TEST_MODE left on in production this landed on a paid template at t+24h
+        instead: the 2-minute test nudge fired immediately, spent the window's single free-form
+        slot, and the conversation went cold inside its own window.
+        """
+        self.assertFalse(store.TEST_MODE, "production timing must not use the 2-minute test lead")
+        meta = self._meta(last_inbound_at=self.NOW, window_open_until=self.TOMORROW)
+        at, kind = store.compute_next_proactive(meta, store.parse_iso(self.NOW))
+        self.assertEqual(kind, "nudge", "must stay free-form, not fall through to a template")
+        gap = (store.parse_iso(at) - store.parse_iso(self.NOW)).total_seconds() / 3600
+        self.assertAlmostEqual(gap, 22.0, places=2)
+
     # ---------------------------------------------------------------- what Rudi is told
     def test_the_reachout_is_told_what_was_promised(self):
         """A generic 'how's it going' after promising to ask about the bike ride reads as

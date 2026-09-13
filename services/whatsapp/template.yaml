@@ -179,8 +179,11 @@ Resources:
           GROQ_SECRET: meetrudi-groq-firstkey
           HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
           # Keep-warm test mode: nudge shortly after last inbound so the loop is observable fast.
-          # Set PROACTIVE_TEST_MODE=false for production (24h/social-hours anti-drift timing).
-          PROACTIVE_TEST_MODE: "true"
+          # OFF in production. Left on, it schedules the nudge at last_inbound + 2 minutes,
+          # bypassing both the anti-drift timing and quiet hours — and because a window only
+          # gets ONE free-form nudge, spending it immediately leaves nothing but a paid template
+          # 24h later. That is exactly how a conversation goes cold inside its own window.
+          PROACTIVE_TEST_MODE: "false"
           PROACTIVE_TEST_LEAD_MIN: "2"
       Events:
         Inbound:
@@ -238,7 +241,7 @@ Resources:
           TEMPLATES_CONFIG_KEY: config/wa_templates.json   # locale -> [approved Content SID,...]
           REENGAGE_INSERT_GOAL: "true"      # insert the stored goal into {{1}}; else per-language generic
           DEFAULT_PERSONALITY_SLUG: seed-rudi-v2   # persona for proactive reach-outs (matches processor)
-          PROACTIVE_TEST_MODE: "true"       # keep in sync with the processor
+          PROACTIVE_TEST_MODE: "false"      # keep in sync with the processor
           PROACTIVE_TEST_LEAD_MIN: "2"
           # Gateway (for the contextual AI reach-out) — same providers as the processor.
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json

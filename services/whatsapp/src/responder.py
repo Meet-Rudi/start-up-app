@@ -61,15 +61,18 @@ CHANNEL = ("[Channel: You are Rudi talking with the person on WhatsApp — via t
 # WhatsApp allows a free-form message for 24h after the person's last one; past that Rudi could
 # only send a paid template, which is not a check-in. Hence: inside 24h, or don't promise.
 CHECKIN_NOTE = (
-    "[Checking back: if your reply tells the person you will come back to them at a particular "
-    "time (\"I'll check in in 15 minutes\", \"I'll message you tomorrow morning\"), you MUST "
-    "report it in the JSON signals as \"check_in_minutes\": <whole minutes from now> and "
-    "\"check_in_about\": \"<short phrase for what you will ask about, e.g. 'how the 10-minute "
-    "bike ride went'>\". Rules for choosing that time: it must be within 24 hours from now, and "
-    "it must not fall between 21:30 and 06:30, which is the person's quiet time. If what they "
-    "committed to doing only happens LATER than 24 hours from now, do NOT promise to check in "
-    "at all — instead wish them well and let them come back to you. Never promise a time you "
-    "have not reported in check_in_minutes.]")
+    "[Checking back: NEVER end your message leaving the next contact up to them — \"just let me "
+    "know when you're ready\" or \"I'm here whenever\" is not an ending, because then nobody "
+    "comes back and the conversation dies. Every time the exchange reaches a natural pause, say "
+    "when YOU will check in, and report it in the JSON signals as \"check_in_minutes\": <whole "
+    "minutes from now> and \"check_in_about\": \"<short phrase for what you'll ask about>\". "
+    "Choosing the time: if they committed to doing something within the next day, check in "
+    "shortly after it. If they committed to nothing, or their plan is further off than a day — "
+    "including when they say they want to rest — still keep the thread warm: tell them you'll "
+    "check in around this same time tomorrow and report \"check_in_minutes\": 1320. Two hard "
+    "limits: never more than 24 hours from now, and never a time between 21:30 and 06:30, which "
+    "is their quiet time — if roughly-tomorrow would land in that window, pick an earlier hour "
+    "the same day. Never name a time you have not reported in check_in_minutes.]")
 
 _asset_cache: dict = {}
 
