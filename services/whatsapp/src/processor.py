@@ -107,7 +107,11 @@ def _reply_and_persist(uid: str, phone: str, text: str, meta, vault) -> None:
           % (uid, info.get("phase"), new_locale, info.get("model")))
 
     # End of a session → refresh the user profile (goal + a one-line 'recent development').
-    if info.get("phase") == "concluded":
+    # "committed" included: that is now where a lap of the loop ends, and it is the moment the
+    # goal and the agreed step are freshest. Waiting for "concluded" meant the profile was only
+    # ever refreshed when a conversation died — which is how a stale goal outlived its owner
+    # changing it.
+    if info.get("phase") in ("committed", "concluded"):
         _update_profile(uid, new_state)
 
 

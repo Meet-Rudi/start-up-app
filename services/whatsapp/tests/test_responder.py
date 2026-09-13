@@ -159,12 +159,58 @@ class ResponderTests(unittest.TestCase):
         self.assertEqual(state["phase"], "concluded")
 
     # -- commit -----------------------------------------------------------
-    def test_commitment_made_concludes(self):
+    def _committed(self, **kw):
+        state = {"phase": "committed", "session_id": 1,
+                 "history": [{"role": "assistant", "content": "earlier"}],
+                 "clarifiers_used": 0, "commit_attempts": 0, "reject_count": 0,
+                 "goal": "walk daily", "goal_domain": "fitness",
+                 "commitment": "the 10-minute walk after lunch"}
+        state.update(kw)
+        return state
+
+    def test_a_commitment_starts_the_check_in_loop(self):
         state = {"phase": "commit", "session_id": 1, "history": [], "clarifiers_used": 0,
                  "commit_attempts": 0, "reject_count": 0, "goal": "walk daily", "goal_domain": "fitness"}
-        queue("Amazing — 10 min after lunch. I'll check in!", {"commitment_made": True})
+        queue("Amazing — 10 min after lunch. I'll check in!",
+              {"commitment_made": True, "check_in_about": "the 10-minute walk after lunch"})
         _, state, _ = responder.respond(state, "ok I'll walk 10 min after lunch")
-        self.assertEqual(state["phase"], "concluded")
+        self.assertEqual(state["phase"], "committed",
+                         "concluding here is what made Rudi forget what he had just agreed")
+        self.assertEqual(state["commitment"], "the 10-minute walk after lunch")
+        self.assertEqual(state["goal"], "walk daily")
+
+    def test_the_next_message_is_not_a_cold_restart(self):
+        """The reported bug: 'Top!' right after a commitment was answered with the canned
+        welcome-back and a wiped goal, so the next lap began by asking for a goal again."""
+        queue("How did the walk go?", {})
+        reply, state, _ = responder.respond(self._committed(), "Top!")
+        self.assertEqual(state["phase"], "committed")
+        self.assertEqual(state["goal"], "walk daily")
+        self.assertIn("walk", reply.lower())
+
+    def test_a_further_commitment_keeps_the_loop_turning(self):
+        queue("Nice one — same again tomorrow?",
+              {"commitment_made": True, "check_in_about": "tomorrow's walk"})
+        _, state, _ = responder.respond(self._committed(), "yes, did it")
+        self.assertEqual(state["phase"], "committed")
+        self.assertEqual(state["commitment"], "tomorrow's walk")
+
+    def test_the_person_can_change_their_goal_mid_loop(self):
+        """Straight from the tester transcript: "Ik wil mijn doel veranderen"."""
+        queue("Back exercises it is!",
+              {"goal_status": "accepted", "goal": "daily back exercises", "goal_domain": "fitness"})
+        _, state, _ = responder.respond(self._committed(), "Ik wil mijn doel veranderen")
+        self.assertEqual(state["phase"], "commit")
+        self.assertEqual(state["goal"], "daily back exercises")
+
+    def test_a_restart_no_longer_forgets_the_goal(self):
+        state = {"phase": "concluded", "session_id": 2, "history": [], "clarifiers_used": 0,
+                 "commit_attempts": 0, "reject_count": 0,
+                 "goal": "walk daily", "goal_domain": "fitness"}
+        _, state, _ = responder.respond(state, "hi")
+        self.assertEqual(state["goal"], "walk daily",
+                         "wiping it is how a stale goal outlived the person changing it")
+        self.assertEqual(state["goal_domain"], "fitness")
 
     def test_commit_exhausts_attempts_and_concludes(self):
         state = {"phase": "commit", "session_id": 1, "history": [], "clarifiers_used": 0,

@@ -120,6 +120,12 @@ def _build_system(phase: str, state: dict, personality_block: str = "") -> str:
                 + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY))
 
     guardrails = _get_s3_text(GUARDRAILS_KEY)
+    if phase == "committed":
+        note = ("[Runtime: their goal is \"%s\". They agreed to: \"%s\". Ask how THAT went before "
+                "anything else, then agree the next small step.]"
+                % (state.get("goal") or "(not recorded)",
+                   state.get("commitment") or "(not recorded)"))
+        return guardrails + pblock + "\n\n" + CHECKIN_PROMPT + "\n\n" + note
     if phase == "goal":
         body = _get_s3_text(GOAL_KEY)
     elif phase == "commit":
@@ -157,10 +163,51 @@ def _parse_envelope(text: str) -> dict:
     return {"reply": reply, "signals": signals}
 
 
-def new_session(prev_session_id: int = 0) -> dict:
+def new_session(prev_session_id: int = 0, goal: str = None, goal_domain: str = None) -> dict:
+    """A fresh session, but not a fresh stranger.
+
+    The goal is carried across deliberately. Wiping it meant that after any restart Rudi asked
+    "what would you like to work on?" to someone who had told him days ago — and the stored
+    profile, which is fed from this state, kept serving whatever goal was last written because a
+    None here reads as "don't change it".
+    """
     return {"phase": "learn", "session_id": prev_session_id + 1, "history": [],
             "clarifiers_used": 0, "commit_attempts": 0, "reject_count": 0,
-            "goal": None, "goal_domain": None}
+            "goal": goal, "goal_domain": goal_domain, "commitment": None}
+
+
+# The check-in half of the loop. Kept in code rather than in an S3 prompt because those prompts
+# are shared with the call brain, voice-bench and rudi-chat — none of which has this phase.
+CHECKIN_PROMPT = (
+    "You are **Rudi**, following up on something this person has ALREADY agreed to do.\n\n"
+    "This is not a fresh start. Do not greet them as if they have just arrived, do not ask what "
+    "they would like to work on, and do not invent a new goal — they have one.\n\n"
+    "On this turn:\n"
+    "1. Ask how the thing they committed to actually went. Name it, so they can tell you heard "
+    "them.\n"
+    "2. Take the answer as it comes. Done deserves a short, genuine word of credit; not done "
+    "deserves curiosity about what got in the way — never disappointment, never a lecture.\n"
+    "3. Then agree the NEXT small step toward the same goal. When they accept one, set "
+    "`commitment_made` to true.\n"
+    "4. Only if THEY say they want to change or drop the goal: set `goal_status` to "
+    "\"accepted\" and put their new goal in `goal`.\n\n"
+    "Short and warm, the way a friend asks. Reply in the user's language. Never give medical "
+    "advice.\n\n"
+    "Respond ONLY as a single JSON object in exactly this shape (no text outside the JSON):\n"
+    '{"reply": "<message>", "signals": {"commitment_made": false, "goal_status": null, '
+    '"goal": null}}'
+)
+
+
+def _commitment_text(signals: dict, last_user: str, state: dict) -> str:
+    """What they just agreed to, in one line.
+
+    Prefers `check_in_about`, which CHECKIN_NOTE already asks the model for on every turn — so
+    this needs no change to the commit prompt, which is shared with three other services.
+    """
+    return (str(signals.get("check_in_about") or "").strip()
+            or (last_user or "").strip()[:200]
+            or state.get("commitment") or "")
 
 
 def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> None:
@@ -193,9 +240,25 @@ def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> Non
             else:
                 state["clarifiers_used"] = state.get("clarifiers_used", 0) + 1
         return
+    if phase == "committed":
+        # The loop: check-in -> next commitment -> check-in. A changed goal sends them back
+        # through goal-setting; anything else keeps the relationship where it is.
+        if signals.get("goal_status") == "accepted" and signals.get("goal"):
+            state["goal"] = signals.get("goal")
+            state["goal_domain"] = signals.get("goal_domain") or state.get("goal_domain") or "other"
+            state["phase"] = "commit"
+            state["commit_attempts"] = 0
+            state["commitment"] = None
+        elif signals.get("commitment_made") is True:
+            state["commitment"] = _commitment_text(signals, last_user, state)
+        return
     if phase == "commit":
         if signals.get("commitment_made") is True:
-            state["phase"] = "concluded"
+            # NOT "concluded". Concluding meant the next message they sent was met with the
+            # canned welcome-back and a wiped goal — so agreeing to something was the surest way
+            # to make Rudi forget it. A commitment starts the next lap instead.
+            state["phase"] = "committed"
+            state["commitment"] = _commitment_text(signals, last_user, state)
             return
         state["commit_attempts"] = state.get("commit_attempts", 0) + 1
         if state["commit_attempts"] >= MAX_COMMIT:
@@ -208,7 +271,10 @@ REACHOUT = (
     "their goal — like a caring buddy checking in, unprompted. Write ONE short, warm message "
     "(1–2 sentences): if you know their goal or last step, reference it naturally and ask how "
     "it's going; otherwise ask an open, friendly question. Do NOT reintroduce yourself or greet "
-    "with your name. Invite a quick reply. Never give medical advice. Plain text only."
+    "with your name. Invite a quick reply. Never give medical advice. Plain text only.\n\n"
+    "Do NOT propose a brand-new goal or a new activity they never agreed to. You are asking "
+    "about what is already theirs. Suggesting fresh homework out of nowhere reads as not having "
+    "listened, which is the opposite of checking in."
 )
 
 
@@ -287,7 +353,8 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
         return (_to_whatsapp(intro), ns, {"phase": "learn", "greeted": True, "new_contact": True})
     if state.get("phase") in (None, "", "concluded"):  # returning number → fresh session (last-used locale)
         back = i18n.t("welcome_back", locale)
-        ns = new_session(state.get("session_id", 0))
+        ns = new_session(state.get("session_id", 0),
+                         goal=state.get("goal"), goal_domain=state.get("goal_domain"))
         ns["history"] = [{"role": "assistant", "content": back}]
         return (_to_whatsapp(back), ns, {"phase": "learn", "greeted": True})
 
@@ -303,6 +370,11 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
     elif phase == "commit":
         note_state = {"attempts_left": max(1, MAX_COMMIT - state.get("commit_attempts", 0)),
                       "goal": state.get("goal"), "goal_domain": state.get("goal_domain")}
+    elif phase == "committed":
+        # _build_system is handed note_state, not the whole state, so the check-in phase has to
+        # carry the two things it is entirely about.
+        note_state = {"goal": state.get("goal"), "commitment": state.get("commitment"),
+                      "goal_domain": state.get("goal_domain")}
 
     system = (_build_system(phase, note_state, personality_block) + "\n\n" + CHANNEL
               + "\n\n" + LANG_NOTE + "\n\n" + CHECKIN_NOTE)
