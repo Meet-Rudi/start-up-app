@@ -144,6 +144,12 @@ class ContactMeta:
     reengage_count: int = 0              # consecutive templates sent without a reply
     last_reengage_at: str = ""
     quiet_since: str = ""                # first time we found this contact gone quiet
+    # A check-in Rudi PROMISED out loud ("I'll check in in 15 minutes"). This outranks the
+    # window heuristic below: a promise to a patient is not a scheduling hint. `commitment_note`
+    # is what he said he'd ask about, so the reach-out chases the real thing rather than
+    # offering a generic "how's it going".
+    commitment_at: str = ""              # UTC ISO — when Rudi said he'd come back
+    commitment_note: str = ""            # e.g. "how the 10-minute bike ride went"
     ai_state: dict[str, Any] = field(default_factory=dict)  # AI responder session state (phase, counters, history)
     # Reversible name<->alias map for the CURRENT 24h window only. Reset whenever a new session
     # opens, so no mapping that could re-identify a stored message outlives the window that
@@ -232,6 +238,31 @@ def next_social_start(dt: datetime.datetime, tz: zoneinfo.ZoneInfo,
     return boundary.astimezone(datetime.timezone.utc)
 
 
+# Rudi must never promise a check-in he cannot make. Past the free-form window he could only
+# reach the person with a paid template, which is not a check-in — so a promise beyond this is
+# refused at capture time rather than quietly dropped later.
+MAX_COMMITMENT_HOURS = 24
+
+
+def commitment_from_signals(signals: dict, now: datetime.datetime) -> tuple[str, str]:
+    """(iso_when, note) for a check-in Rudi just promised, or ("", "") if he promised nothing.
+
+    The model reports minutes-from-now rather than a wall-clock time, deliberately: it does not
+    reliably know the current time or the person's timezone, but it does know it just wrote
+    "in 15 minutes". Converting here keeps the clock in one place.
+    """
+    if not isinstance(signals, dict):
+        return ("", "")
+    try:
+        minutes = int(signals.get("check_in_minutes"))
+    except (TypeError, ValueError):
+        return ("", "")
+    if minutes <= 0 or minutes > MAX_COMMITMENT_HOURS * 60:
+        return ("", "")
+    note = str(signals.get("check_in_about") or "").strip()[:200]
+    return (to_iso(now + datetime.timedelta(minutes=minutes)), note)
+
+
 def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple[str, str]:
     """Precompute the next system-initiated send for a conversation → (iso_when, kind).
 
@@ -247,6 +278,19 @@ def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple
     expiry = parse_iso(meta.window_open_until)
     window_open = now < expiry
     already_nudged = meta.nudge_sent_for_window == meta.window_open_until
+
+    # 0) A promise Rudi actually made outranks everything below. Without this the scheduler only
+    # knew window mechanics, so "I'll check in in 15 minutes" was followed by silence and then a
+    # template a day later — the person is simply let down, which is worse than never promising.
+    # The promise still bends to the two rules it cannot break: never inside quiet hours, and
+    # never past the window (beyond it there is no free-form message to send).
+    if meta.commitment_at:
+        promised = parse_iso(meta.commitment_at)
+        when = next_social_start(promised if promised > now else now, tz)
+        if when < expiry:
+            return (to_iso(when), "nudge")
+        # Falls through: the promise cannot be honoured as a check-in, so the normal
+        # window/template logic takes over rather than scheduling something undeliverable.
 
     # 1) Window still open and not yet nudged → schedule the anti-drift free-form nudge.
     if window_open and not already_nudged:
@@ -440,6 +484,10 @@ class ConversationStore:
         meta.nudge_sent_for_window = ""
         meta.reengage_count = 0
         meta.quiet_since = ""
+        # A new user turn supersedes the old promise: the conversation has moved on, and if Rudi
+        # promises again he does so in the reply that follows this call.
+        meta.commitment_at = ""
+        meta.commitment_note = ""
         _reschedule(meta, parse_iso(msg.at))
         self.put_meta(meta)
         return meta
@@ -448,7 +496,9 @@ class ConversationStore:
                         proactive_kind: Optional[str] = None,
                         ai_state: Optional[dict] = None,
                         locale: Optional[str] = None,
-                        alias_vault: Optional[dict] = None) -> ContactMeta:
+                        alias_vault: Optional[dict] = None,
+                        commitment_at: Optional[str] = None,
+                        commitment_note: Optional[str] = None) -> ContactMeta:
         """Persist an outbound message and advance state (clears unread).
 
         proactive_kind marks a system-initiated send: "nudge" (spends the nudge for this window)
@@ -477,10 +527,17 @@ class ConversationStore:
         if proactive_kind == "nudge":
             meta.nudge_sent_for_window = meta.window_open_until
             meta.quiet_since = meta.quiet_since or msg.at
+            # The promise has now been kept; clearing it stops the same check-in firing forever.
+            meta.commitment_at = ""
+            meta.commitment_note = ""
         elif proactive_kind == "template":
             meta.reengage_count += 1
             meta.last_reengage_at = msg.at
             meta.quiet_since = meta.quiet_since or msg.at
+        if commitment_at is not None:
+            meta.commitment_at = commitment_at
+        if commitment_note is not None:
+            meta.commitment_note = commitment_note
         _reschedule(meta, parse_iso(msg.at))
         self.put_meta(meta)
         return meta

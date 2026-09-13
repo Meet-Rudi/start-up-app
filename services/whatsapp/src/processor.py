@@ -90,11 +90,19 @@ def _reply_and_persist(uid: str, phone: str, text: str, meta, vault) -> None:
     reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
                                                personality_block=pblock)
     new_locale = info.get("lang") or locale   # "last used language" (falls back to current)
+    # If Rudi just told them he'd come back at a time, that sentence becomes the next scheduled
+    # reach-out. Captured here, at the moment it is said, so the promise and the schedule cannot
+    # drift apart.
+    commit_at, commit_note = store.commitment_from_signals(info.get("signals") or {},
+                                                           store.now_dt())
     provider.send_text(phone, _restore_outbound(vault, reply))
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
                         text=reply, operator_id="ai:rudi")
     STORE.record_outbound(uid, out, ai_state=new_state, locale=new_locale,
-                          alias_vault=vault.to_dict())
+                          alias_vault=vault.to_dict(),
+                          commitment_at=commit_at, commitment_note=commit_note)
+    if commit_at:
+        print("AI uid=%s promised a check-in at %s (%s)" % (uid, commit_at, commit_note or "-"))
     print("AI uid=%s phase=%s lang=%s model=%s"
           % (uid, info.get("phase"), new_locale, info.get("model")))
 

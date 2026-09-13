@@ -56,6 +56,21 @@ CHANNEL = ("[Channel: You are Rudi talking with the person on WhatsApp — via t
            "or voice note you can't process yet, acknowledge it warmly and say you'll be able to "
            "look/listen properly soon.]")
 
+# Whenever Rudi says he'll come back at a time, that sentence becomes a scheduled reach-out —
+# so he has to report it, and he has to only promise what the channel can actually deliver.
+# WhatsApp allows a free-form message for 24h after the person's last one; past that Rudi could
+# only send a paid template, which is not a check-in. Hence: inside 24h, or don't promise.
+CHECKIN_NOTE = (
+    "[Checking back: if your reply tells the person you will come back to them at a particular "
+    "time (\"I'll check in in 15 minutes\", \"I'll message you tomorrow morning\"), you MUST "
+    "report it in the JSON signals as \"check_in_minutes\": <whole minutes from now> and "
+    "\"check_in_about\": \"<short phrase for what you will ask about, e.g. 'how the 10-minute "
+    "bike ride went'>\". Rules for choosing that time: it must be within 24 hours from now, and "
+    "it must not fall between 21:30 and 06:30, which is the person's quiet time. If what they "
+    "committed to doing only happens LATER than 24 hours from now, do NOT promise to check in "
+    "at all — instead wish them well and let them come back to you. Never promise a time you "
+    "have not reported in check_in_minutes.]")
+
 _asset_cache: dict = {}
 
 
@@ -195,7 +210,8 @@ REACHOUT = (
 
 
 def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
-              goal: str = None, development: str = None, personality_block: str = "") -> tuple:
+              goal: str = None, development: str = None, personality_block: str = "",
+              commitment: str = None) -> tuple:
     """Generate a proactive, context-aware keep-warm message → (text, new_state, info).
 
     Uses the person's goal + most-recent-development (from their profile) plus recent history so
@@ -211,6 +227,12 @@ def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
     if development:
         bits.append('what was last going on: "%s"' % development)
     ctx = ("What you know — " + "; ".join(bits) + ".") if bits else "You don't know their specific goal yet."
+    # This reach-out is Rudi keeping a promise, so it must ask about the thing he promised to ask
+    # about. A generic "how's it going" after "I'll check in on your bike ride" reads as having
+    # forgotten — which is exactly the failure the commitment machinery exists to prevent.
+    if commitment:
+        ctx += (' You promised to come back to them specifically about: "%s". Ask about THAT, '
+                'directly and warmly, as the reason you are messaging now.' % commitment)
     lang = "[Language: write your message in the user's language (code: %s).]" % (locale or "en")
     pblock = ("\n\n" + personality_block) if personality_block else ""
     system = (_get_s3_text(GUARDRAILS_KEY) + pblock + "\n\n" + REACHOUT + "\n\n[Context] " + ctx
@@ -279,7 +301,8 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
         note_state = {"attempts_left": max(1, MAX_COMMIT - state.get("commit_attempts", 0)),
                       "goal": state.get("goal"), "goal_domain": state.get("goal_domain")}
 
-    system = _build_system(phase, note_state, personality_block) + "\n\n" + CHANNEL + "\n\n" + LANG_NOTE
+    system = (_build_system(phase, note_state, personality_block) + "\n\n" + CHANNEL
+              + "\n\n" + LANG_NOTE + "\n\n" + CHECKIN_NOTE)
     result = gateway.generate([{"role": "system", "content": system}] + history[-MAX_HISTORY:],
                               json_mode=True)
     env = _parse_envelope(result["text"])

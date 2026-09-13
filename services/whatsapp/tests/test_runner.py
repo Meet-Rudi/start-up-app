@@ -125,5 +125,137 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(reengage.STORE.get_profile(uid)["most_recent_development"], "OLD DEV")
 
 
+class CommitmentTests(unittest.TestCase):
+    """A check-in Rudi promised out loud must become the next reach-out.
+
+    The failure these guard against is not a crash: Rudi said "I'll check in in 15 minutes",
+    the scheduler only knew window mechanics, and the person was met with silence and then a
+    template a day later.
+    """
+
+    # 14:00 Brussels (CEST, UTC+2) — comfortably inside social hours.
+    NOW = "2026-09-13T12:00:00+00:00"
+    TOMORROW = "2026-09-14T12:00:00+00:00"
+
+    def setUp(self):
+        _FAKE_S3.__init__()
+        _FAKE_S3.put_object(Bucket="meetrudi-ai-data-test", Key="prompts/rudi_guardrails.md", Body=b"GUARD")
+        responder.s3 = _FAKE_S3
+        responder._asset_cache.clear()
+        _SENT.clear()
+
+    def _meta(self, **kw):
+        base = dict(user_id="wa_c", phone="+320000000000", consent_state="granted",
+                    keep_warm=True, locale="en", window_open_until=self.TOMORROW,
+                    last_inbound_at=self.NOW, last_message_at=self.NOW)
+        base.update(kw)
+        return store.ContactMeta(**base)
+
+    # ---------------------------------------------------------------- parsing what Rudi said
+    def test_minutes_become_a_time_and_a_note(self):
+        when, note = store.commitment_from_signals(
+            {"check_in_minutes": 15, "check_in_about": "how the bike ride went"},
+            store.parse_iso(self.NOW))
+        self.assertEqual(when, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(note, "how the bike ride went")
+
+    def test_no_promise_yields_nothing(self):
+        for signals in ({}, {"check_in_minutes": None}, {"check_in_minutes": "soon"},
+                        {"check_in_minutes": 0}, {"check_in_minutes": -5}, None):
+            self.assertEqual(store.commitment_from_signals(signals, store.parse_iso(self.NOW)),
+                             ("", ""))
+
+    def test_a_promise_beyond_24h_is_refused_at_capture(self):
+        """Past the window Rudi could only send a paid template, which is not a check-in."""
+        self.assertEqual(
+            store.commitment_from_signals({"check_in_minutes": 24 * 60 + 1},
+                                          store.parse_iso(self.NOW)),
+            ("", ""))
+
+    # ---------------------------------------------------------------- honouring it
+    def test_commitment_becomes_the_next_reachout(self):
+        meta = self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                          commitment_note="the bike ride")
+        at, kind = store.compute_next_proactive(meta, store.parse_iso(self.NOW))
+        self.assertEqual(at, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(kind, "nudge")
+
+    def test_commitment_outranks_an_already_spent_nudge(self):
+        """The exact shape of the reported bug: the window's nudge was already used, so the
+        scheduler fell through to a template a day out and the promise was lost."""
+        meta = self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                          nudge_sent_for_window=self.TOMORROW)
+        at, kind = store.compute_next_proactive(meta, store.parse_iso(self.NOW))
+        self.assertEqual(kind, "nudge")
+        self.assertEqual(at, "2026-09-13T12:15:00+00:00")
+
+    def test_a_promise_landing_in_quiet_hours_waits_for_morning(self):
+        # 22:00 Brussels is inside the 21:30-06:30 quiet window → pushed to 06:30 local (04:30Z).
+        meta = self._meta(commitment_at="2026-09-13T20:00:00+00:00",
+                          window_open_until="2026-09-14T12:00:00+00:00")
+        at, kind = store.compute_next_proactive(meta, store.parse_iso("2026-09-13T19:00:00+00:00"))
+        self.assertEqual(at, "2026-09-14T04:30:00+00:00")
+        self.assertEqual(kind, "nudge")
+
+    def test_a_promise_past_the_window_does_not_schedule_a_check_in(self):
+        meta = self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                          window_open_until="2026-09-13T12:10:00+00:00")
+        at, _ = store.compute_next_proactive(meta, store.parse_iso(self.NOW))
+        self.assertNotEqual(at, "2026-09-13T12:15:00+00:00")
+
+    # ---------------------------------------------------------------- lifecycle
+    def test_keeping_the_promise_clears_it(self):
+        st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
+        st.put_meta(self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                               commitment_note="the bike ride"))
+        st.record_outbound("wa_c", store.Message(id="m1", direction="out", text="How did it go?",
+                                                 at="2026-09-13T12:15:00+00:00"),
+                           proactive_kind="nudge")
+        meta = st.get_meta("wa_c")
+        self.assertEqual(meta.commitment_at, "", "a kept promise must not fire again")
+        self.assertEqual(meta.commitment_note, "")
+
+    def test_a_new_user_turn_supersedes_the_old_promise(self):
+        st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
+        st.put_meta(self._meta(commitment_at="2026-09-13T12:15:00+00:00",
+                               commitment_note="the bike ride"))
+        st.record_inbound("wa_c", "+320000000000",
+                          store.Message(id="m2", direction="in", text="already done!",
+                                        at="2026-09-13T12:05:00+00:00"))
+        self.assertEqual(st.get_meta("wa_c").commitment_at, "")
+
+    def test_outbound_records_a_new_promise(self):
+        st = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
+        st.put_meta(self._meta())
+        st.record_outbound("wa_c", store.Message(id="m3", direction="out", text="I'll check back",
+                                                 at=self.NOW),
+                           commitment_at="2026-09-13T12:15:00+00:00",
+                           commitment_note="the bike ride")
+        meta = st.get_meta("wa_c")
+        self.assertEqual(meta.commitment_at, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(meta.next_proactive_at, "2026-09-13T12:15:00+00:00")
+        self.assertEqual(meta.next_proactive_kind, "nudge")
+
+    # ---------------------------------------------------------------- what Rudi is told
+    def test_the_reachout_is_told_what_was_promised(self):
+        """A generic 'how's it going' after promising to ask about the bike ride reads as
+        having forgotten — so the promise has to reach the prompt."""
+        seen = {}
+
+        def capture(messages, json_mode=False):
+            seen["system"] = messages[0]["content"]
+            return {"text": "How did the bike ride go?", "model": "fake"}
+
+        responder.gateway.generate = capture
+        reengage.STORE = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
+        reengage.STORE.put_meta(self._meta(
+            user_id="wa_promise", next_proactive_at=PAST, next_proactive_kind="nudge",
+            window_open_until=FUTURE, last_inbound_at=FUTURE, last_message_at=FUTURE,
+            commitment_at=PAST, commitment_note="how the 10-minute bike ride went"))
+        reengage.handler({}, None)
+        self.assertIn("how the 10-minute bike ride went", seen.get("system", ""))
+        self.assertTrue(_SENT, "the promised check-in must actually be sent")
+
+
 if __name__ == "__main__":
     unittest.main()

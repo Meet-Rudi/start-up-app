@@ -136,7 +136,8 @@ def _send_nudge(meta, now) -> bool:
             meta.ai_state, locale,
             goal=profile.get("extracted_goal_commitment"),
             development=profile.get("most_recent_development"),
-            personality_block=personality.resolve_block(meta.persona))
+            personality_block=personality.resolve_block(meta.persona),
+            commitment=meta.commitment_note)
     except Exception as e:  # noqa: BLE001 - rate-limited / AI error → safe canned nudge
         print("WARN reachout uid=%s fell back to canned nudge: %s" % (meta.user_id, e))
         text = i18n.t("nudge", locale)
