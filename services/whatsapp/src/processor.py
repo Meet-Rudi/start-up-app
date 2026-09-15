@@ -23,11 +23,23 @@ import gateway
 import deid
 import responder
 import personality
+import objection
+import alerts
 
 _s3 = boto3.client("s3")
+_ses = boto3.client("ses")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 SALT = os.environ.get("PSEUDONYMIZE_SALT", "meetrudi-pilot-salt")
 AI_RESPONDER = os.environ.get("AI_RESPONDER", "true").lower() == "true"
+# The model layer of the objection gate. Off makes the gate lexicon-only — still safe, just
+# blunter. The gate itself is NOT switchable: a wrong number must be catchable in every mode.
+OBJECTION_CLASSIFIER = os.environ.get("OBJECTION_CLASSIFIER", "true").lower() == "true"
+# ...but only for the opening turns of a thread. Somebody who has been coached for forty
+# messages is demonstrably the right person; the stranger who realises we have the wrong number
+# says so almost immediately. Bounding it this way caps the extra model spend at a handful of
+# calls per CONTACT rather than one per message (§4), and costs the lexicon nothing — explicit
+# opt-outs stay catchable forever, at any point in the thread.
+OBJECTION_CLASSIFIER_TURNS = int(os.environ.get("OBJECTION_CLASSIFIER_TURNS", "5"))
 
 STORE = store.ConversationStore(_s3, DATA_BUCKET)
 
@@ -126,6 +138,32 @@ def _update_profile(uid: str, ai_state: dict) -> None:
                                                      prof.get("proactivity_index")))
 
 
+def _freeze_and_notify(uid, phone, meta, detection, locale):
+    """Stop everything, tell the person once, and put it in front of a human.
+
+    Order matters: the freeze is made durable FIRST, so a failure to send the acknowledgement or
+    to raise the alert can never leave a contact we decided to stop messaging still schedulable.
+    """
+    frozen = STORE.freeze(uid, detection.kind, detection.evidence, detection.source) or meta
+    print("FROZEN uid=%s kind=%s source=%s" % (uid, detection.kind, detection.source))
+
+    # One canned line, then silence. Sent even in operator-console mode: this is a safety
+    # response, not a conversational one, and it should not wait for someone to notice.
+    try:
+        ack = i18n.t("frozen_ack", locale)
+        provider.send_text(phone, ack)
+        STORE.record_outbound(uid, store.Message(id=store.new_message_id(), direction="out",
+                                                 type="text", text=ack,
+                                                 operator_id="system:frozen"))
+    except Exception as e:  # noqa: BLE001 - they are already un-messageable; don't fail the batch
+        print("WARN frozen ack not delivered uid=%s: %s" % (uid, type(e).__name__))
+
+    try:
+        alerts.conversation_frozen(_s3, DATA_BUCKET, uid, frozen, detection, ses=_ses)
+    except Exception as e:  # noqa: BLE001 - the freeze stands regardless
+        print("ERROR alert failed uid=%s: %s" % (uid, type(e).__name__))
+
+
 def handler(event, context):
     for record in event.get("Records", []):
         phone = ""
@@ -148,6 +186,20 @@ def handler(event, context):
             meta.alias_vault = vault.to_dict()
             locale = meta.locale or i18n.DEFAULT_LOCALE
             print("INBOUND uid=%s type=%s sid=%s" % (uid, msg.get("type"), msg.get("provider_msg_id")))
+
+            # ---- objection gate (§6, inbound side) --------------------------------------
+            # Ahead of EVERYTHING that could send: the media acknowledgement and the operator
+            # mode included. A frozen contact hears nothing further from us, whatever they send.
+            # The message is still stored — an operator investigating needs to read it.
+            if meta.status == "frozen":
+                print("FROZEN uid=%s — stored, no reply (kind=%s)" % (uid, meta.frozen_kind))
+                continue
+
+            use_model = OBJECTION_CLASSIFIER and meta.msg_user <= OBJECTION_CLASSIFIER_TURNS
+            detection = objection.detect(scrubbed, use_model=use_model)
+            if detection.fired:
+                _freeze_and_notify(uid, phone, meta, detection, locale)
+                continue
 
             if not AI_RESPONDER:
                 continue  # operator-console mode: a human answers from the console

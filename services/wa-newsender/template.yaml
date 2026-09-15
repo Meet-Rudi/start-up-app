@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI WhatsApp NEW-SENDER probe. A single throwaway outbound tester pointed at the
+  production WhatsApp sender, deployed as its OWN stack so the live meetrudi-whatsapp stack —
+  and the sandbox routing every tester is currently on — is never redeployed to run this check.
+
+  It reuses services/whatsapp/src UNCHANGED (send_test.handler -> provider.send_text -> Twilio).
+  The only difference from meetrudi-wa-sendtest is WHATSAPP_FROM, which is the entire point:
+  same code, same creds, same token gate, one variable changed, so a difference in the result is
+  unambiguously the sender and not the code.
+
+  Delete this stack once the cutover is done — like meetrudi-wa-sendtest, it is not product path.
+
+  Requires the console-created meetrudi-lambda-runner role, the meetrudi/whatsapp/twilio secret,
+  and meetrudi/whatsapp/console-token (the same operator token the sandbox tester uses).
+
+Parameters:
+  WhatsAppFrom:
+    Type: String
+    # Deliberately NO default. The sandbox default on the main stack is a sensible fallback there;
+    # here it would silently re-run the test we already have against the number we are trying to
+    # move off. With no default, a deploy that forgot to supply the number fails loudly instead.
+    Description: >
+      WhatsApp 'From' for the production sender, in Twilio form, e.g. "whatsapp:+32...".
+      Supplied from deploy.local.json (whatsapp_from_new) — never committed, it is a phone number.
+    AllowedPattern: "^whatsapp:\\+[1-9][0-9]{6,14}$"
+    ConstraintDescription: must look like whatsapp:+<E.164>, e.g. whatsapp:+32470123456
+
+Resources:
+  # Declared explicitly so retention is 30 days rather than "never expire", matching the other
+  # functions. DependsOn below stops Lambda auto-creating it first with no retention.
+  WaSendTestNewSenderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-wa-sendtest-newsender
+      RetentionInDays: 30
+
+  WaSendTestNewSenderFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: WaSendTestNewSenderLogGroup
+    Properties:
+      FunctionName: meetrudi-wa-sendtest-newsender
+      Handler: send_test.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      # Reused as-is from the main service. Sharing the source is the point: if this send behaves
+      # differently, the sender is the only thing that can explain it.
+      CodeUri: ../whatsapp/src/
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          TWILIO_SECRET: meetrudi/whatsapp/twilio
+          WHATSAPP_FROM: !Ref WhatsAppFrom
+          CONSOLE_TOKEN_SECRET: meetrudi/whatsapp/console-token
+      FunctionUrlConfig:
+        AuthType: NONE
+
+Outputs:
+  SendTestNewSenderUrl:
+    Description: >
+      Token-gated outbound tester on the PRODUCTION sender. Open with ?token=&to=&body=.
+      A 63016 from Twilio here is the expected, informative failure when the recipient has no
+      open 24h window on THIS number — the window does not transfer from the sandbox.
+    Value: !GetAtt WaSendTestNewSenderFunctionUrl.FunctionUrl
+  SenderInUse:
+    Description: The From this stack sends as — check it is NOT the sandbox before trusting a result.
+    Value: !Ref WhatsAppFrom

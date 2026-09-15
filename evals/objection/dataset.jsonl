@@ -1,0 +1,63 @@
+{"id": "nl-obj-01", "lang": "nl", "text": "Verkeerd nummer", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-02", "lang": "nl", "text": "Sorry, wie is dit?", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-03", "lang": "nl", "text": "Ik ken u niet, hoe komt u aan mijn nummer?", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-04", "lang": "nl", "text": "ik heb me nooit ingeschreven voor zoiets", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-05", "lang": "nl", "text": "Je hebt de verkeerde persoon te pakken", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-06", "lang": "nl", "text": "STOP", "objection": true, "kind": "unsubscribe"}
+{"id": "nl-obj-07", "lang": "nl", "text": "stuur me geen berichten meer alsjeblieft", "objection": true, "kind": "unsubscribe"}
+{"id": "nl-obj-08", "lang": "nl", "text": "afmelden", "objection": true, "kind": "unsubscribe"}
+{"id": "nl-obj-09", "lang": "nl", "text": "Laat me met rust, dit is spam", "objection": true, "kind": "hostile"}
+{"id": "nl-obj-10", "lang": "nl", "text": "Als dit doorgaat dien ik een klacht in", "objection": true, "kind": "hostile"}
+{"id": "nl-obj-11", "lang": "nl", "text": "wie ben jij eigenlijk?", "objection": true, "kind": "wrong_number"}
+{"id": "nl-obj-12", "lang": "nl", "text": "ik heb hier niet om gevraagd", "objection": true, "kind": "wrong_number"}
+{"id": "en-obj-01", "lang": "en", "text": "Wrong number mate", "objection": true, "kind": "wrong_number"}
+{"id": "en-obj-02", "lang": "en", "text": "Who is this?", "objection": true, "kind": "wrong_number"}
+{"id": "en-obj-03", "lang": "en", "text": "I never signed up for anything like this", "objection": true, "kind": "wrong_number"}
+{"id": "en-obj-04", "lang": "en", "text": "I don't know you. Please stop messaging me.", "objection": true, "kind": "wrong_number"}
+{"id": "en-obj-05", "lang": "en", "text": "unsubscribe", "objection": true, "kind": "unsubscribe"}
+{"id": "en-obj-06", "lang": "en", "text": "take me off your list", "objection": true, "kind": "unsubscribe"}
+{"id": "en-obj-07", "lang": "en", "text": "stop bothering me or I'll report you", "objection": true, "kind": "hostile"}
+{"id": "en-obj-08", "lang": "en", "text": "this is spam, leave me alone", "objection": true, "kind": "hostile"}
+{"id": "en-obj-09", "lang": "en", "text": "you have the wrong person", "objection": true, "kind": "wrong_number"}
+{"id": "fr-obj-01", "lang": "fr", "text": "Mauvais numéro", "objection": true, "kind": "wrong_number"}
+{"id": "fr-obj-02", "lang": "fr", "text": "Qui êtes vous ? Je ne vous connais pas", "objection": true, "kind": "wrong_number"}
+{"id": "fr-obj-03", "lang": "fr", "text": "Arrêtez de me contacter s'il vous plaît", "objection": true, "kind": "unsubscribe"}
+{"id": "fr-obj-04", "lang": "fr", "text": "Laissez moi tranquille, je vais porter plainte", "objection": true, "kind": "hostile"}
+{"id": "fr-obj-05", "lang": "fr", "text": "je ne me suis pas inscrit à ce service", "objection": true, "kind": "wrong_number"}
+{"id": "de-obj-01", "lang": "de", "text": "Falsche Nummer", "objection": true, "kind": "wrong_number"}
+{"id": "de-obj-02", "lang": "de", "text": "Wer sind Sie? Ich kenne Sie nicht", "objection": true, "kind": "wrong_number"}
+{"id": "de-obj-03", "lang": "de", "text": "Keine Nachrichten mehr bitte", "objection": true, "kind": "unsubscribe"}
+{"id": "de-obj-04", "lang": "de", "text": "Ich habe mich nicht angemeldet", "objection": true, "kind": "wrong_number"}
+{"id": "de-obj-05", "lang": "de", "text": "Lassen Sie mich in Ruhe, das ist Spam", "objection": true, "kind": "hostile"}
+{"id": "nl-ok-01", "lang": "nl", "text": "ik wil stoppen met roken", "objection": false, "kind": "", "note": "the trap: half of coaching is about stopping something"}
+{"id": "nl-ok-02", "lang": "nl", "text": "Ik moet stoppen met snoepen 's avonds", "objection": false, "kind": ""}
+{"id": "nl-ok-03", "lang": "nl", "text": "mijn doel is stoppen met alcohol", "objection": false, "kind": ""}
+{"id": "nl-ok-04", "lang": "nl", "text": "Ging goed vandaag, 20 minuten gewandeld", "objection": false, "kind": ""}
+{"id": "nl-ok-05", "lang": "nl", "text": "nee, vandaag even niet", "objection": false, "kind": ""}
+{"id": "nl-ok-06", "lang": "nl", "text": "Ik ben niet zo gemotiveerd deze week", "objection": false, "kind": ""}
+{"id": "nl-ok-07", "lang": "nl", "text": "Wie kan mij daarbij helpen?", "objection": false, "kind": "", "note": "contains 'wie' but is not the bare word"}
+{"id": "nl-ok-08", "lang": "nl", "text": "ik ben er klaar voor", "objection": false, "kind": ""}
+{"id": "nl-ok-09", "lang": "nl", "text": "Kan je me een herinnering sturen morgen?", "objection": false, "kind": ""}
+{"id": "nl-ok-10", "lang": "nl", "text": "Mijn rug doet pijn, ik sla vandaag over", "objection": false, "kind": ""}
+{"id": "nl-ok-11", "lang": "nl", "text": "Quite good. How was yours?", "objection": false, "kind": ""}
+{"id": "nl-ok-12", "lang": "nl", "text": "Top!", "objection": false, "kind": ""}
+{"id": "en-ok-01", "lang": "en", "text": "I want to stop eating late at night", "objection": false, "kind": ""}
+{"id": "en-ok-02", "lang": "en", "text": "I need to stop skipping breakfast", "objection": false, "kind": ""}
+{"id": "en-ok-03", "lang": "en", "text": "not today, I'm busy", "objection": false, "kind": ""}
+{"id": "en-ok-04", "lang": "en", "text": "Can you remind me tomorrow morning?", "objection": false, "kind": ""}
+{"id": "en-ok-05", "lang": "en", "text": "I did 15 minutes, felt good", "objection": false, "kind": ""}
+{"id": "en-ok-06", "lang": "en", "text": "who should I ask about my medication?", "objection": false, "kind": "", "note": "starts like 'who is this' but is a coaching question"}
+{"id": "en-ok-07", "lang": "en", "text": "no", "objection": false, "kind": ""}
+{"id": "en-ok-08", "lang": "en", "text": "I'm not sure I can keep this up", "objection": false, "kind": ""}
+{"id": "fr-ok-01", "lang": "fr", "text": "je veux arrêter de fumer", "objection": false, "kind": "", "note": "the French version of the trap"}
+{"id": "fr-ok-02", "lang": "fr", "text": "pas aujourd'hui, je suis occupé", "objection": false, "kind": ""}
+{"id": "fr-ok-03", "lang": "fr", "text": "j'ai marché 20 minutes", "objection": false, "kind": ""}
+{"id": "de-ok-01", "lang": "de", "text": "ich möchte mit dem Rauchen aufhören", "objection": false, "kind": "", "note": "the German version of the trap"}
+{"id": "de-ok-02", "lang": "de", "text": "heute nicht, ich habe keine Zeit", "objection": false, "kind": ""}
+{"id": "de-ok-03", "lang": "de", "text": "Ich bin 20 Minuten gelaufen", "objection": false, "kind": ""}
+{"id": "xx-ok-01", "lang": "nl", "text": "👍", "objection": false, "kind": ""}
+{"id": "xx-ok-02", "lang": "nl", "text": "", "objection": false, "kind": ""}
+{"id": "nl-hard-01", "lang": "nl", "text": "Ik denk dat je me verwart met iemand anders", "objection": true, "kind": "wrong_number", "lexicon_miss": true}
+{"id": "en-hard-01", "lang": "en", "text": "I think you may have mixed me up with somebody else", "objection": true, "kind": "wrong_number", "lexicon_miss": true}
+{"id": "en-hard-02", "lang": "en", "text": "Pretty sure this isn't meant for me", "objection": true, "kind": "wrong_number", "lexicon_miss": true}
+{"id": "nl-hard-02", "lang": "nl", "text": "Ik denk dat er iets fout gelopen is, ik doe hier niet aan mee", "objection": true, "kind": "wrong_number", "lexicon_miss": true}

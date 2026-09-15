@@ -28,6 +28,12 @@ STRINGS = {
         "nudge": "👋 Just checking in — how's it going? A quick reply keeps us moving together 🙂",
         # Fallback value for the re-engagement template's {{1}} goal variable (no stored goal).
         "generic_goal": "our agreed goal",
+        # Sent ONCE when the objection gate freezes a thread, then silence. Deliberately canned:
+        # the model must not improvise to somebody who has just told us to go away, and it must
+        # not argue, ask a question, or leave the door open.
+        "frozen_ack": ("Sorry for the interruption — I've stopped messaging you. "
+                       "Someone from our team will check how this number reached us. "
+                       "You won't hear from me again."),
     },
     "de": {
         "intro": ("👋 Hallo, schön dich kennenzulernen! Ich bin Rudi. Ich helfe Menschen, ihre "
@@ -39,6 +45,9 @@ STRINGS = {
         "error": "Entschuldige — da ist etwas schiefgelaufen. Bitte versuch es gleich noch einmal. 💬",
         "nudge": "👋 Ich schau nur kurz vorbei — wie läuft's? Eine kurze Antwort hält uns gemeinsam in Schwung 🙂",
         "generic_goal": "unserem vereinbarten Ziel",
+        "frozen_ack": ("Entschuldige die Störung — ich schreibe dir nicht mehr. "
+                       "Jemand aus unserem Team prüft, wie diese Nummer zu uns gelangt ist. "
+                       "Du hörst nichts mehr von mir."),
     },
     "fr": {
         "intro": ("👋 Bonjour, ravi de te rencontrer ! Je suis Rudi. J'aide les gens à atteindre "
@@ -50,6 +59,9 @@ STRINGS = {
         "error": "Désolé — j'ai eu un petit souci. Réessaie dans un instant, s'il te plaît. 💬",
         "nudge": "👋 Je passe juste prendre des nouvelles — comment ça va ? Un petit mot et on continue ensemble 🙂",
         "generic_goal": "notre objectif",
+        "frozen_ack": ("Désolé pour le dérangement — je ne t'écrirai plus. "
+                       "Quelqu'un de notre équipe va vérifier comment ce numéro est arrivé "
+                       "chez nous. Tu n'auras plus de messages de ma part."),
     },
     "nl": {
         "intro": ("👋 Hoi, leuk je te ontmoeten! Ik ben Rudi. Ik help mensen hun doelen te "
@@ -61,6 +73,9 @@ STRINGS = {
         "error": "Sorry — er ging even iets mis. Probeer het zo meteen opnieuw. 💬",
         "nudge": "👋 Ik check even in — hoe gaat het? Een kort berichtje houdt ons samen op gang 🙂",
         "generic_goal": "ons afgesproken doel",
+        "frozen_ack": ("Sorry voor de storing — ik stuur je geen berichten meer. "
+                       "Een collega kijkt na hoe dit nummer bij ons terechtgekomen is. "
+                       "Je hoort niets meer van mij."),
     },
 }
 

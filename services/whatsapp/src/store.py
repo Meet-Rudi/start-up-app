@@ -124,7 +124,11 @@ class ContactMeta:
     consent_state: str = "unknown"       # unknown | granted | revoked
     persona: str = ""                    # which "Rudi"
     assigned_number: str = ""            # our WhatsApp sender this contact is pinned to
-    status: str = "active"               # active | archived | blocked
+    # active | archived | blocked | frozen. "frozen" is set by the inbound objection gate and
+    # only an operator clears it. Everything proactive already keys off status == "active"
+    # (see compute_next_proactive), so freezing silences nudges and templates with no extra
+    # wiring — the one thing that still needs an explicit check is the live reply path.
+    status: str = "active"
     keep_warm: bool = True               # operator can stop proactive keep-warm per number
     tags: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=iso_now)
@@ -150,6 +154,13 @@ class ContactMeta:
     # offering a generic "how's it going".
     commitment_at: str = ""              # UTC ISO — when Rudi said he'd come back
     commitment_note: str = ""            # e.g. "how the 10-minute bike ride went"
+    # Set together with status="frozen" by the objection gate. Kept on the contact rather than
+    # only in the alert record so every read path — console, scheduler, call runner — can see
+    # WHY without going and finding the alert.
+    frozen_at: str = ""                  # UTC ISO
+    frozen_kind: str = ""                # wrong_number | unsubscribe | hostile
+    frozen_evidence: str = ""            # the phrase that matched, or the classifier's reason
+    frozen_source: str = ""              # lexicon | classifier | operator
     ai_state: dict[str, Any] = field(default_factory=dict)  # AI responder session state (phase, counters, history)
     # Reversible name<->alias map for the CURRENT 24h window only. Reset whenever a new session
     # opens, so no mapping that could re-identify a stored message outlives the window that
@@ -377,6 +388,48 @@ class ConversationStore:
 
     def put_meta(self, meta: ContactMeta) -> None:
         self._put_json(self._meta_key(meta.user_id), meta.to_dict())
+
+    def freeze(self, uid: str, kind: str, evidence: str = "",
+               source: str = "lexicon") -> Optional[ContactMeta]:
+        """Stop everything outbound to this contact until an operator says otherwise.
+
+        Deliberately NOT the same thing as consent_state="revoked". Revoked means a known user
+        withdrew consent; frozen means we do not yet know whether this person is our user at all,
+        and answering that is a human's job. Conflating them would quietly close a wrong-number
+        incident as a routine opt-out and lose the reason to go and check the registration.
+        """
+        meta = self.get_meta(uid)
+        if meta is None:
+            return None
+        meta.status = "frozen"
+        meta.frozen_at = iso_now()
+        meta.frozen_kind = kind
+        meta.frozen_evidence = str(evidence or "")[:300]
+        meta.frozen_source = source
+        # keep_warm off as belt and braces: status alone already stops the scheduler, but this
+        # survives an operator flipping status back without reading why it was frozen.
+        meta.keep_warm = False
+        meta.commitment_at = ""
+        meta.commitment_note = ""
+        _reschedule(meta, now_dt())          # -> ("", ""), since status is no longer "active"
+        self.put_meta(meta)
+        return meta
+
+    def unfreeze(self, uid: str, operator_id: str = "") -> Optional[ContactMeta]:
+        """Operator-only. Clears the freeze and lets the normal scheduling resume."""
+        meta = self.get_meta(uid)
+        if meta is None or meta.status != "frozen":
+            return meta
+        meta.status = "active"
+        meta.keep_warm = True
+        meta.frozen_at = ""
+        meta.frozen_kind = ""
+        meta.frozen_evidence = ""
+        meta.frozen_source = ""
+        _reschedule(meta, now_dt())
+        self.put_meta(meta)
+        print("UNFROZE uid=%s by=%s" % (uid, operator_id or "unknown"))
+        return meta
 
     def ensure_contact(self, uid: str, phone: str) -> ContactMeta:
         meta = self.get_meta(uid)

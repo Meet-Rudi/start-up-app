@@ -191,6 +191,16 @@ Resources:
           # 24h later. That is exactly how a conversation goes cold inside its own window.
           PROACTIVE_TEST_MODE: "false"
           PROACTIVE_TEST_LEAD_MIN: "2"
+          # Inbound objection gate. The gate itself is always on — a wrong number must be
+          # catchable in every mode — but the model layer that backs up the phrase list can be
+          # switched off, and it only runs for the opening turns of a thread (see processor.py).
+          OBJECTION_CLASSIFIER: "true"
+          OBJECTION_CLASSIFIER_TURNS: "5"
+          # Where a freeze is announced. The S3 alert record is always written; this is the
+          # part that reaches a human out of hours. Source must match the ses:FromAddress
+          # condition on meetrudi-lambda-runner, which is why it reuses the tester sender.
+          ALERT_MAIL_FROM: !Ref TesterMailFrom
+          ALERT_MAIL_TO: !Ref TesterSupportEmail
       Events:
         Inbound:
           Type: SQS

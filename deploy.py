@@ -74,6 +74,17 @@ COMPONENTS = {
             "TesterWaJoinPhrase": {"from_config": "tester_wa_join_phrase"},
         },
     },
+    # Parallel probe for the PRODUCTION WhatsApp sender. Its own stack on purpose: verifying the
+    # new number must not require redeploying meetrudi-whatsapp, because that stack is what every
+    # tester's sandbox routing currently runs on. Deploying this changes nothing they touch.
+    "wa-newsender": {
+        "stack": "meetrudi-wa-newsender",
+        "template": "services/wa-newsender/template.yaml",
+        "build": True,
+        "params": {
+            "WhatsAppFrom": {"from_config": "whatsapp_from_new"},
+        },
+    },
     "registration": {
         "stack": "meetrudi-registration",
         "template": "services/registration/template.yaml",

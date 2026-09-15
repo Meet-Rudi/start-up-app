@@ -193,6 +193,37 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.dispatch.calls, [], "nobody should be rung about a thing they did")
         self.assertEqual(runner.STORE.scheduled_calls(), [])
 
+    def test_a_frozen_whatsapp_thread_stops_every_pending_call(self):
+        """If the objection gate decided we may have the wrong person, phoning them is the same
+        mistake in a louder channel. Every pending call goes, not just the one that came due."""
+        t = self._tester()
+        runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                             status="frozen", frozen_kind="wrong_number"))
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise", note="the bike ride")
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "whatsapp_reminder", note="fitness")
+        placed, skipped = runner.place_due(NOW)
+        self.assertEqual(placed, 0)
+        self.assertEqual(self.dispatch.calls, [])
+        self.assertEqual(runner.STORE.scheduled_calls(), [], "both reasons must be dropped")
+
+    def test_an_unreadable_contact_holds_the_call_rather_than_cancelling_it(self):
+        """Fail closed, but only as a HOLD. Cancelling on a transient read error would silently
+        delete work nobody decided to drop."""
+        t = self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise", note="the bike ride")
+
+        class _Boom:
+            def get_meta(self, uid):
+                raise RuntimeError("s3 unavailable")
+        real_wa, runner.WA = runner.WA, _Boom()
+        try:
+            placed, skipped = runner.place_due(NOW)
+        finally:
+            runner.WA = real_wa
+        self.assertEqual((placed, skipped), (0, 1))
+        self.assertEqual(self.dispatch.calls, [], "never dial while the freeze state is unknown")
+        self.assertEqual(len(runner.STORE.scheduled_calls()), 1, "still queued for the next tick")
+
     def test_the_reminder_is_placed_if_they_stayed_silent(self):
         t = self._tester()
         runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,

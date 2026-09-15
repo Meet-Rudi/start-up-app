@@ -272,6 +272,25 @@ def reconcile(now):
 
 
 # --------------------------------------------------------------------------- 2. place calls
+def _wa_state(tester):
+    """"frozen" | "ok" | "unknown" for this tester's WhatsApp thread.
+
+    Three states rather than two because the caller must treat them differently: "frozen" is a
+    decision and cancels the pending calls, while "unknown" is only a failed read and must merely
+    HOLD them — cancelling on a transient S3 error would silently delete work nobody asked to
+    drop. Either way the call does not go out: ringing somebody who may have already told us they
+    are the wrong person is the one outcome worth stalling a coaching call to avoid.
+    """
+    if not tester.wa_user_id:
+        return "ok"
+    try:
+        meta = WA.get_meta(tester.wa_user_id)
+    except Exception as e:  # noqa: BLE001
+        print("WARN frozen-check failed tid=%s: %s" % (tester.tester_id, type(e).__name__))
+        return "unknown"
+    return "frozen" if (meta and meta.status == "frozen") else "ok"
+
+
 def _messaged_since(tester, since_iso):
     """Did they start the WhatsApp thread after the call? Cancels the reminder if so."""
     if not tester.wa_user_id or not since_iso:
@@ -344,6 +363,19 @@ def place_due(now):
             STORE.cancel_calls(tid, entry.get("reason", ""))
             skipped += 1
             continue
+        # A frozen WhatsApp thread means we may have the wrong person entirely. Phoning them
+        # would be the same mistake in a louder channel, so every pending call for this tester
+        # is dropped — not just the one that came due.
+        wa_state = _wa_state(tester)
+        if wa_state == "frozen":
+            _skip(entry, "whatsapp thread frozen pending investigation")
+            STORE.cancel_calls(tid)
+            skipped += 1
+            continue
+        if wa_state == "unknown":
+            _skip(entry, "could not verify whatsapp state; holding for the next tick")
+            skipped += 1
+            continue                  # deliberately NOT cancelled — this retries
         if tester.calls_left() <= 0:
             _skip(entry, "no calls left on their ledger")
             STORE.cancel_calls(tid, entry.get("reason", ""))

@@ -26,6 +26,8 @@ sys.modules["boto3"] = boto3_stub
 os.environ["DATA_BUCKET"] = "meetrudi-ai-data-test"
 os.environ["PSEUDONYMIZE_SALT"] = "test-salt"
 os.environ["AI_RESPONDER"] = "false"   # this suite covers the persist-only (operator) path
+os.environ["OBJECTION_CLASSIFIER"] = "false"   # lexicon-only; the model layer is stubbed in
+                                               # test_objection.py rather than called for real
 
 import store  # noqa: E402
 import processor  # noqa: E402
@@ -38,6 +40,12 @@ def _sqs_event(**msg):
 class ProcessorTests(unittest.TestCase):
     def setUp(self):
         _FAKE_S3.__init__()
+        # Bind the subject to THIS suite's fake explicitly. `processor` is a singleton across the
+        # whole discover run and captures its S3 client at import, so whichever test module
+        # imports it first decides what it talks to. Rebinding here makes the suite independent
+        # of discovery order instead of quietly inheriting a neighbour's client.
+        processor._s3 = _FAKE_S3
+        processor.STORE = store.ConversationStore(_FAKE_S3, "meetrudi-ai-data-test")
 
     def test_inbound_persisted_and_window_opened(self):
         processor.handler(_sqs_event(

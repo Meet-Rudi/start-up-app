@@ -27,6 +27,9 @@ from fake_s3 import FakeS3  # noqa: E402
 BUCKET = "meetrudi-ai-data-test"
 os.environ.setdefault("DATA_BUCKET", BUCKET)
 os.environ.setdefault("CONTACT_SALT", "test-salt")
+# Lexicon-only objection gate here: this suite is about de-identification, and the model layer
+# would reach for a real endpoint. test_objection.py covers the classifier with a stub.
+os.environ.setdefault("OBJECTION_CLASSIFIER", "false")
 
 _FAKE_S3 = FakeS3()
 boto3_stub = types.ModuleType("boto3")
