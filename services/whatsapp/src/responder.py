@@ -22,6 +22,7 @@ import boto3
 
 import gateway
 import i18n
+import timeline
 
 s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -121,10 +122,15 @@ def _build_system(phase: str, state: dict, personality_block: str = "") -> str:
 
     guardrails = _get_s3_text(GUARDRAILS_KEY)
     if phase == "committed":
-        note = ("[Runtime: their goal is \"%s\". They agreed to: \"%s\". Ask how THAT went before "
-                "anything else, then agree the next small step.]"
-                % (state.get("goal") or "(not recorded)",
-                   state.get("commitment") or "(not recorded)"))
+        agreed = (" " + state["commitment_agreed"]) if state.get("commitment_agreed") else ""
+        check_in = ((" You planned to check in on it %s." % state["check_in"])
+                    if state.get("check_in") else "")
+        note = ("[Runtime: their goal is \"%s\". They agreed%s to: \"%s\".%s Ask how THAT went "
+                "before anything else — unless the time they planned is still ahead, in which "
+                "case encourage them for it instead of asking for an update. Then agree the next "
+                "small step.]"
+                % (state.get("goal") or "(not recorded)", agreed,
+                   state.get("commitment") or "(not recorded)", check_in))
         return guardrails + pblock + "\n\n" + CHECKIN_PROMPT + "\n\n" + note
     if phase == "goal":
         body = _get_s3_text(GOAL_KEY)
@@ -173,7 +179,8 @@ def new_session(prev_session_id: int = 0, goal: str = None, goal_domain: str = N
     """
     return {"phase": "learn", "session_id": prev_session_id + 1, "history": [],
             "clarifiers_used": 0, "commit_attempts": 0, "reject_count": 0,
-            "goal": goal, "goal_domain": goal_domain, "commitment": None}
+            "goal": goal, "goal_domain": goal_domain, "commitment": None,
+            "commitment_agreed_at": None, "check_in_at": None}
 
 
 # The check-in half of the loop. Kept in code rather than in an S3 prompt because those prompts
@@ -210,7 +217,7 @@ def _commitment_text(signals: dict, last_user: str, state: dict) -> str:
             or state.get("commitment") or "")
 
 
-def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> None:
+def _advance(state: dict, signals: dict, last_user: str, clarifiers_left, now=None) -> None:
     """Port of try-rudi.html processSignals(): mutate `state` per phase + signals."""
     phase = state["phase"]
     if phase == "learn":
@@ -249,8 +256,10 @@ def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> Non
             state["phase"] = "commit"
             state["commit_attempts"] = 0
             state["commitment"] = None
+            state["commitment_agreed_at"] = None
         elif signals.get("commitment_made") is True:
             state["commitment"] = _commitment_text(signals, last_user, state)
+            state["commitment_agreed_at"] = timeline.stamp(now)
         return
     if phase == "commit":
         if signals.get("commitment_made") is True:
@@ -259,6 +268,8 @@ def _advance(state: dict, signals: dict, last_user: str, clarifiers_left) -> Non
             # to make Rudi forget it. A commitment starts the next lap instead.
             state["phase"] = "committed"
             state["commitment"] = _commitment_text(signals, last_user, state)
+            # Stored whole. "Walk at 7PM" means nothing a day later unless we know which day.
+            state["commitment_agreed_at"] = timeline.stamp(now)
             return
         state["commit_attempts"] = state.get("commit_attempts", 0) + 1
         if state["commit_attempts"] >= MAX_COMMIT:
@@ -288,7 +299,8 @@ RECOMMIT = (
 
 def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
               goal: str = None, development: str = None, personality_block: str = "",
-              commitment: str = None, purpose: str = None) -> tuple:
+              commitment: str = None, purpose: str = None, commitment_at: str = None,
+              development_at: str = None, tz: str = "", now=None) -> tuple:
     """Generate a proactive, context-aware keep-warm message → (text, new_state, info).
 
     Uses the person's goal + most-recent-development (from their profile) plus recent history so
@@ -297,55 +309,67 @@ def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
     session history for continuity.
     """
     state = dict(state or {})
+    now = now or timeline.now_utc()
     goal = goal or state.get("goal")
     bits = []
     if goal:
         bits.append('their goal: "%s"' % goal)
     if development:
-        bits.append('what was last going on: "%s"' % development)
+        noted = timeline.humanize(development_at, now, tz)
+        bits.append('what was last going on%s: "%s"'
+                    % ((" (noted %s)" % noted) if noted else "", development))
     ctx = ("What you know — " + "; ".join(bits) + ".") if bits else "You don't know their specific goal yet."
     # This reach-out is Rudi keeping a promise, so it must ask about the thing he promised to ask
     # about. A generic "how's it going" after "I'll check in on your bike ride" reads as having
     # forgotten — which is exactly the failure the commitment machinery exists to prevent.
     if commitment:
-        ctx += (' You promised to come back to them specifically about: "%s". Ask about THAT, '
-                'directly and warmly, as the reason you are messaging now.' % commitment)
+        agreed = timeline.humanize(state.get("commitment_agreed_at"), now, tz)
+        planned = timeline.due(commitment_at, now, tz)
+        ctx += (' You promised to come back to them specifically about: "%s".%s%s Ask about '
+                'THAT, directly and warmly, as the reason you are messaging now.'
+                % (commitment,
+                   (" They agreed to it %s." % agreed) if agreed else "",
+                   (" The check-in was planned for %s." % planned) if planned else ""))
     if purpose == "recommit":
         ctx += RECOMMIT
     lang = "[Language: write your message in the user's language (code: %s).]" % (locale or "en")
     pblock = ("\n\n" + personality_block) if personality_block else ""
     system = (_get_s3_text(GUARDRAILS_KEY) + pblock + "\n\n" + REACHOUT + "\n\n[Context] " + ctx
-              + "\n\n" + CHANNEL + "\n\n" + lang)
+              + "\n\n" + CHANNEL + "\n\n" + lang + "\n\n" + timeline.now_note(now, tz))
 
     history = list(state.get("history", []))
-    msgs = [{"role": "system", "content": system}] + history[-MAX_HISTORY:]
+    msgs = [{"role": "system", "content": system}] + timeline.render(history[-MAX_HISTORY:], now, tz)
     if not history:
         msgs.append({"role": "user", "content": "(system: time for a gentle check-in)"})
 
     result = gateway.generate(msgs, json_mode=False)
-    text = _to_whatsapp(_parse_envelope(result["text"])["reply"])
-    state["history"] = history + [{"role": "assistant", "content": text}]
+    text = _to_whatsapp(timeline.strip_markers(_parse_envelope(result["text"])["reply"]))
+    state["history"] = history + [{"role": "assistant", "content": text, "at": timeline.stamp(now)}]
     return (text, state, {"model": result.get("model")})
 
 
 SUMMARIZE = ("In ONE short neutral sentence, summarize what this person's last topic, issue, or "
              "progress was in the conversation. Third-person, factual, no advice, no greeting. "
-             "Plain text only.")
+             "Plain text only. If it involves a planned time, keep the date with it, written out "
+             "in full (for example \"planned a walk for 19:00 on Monday 15 September\") — never "
+             "\"today\", \"tonight\" or \"tomorrow\", because this line is read again days later.")
 
 
-def summarize(history: list) -> str:
-    """One-line 'most recent development' for the profile from a [{role,content}] history.
+def summarize(history: list, tz: str = "", now=None) -> str:
+    """One-line 'most recent development' for the profile from a [{role,content,at}] history.
     Raises on gateway error (caller falls back)."""
     history = list(history or [])
     if not history:
         return ""
-    msgs = [{"role": "system", "content": _get_s3_text(GUARDRAILS_KEY) + "\n\n" + SUMMARIZE}] + history[-MAX_HISTORY:]
+    system = (_get_s3_text(GUARDRAILS_KEY) + "\n\n" + SUMMARIZE + "\n\n"
+              + timeline.now_note(now, tz, speaking=False))
+    msgs = [{"role": "system", "content": system}] + timeline.render(history[-MAX_HISTORY:], now, tz)
     result = gateway.generate(msgs, json_mode=False)
-    return _parse_envelope(result["text"])["reply"].strip()[:280]
+    return timeline.strip_markers(_parse_envelope(result["text"])["reply"]).strip()[:280]
 
 
 def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
-            personality_block: str = "") -> tuple:
+            personality_block: str = "", tz: str = "", now=None) -> tuple:
     """Advance one turn. Returns (reply_text, new_state, info).
 
     A fresh or concluded conversation is greeted (no model call); otherwise the phase-specific
@@ -354,22 +378,26 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
     carries the language the model detected this turn (for the caller to persist).
     `personality_block` is the rendered OCEAN persona block (from `personality.resolve_block`),
     prepended to the reasoning prompt to shape tone/style; "" = no persona flavor.
+    `tz` is the contact's timezone and `now` the turn's clock (injectable for tests): every
+    history entry and commitment is stamped with it, and the prompt is told what it is.
     """
     state = dict(state or {})
+    now = now or timeline.now_utc()
     if not state:                                    # brand-new number → introduce Rudi (English default)
         intro = i18n.t("intro", i18n.DEFAULT_LOCALE)
         ns = new_session(0)
-        ns["history"] = [{"role": "assistant", "content": intro}]
+        ns["history"] = [{"role": "assistant", "content": intro, "at": timeline.stamp(now)}]
         return (_to_whatsapp(intro), ns, {"phase": "learn", "greeted": True, "new_contact": True})
     if state.get("phase") in (None, "", "concluded"):  # returning number → fresh session (last-used locale)
         back = i18n.t("welcome_back", locale)
         ns = new_session(state.get("session_id", 0),
                          goal=state.get("goal"), goal_domain=state.get("goal_domain"))
-        ns["history"] = [{"role": "assistant", "content": back}]
+        ns["history"] = [{"role": "assistant", "content": back, "at": timeline.stamp(now)}]
         return (_to_whatsapp(back), ns, {"phase": "learn", "greeted": True})
 
     phase = state["phase"]
-    history = list(state.get("history", [])) + [{"role": "user", "content": user_text[:MAX_INPUT_CHARS]}]
+    history = list(state.get("history", [])) + [
+        {"role": "user", "content": user_text[:MAX_INPUT_CHARS], "at": timeline.stamp(now)}]
 
     note_state: dict = {}
     clarifiers_left = None
@@ -384,17 +412,28 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
         # _build_system is handed note_state, not the whole state, so the check-in phase has to
         # carry the two things it is entirely about.
         note_state = {"goal": state.get("goal"), "commitment": state.get("commitment"),
-                      "goal_domain": state.get("goal_domain")}
+                      "goal_domain": state.get("goal_domain"),
+                      # Resolved here, against this turn's clock. The prompt only ever sees
+                      # "yesterday at 15:00", never a timestamp it would have to work out.
+                      "commitment_agreed": timeline.humanize(state.get("commitment_agreed_at"),
+                                                             now, tz),
+                      "check_in": timeline.due(state.get("check_in_at"), now, tz)}
 
     system = (_build_system(phase, note_state, personality_block) + "\n\n" + CHANNEL
-              + "\n\n" + LANG_NOTE + "\n\n" + CHECKIN_NOTE)
-    result = gateway.generate([{"role": "system", "content": system}] + history[-MAX_HISTORY:],
-                              json_mode=True)
+              + "\n\n" + LANG_NOTE + "\n\n" + CHECKIN_NOTE + "\n\n" + timeline.now_note(now, tz))
+    result = gateway.generate([{"role": "system", "content": system}]
+                              + timeline.render(history[-MAX_HISTORY:], now, tz), json_mode=True)
     env = _parse_envelope(result["text"])
-    reply, signals = env["reply"], env["signals"]
+    reply, signals = timeline.strip_markers(env["reply"]), env["signals"]
 
-    state["history"] = history + [{"role": "assistant", "content": reply}]
-    _advance(state, signals, user_text, clarifiers_left)
+    state["history"] = history + [{"role": "assistant", "content": reply,
+                                   "at": timeline.stamp(now)}]
+    _advance(state, signals, user_text, clarifiers_left, now)
+    # The check-in moment, stored whole. The model reports minutes-from-now because it cannot
+    # know the clock; this stamp is what lets a later turn say "today at 19:30" or "yesterday".
+    check_in_at = timeline.after_minutes(signals.get("check_in_minutes"), now)
+    if check_in_at:
+        state["check_in_at"] = check_in_at
     return (_to_whatsapp(reply), state,
             {"phase": state["phase"], "signals": signals, "model": result.get("model"),
              "lang": i18n.normalize_locale(signals.get("lang"))})

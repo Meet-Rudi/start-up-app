@@ -63,7 +63,7 @@ processor = None
 _REPLY = {"text": "Thanks, noted."}
 
 
-def _fake_respond(state, text, locale="en", personality_block=""):
+def _fake_respond(state, text, locale="en", personality_block="", **_clock):
     return (_REPLY["text"], dict(state or {}, phase="goal", history=[]),
             {"phase": "goal", "lang": locale})
 
@@ -154,9 +154,9 @@ class Ingest(WiringCase):
     def test_model_never_receives_the_identifier(self):
         seen = {}
         original = responder.respond
-        def spy(state, text, locale="en", personality_block=""):
+        def spy(state, text, locale="en", personality_block="", **clock):
             seen["text"] = text
-            return original(state, text, locale, personality_block)
+            return original(state, text, locale, personality_block, **clock)
         responder.respond = spy
         try:
             _inbound("+32470000004", "my number is 85.07.30-033.28")

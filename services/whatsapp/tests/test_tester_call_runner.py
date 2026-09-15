@@ -182,6 +182,15 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("speak_only", cfg)
         self.assertEqual(runner.STORE.scheduled_calls(), [], "a placed call leaves the queue")
 
+    def test_a_call_back_tells_rudi_when_the_promise_was_made(self):
+        """A promise read out a day later has to arrive with its day, not as a bare "7PM"."""
+        tester = self._tester()
+        entry = {"reason": "promise", "note": "how the 7PM walk went",
+                 "created_at": "2026-09-14T13:00:00+00:00"}
+        cfg = runner._config_for(entry, tester, now=store.parse_iso("2026-09-15T12:00:00+00:00"))
+        self.assertIn("You promised yesterday at 15:00", cfg["notes"])
+        self.assertIn("how the 7PM walk went", cfg["notes"])
+
     def test_the_reminder_is_cancelled_if_they_already_messaged(self):
         t = self._tester()
         runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,

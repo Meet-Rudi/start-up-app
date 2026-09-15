@@ -95,13 +95,14 @@ def _eligible(meta) -> bool:
 
 
 def _history_from_messages(msgs, limit=20):
-    """Build a [{role,content}] history from stored messages for summarization."""
+    """Build a [{role,content,at}] history from stored messages for summarization."""
     out = []
     for m in msgs[-limit:]:
         content = m.text or ("[photo]" if m.type in ("image", "video")
                              else "[voice note]" if m.type == "audio" else "")
         if content:
-            out.append({"role": "user" if m.direction == "in" else "assistant", "content": content})
+            out.append({"role": "user" if m.direction == "in" else "assistant",
+                        "content": content, "at": m.at})
     return out
 
 
@@ -113,7 +114,8 @@ def _refresh_profile_if_stale(meta) -> dict:
         return STORE.get_profile(meta.user_id)
     existing = STORE.get_profile(meta.user_id)
     try:
-        development = responder.summarize(_history_from_messages(STORE.list_messages(meta.user_id)))
+        development = responder.summarize(
+            _history_from_messages(STORE.list_messages(meta.user_id)), tz=meta.timezone)
     except Exception as e:  # noqa: BLE001 - keep prior summary on AI error
         print("WARN refresh summarize uid=%s: %s" % (meta.user_id, e))
         development = existing.get("most_recent_development")
@@ -123,9 +125,22 @@ def _refresh_profile_if_stale(meta) -> dict:
     return prof
 
 
+def _claim(meta, now) -> bool:
+    """Outreach limits, checked against the live record immediately before a send (see
+    store.MAX_UNANSWERED_OUTREACH). The precomputed schedule already respects them; this is the
+    guard for everything the schedule cannot see — a time computed before Rudi's latest reply,
+    an overlapping tick, or a send that went out but was never recorded."""
+    ok, reason = STORE.claim_outreach(meta.user_id, now)
+    if not ok:
+        print("HOLD uid=%s kind=%s reason=%s" % (meta.user_id, meta.next_proactive_kind, reason))
+    return ok
+
+
 def _send_nudge(meta, now) -> bool:
     if not meta.is_in_window(now):
         return False  # window closed — can't free-form; compute will switch this to a template
+    if not _claim(meta, now):
+        return False
     locale = meta.locale or i18n.DEFAULT_LOCALE
     # Reconcile the profile with any messages newer than its last update, THEN reach out with it.
     profile = _refresh_profile_if_stale(meta)
@@ -137,7 +152,9 @@ def _send_nudge(meta, now) -> bool:
             goal=profile.get("extracted_goal_commitment"),
             development=profile.get("most_recent_development"),
             personality_block=personality.resolve_block(meta.persona),
-            commitment=meta.commitment_note)
+            commitment=meta.commitment_note, commitment_at=meta.commitment_at,
+            development_at=profile.get("most_recent_development_at"),
+            tz=meta.timezone, now=now)
     except Exception as e:  # noqa: BLE001 - rate-limited / AI error → safe canned nudge
         print("WARN reachout uid=%s fell back to canned nudge: %s" % (meta.user_id, e))
         text = i18n.t("nudge", locale)
@@ -148,11 +165,13 @@ def _send_nudge(meta, now) -> bool:
     return True
 
 
-def _send_template(meta) -> bool:
+def _send_template(meta, now=None) -> bool:
     locale = meta.locale or i18n.DEFAULT_LOCALE
     sid = _pick_template_sid(locale, meta.reengage_count)
     if not sid:
         print("SKIP template uid=%s (no approved template SID for locale=%s)" % (meta.user_id, locale))
+        return False
+    if not _claim(meta, now or store.now_dt()):
         return False
     goal = _goal_variable(meta)
     provider.send_template(meta.phone, sid, {"1": goal})
@@ -188,7 +207,7 @@ def handler(event, context):
             if meta.next_proactive_kind == "nudge":
                 ok = _send_nudge(meta, now)
             elif meta.next_proactive_kind == "template":
-                ok = _send_template(meta)
+                ok = _send_template(meta, now)
             else:
                 ok = False
             if ok:

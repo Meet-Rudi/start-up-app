@@ -524,6 +524,39 @@ class GreetThenDisclose(unittest.TestCase):
                         "must stay disclosed, not re-fire every turn")
 
 
+class Clock(unittest.TestCase):
+    """A call is told what time it is, and remembers its turns as whole timestamps."""
+
+    def test_the_prompt_carries_the_local_moment(self):
+        system = brain.build_system("goal", {"clarifiers_left": 2},
+                                    _config(timezone="Europe/Brussels"), now=MIDDAY)
+        self.assertIn("14 August 2026, 14:00 in Europe/Brussels", system)
+
+    def test_turns_are_stamped_but_the_provider_never_sees_a_stamp(self):
+        seen = {}
+
+        def generate(messages, json_mode=False):
+            seen["messages"] = messages
+            return {"text": json.dumps({"reply": "Alright.", "signals": {}}), "model": "fake"}
+
+        original = brain.gateway.generate
+        brain.gateway.generate = generate
+        try:
+            _, state, _ = brain.turn(brain.new_state(_config()), "hello", _config(), now=MIDDAY)
+        finally:
+            brain.gateway.generate = original
+        self.assertTrue(all(m.get("at") for m in state["history"]))
+        self.assertTrue(all(set(m) == {"role", "content"} for m in seen["messages"]))
+
+    def test_the_two_timeline_copies_have_not_drifted(self):
+        """Each service ships self-contained, so the helper exists twice. It must stay one helper."""
+        mine = os.path.join(HERE, "..", "src", "timeline.py")
+        theirs = os.path.join(HERE, "..", "..", "whatsapp", "src", "timeline.py")
+        with open(mine, "rb") as a, open(theirs, "rb") as b:
+            self.assertEqual(a.read(), b.read(),
+                             "copy services/whatsapp/src/timeline.py over the call service's copy")
+
+
 class Farewell(unittest.TestCase):
     """The call ends the instant a commitment lands, so that turn is also the goodbye. Without
     being told, the model wrote an ordinary confirmation and the line went dead — which reads as

@@ -99,14 +99,17 @@ def _reply_and_persist(uid: str, phone: str, text: str, meta, vault) -> None:
     """
     locale = meta.locale or i18n.DEFAULT_LOCALE
     pblock = personality.resolve_block(meta.persona)   # operator-chosen persona (or default)
+    # One clock for the whole turn: the responder stamps history and the commitment with it, and
+    # the schedule below is computed from the same instant, so the two can never disagree.
+    now = store.now_dt()
     reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
-                                               personality_block=pblock)
+                                               personality_block=pblock,
+                                               tz=meta.timezone, now=now)
     new_locale = info.get("lang") or locale   # "last used language" (falls back to current)
     # If Rudi just told them he'd come back at a time, that sentence becomes the next scheduled
     # reach-out. Captured here, at the moment it is said, so the promise and the schedule cannot
     # drift apart.
-    commit_at, commit_note = store.commitment_from_signals(info.get("signals") or {},
-                                                           store.now_dt())
+    commit_at, commit_note = store.commitment_from_signals(info.get("signals") or {}, now)
     provider.send_text(phone, _restore_outbound(vault, reply))
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
                         text=reply, operator_id="ai:rudi")

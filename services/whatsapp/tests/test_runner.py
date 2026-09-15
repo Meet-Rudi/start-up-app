@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+import datetime
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -123,6 +124,49 @@ class RunnerTests(unittest.TestCase):
                                      now=store.parse_iso("2999-12-31T00:00:00+00:00"))  # newer than messages
         reengage.handler({}, None)
         self.assertEqual(reengage.STORE.get_profile(uid)["most_recent_development"], "OLD DEV")
+
+
+class OutreachLimitTests(unittest.TestCase):
+    """The runner re-checks the outreach limits against the live record right before it sends,
+    so a time precomputed before Rudi's latest message cannot slip a reach-out past them."""
+
+    def setUp(self):
+        _FAKE_S3.__init__()
+        _FAKE_S3.put_object(Bucket="meetrudi-ai-data-test", Key="prompts/rudi_guardrails.md", Body=b"GUARD")
+        responder.s3 = _FAKE_S3
+        responder.gateway.generate = _runner_gen
+        responder._asset_cache.clear()
+        reengage._tpl_cache.clear()
+        _SENT.clear()
+
+    def test_a_due_nudge_is_held_when_rudi_wrote_minutes_ago(self):
+        uid = "wa_hold_spacing"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        _put(uid, last_inbound_at="2026-01-01T00:00:00+00:00",
+             last_outbound_at=store.to_iso(now - datetime.timedelta(minutes=5)))
+        res = reengage.handler({}, None)
+        self.assertEqual(res["sent"], 0)
+        self.assertEqual(_SENT, [])
+        meta = reengage.STORE.get_meta(uid)
+        self.assertGreater(store.parse_iso(meta.next_proactive_at), now,
+                           "rescheduled forward, not left due to be retried every tick")
+
+    def test_two_unanswered_reach_outs_hold_the_runner(self):
+        uid = "wa_hold_cap"
+        _put(uid, unanswered_outreach=2)
+        res = reengage.handler({}, None)
+        self.assertEqual((res["sent"], _SENT), (0, []))
+        self.assertEqual(reengage.STORE.get_meta(uid).next_proactive_kind, "",
+                         "nothing is scheduled until they write")
+
+    def test_a_sent_nudge_counts_once(self):
+        uid = "wa_count"
+        _put(uid)
+        reengage.handler({}, None)
+        meta = reengage.STORE.get_meta(uid)
+        self.assertEqual(len(_SENT), 1)
+        self.assertEqual(meta.unanswered_outreach, 1)
+        self.assertEqual(meta.pending_outreach_at, "", "the claim is consumed by the record")
 
 
 class CommitmentTests(unittest.TestCase):

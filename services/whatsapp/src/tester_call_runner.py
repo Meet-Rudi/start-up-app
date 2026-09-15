@@ -35,6 +35,7 @@ import boto3
 
 import store
 import gateway
+import timeline
 import tester_store
 from tester_store import TesterStore
 
@@ -304,20 +305,27 @@ def _messaged_since(tester, since_iso):
         return False
 
 
-def _config_for(entry, tester, speak_only=""):
+def _config_for(entry, tester, speak_only="", now=None):
     goal = "GOAL_FOLLOWUP" if entry.get("reason") == "promise" else "SET_NEARTERM_GOAL"
     notes = ""
+    # Moments reach the call brain already resolved ("yesterday at 16:10"), never as a bare
+    # "7PM" whose day the model would have to guess.
     if entry.get("reason") == "whatsapp_reminder":
-        notes = ("They had a first call about %s and agreed to continue on WhatsApp, but have "
+        first = timeline.humanize(entry.get("since"), now, DEFAULT_TZ)
+        notes = ("They had a first call%s about %s and agreed to continue on WhatsApp, but have "
                  "not sent a message yet. Help them set one small near-term goal, and before you "
                  "say goodbye ask them again to send you any WhatsApp message so the two of you "
-                 "can carry on there." % (entry.get("note") or "their goal"))
+                 "can carry on there."
+                 % ((" " + first) if first else "", entry.get("note") or "their goal"))
     elif entry.get("reason") == "recommit":
         notes = ("The team has cleared this person's open commitments. Do not refer to anything "
                  "they agreed to before — start clean. Help them settle on one thing they want "
                  "to work on next and agree a first small step.")
     elif entry.get("note"):
-        notes = "You promised to call back about: %s. Ask about that first." % entry["note"]
+        promised = timeline.humanize(entry.get("created_at"), now, DEFAULT_TZ)
+        notes = ("You promised%s to call back about: %s. Ask about that first — unless it has "
+                 "not happened yet, in which case encourage them for it."
+                 % ((" " + promised) if promised else "", entry["note"]))
 
     config = {
         "to": tester.phone,                     # hard-locked to the registered number
@@ -400,7 +408,7 @@ def place_due(now):
         # Enough model capacity for a conversation, or just the one line?
         line = "" if gateway.has_headroom() else (
             FALLBACK_LINE.get(tester.locale) or FALLBACK_LINE["en"])
-        ok, result = _dispatch(_config_for(entry, tester, speak_only=line))
+        ok, result = _dispatch(_config_for(entry, tester, speak_only=line, now=now))
         if not ok:
             if result == "quiet-hours":
                 when = store.next_social_start(now, store._tz(DEFAULT_TZ))

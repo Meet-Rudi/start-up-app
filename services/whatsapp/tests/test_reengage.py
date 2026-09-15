@@ -102,13 +102,24 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(store.parse_iso(at), U(2026, 1, 16, 5, 30))
 
     def test_template_cadence_gap_enforced(self):
+        # The window lapsed without its nudge ever going out (e.g. the slot fell in quiet hours),
+        # so one template is the only reach-out so far and a second is still allowed — but not
+        # sooner than the 48h cadence gap.
         wou = iso(U(2026, 1, 10, 11, 0))                       # window long closed
-        m = _meta(window_open_until=wou, nudge_sent_for_window=wou,
+        m = _meta(window_open_until=wou, nudge_sent_for_window="",
                   reengage_count=1, last_reengage_at=iso(U(2026, 1, 15, 8, 0)))
         at, kind = compute_next_proactive(m, U(2026, 1, 15, 9, 0))
         self.assertEqual(kind, "template")
         # next template must be ≥ last_reengage + 48h (2026-01-17 08:00 UTC = 09:00 local, social)
         self.assertGreaterEqual(store.parse_iso(at), U(2026, 1, 17, 8, 0))
+
+    def test_no_second_template_after_a_nudge_and_a_template_went_unanswered(self):
+        # Nudge spent + one template unanswered = two reach-outs in a row. A second template
+        # would be the third, which the outreach limit forbids however long the gap.
+        wou = iso(U(2026, 1, 10, 11, 0))
+        m = _meta(window_open_until=wou, nudge_sent_for_window=wou,
+                  reengage_count=1, last_reengage_at=iso(U(2026, 1, 15, 8, 0)))
+        self.assertEqual(compute_next_proactive(m, U(2026, 1, 20, 9, 0)), ("", ""))
 
     def test_dormant_after_max_misses(self):
         wou = iso(U(2026, 1, 10, 11, 0))

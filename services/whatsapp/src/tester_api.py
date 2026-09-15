@@ -1021,7 +1021,15 @@ def _wipe_commitments(tester):
         meta.ai_state["phase"] = "goal"
         WA.put_meta(meta)
 
+    # A deliberate reset by the team is still bound by the outreach limits: somebody who left the
+    # last reach-outs unanswered, or was written to minutes ago, does not get another WhatsApp
+    # from Rudi because an operator pressed a button. The call fallback below still applies.
+    allowed = False
     if meta is not None and meta.phone and meta.is_in_window():
+        allowed, held = WA.claim_outreach(tester.wa_user_id)
+        if not allowed:
+            print("TESTER wipe tid=%s WhatsApp held by outreach limits (%s)" % (tid, held))
+    if allowed:
         try:
             text, ai_state, _ = responder.reach_out(
                 meta.ai_state, meta.locale or _engine_locale(tester.locale),

@@ -22,6 +22,7 @@ import datetime
 import boto3
 
 import gateway
+import timeline
 
 s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -219,12 +220,17 @@ def _runtime_note(phase, note_state):
     return ""
 
 
-def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose=False):
-    """Guardrails first, always. Then voice style, then the phase body, then runtime notes."""
+def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose=False, now=None):
+    """Guardrails first, always. Then voice style, then the phase body, then runtime notes.
+
+    The clock goes last on every phase. A call-back promised yesterday is only "yesterday" if
+    Rudi knows today's date, and the model has no other way of knowing it.
+    """
+    clock = timeline.now_note(now, config.get("timezone") or "")
     if phase == "learn":
         base = (_get_s3_text(LEARN_KEY) + "\n\n# About me (context)\n\n"
                 + _get_s3_text(RUDI_CONTEXT_KEY))
-        parts = [base, VOICE_STYLE, _call_brief(config, opening), _goal_note(config)]
+        parts = [base, VOICE_STYLE, _call_brief(config, opening), _goal_note(config), clock]
         return "\n\n".join(p for p in parts if p)
 
     guardrails = _get_s3_text(GUARDRAILS_KEY)
@@ -244,7 +250,8 @@ def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose
 
     parts = [guardrails, VOICE_STYLE, body, _call_brief(config, opening),
              DISCLOSURE if disclose else "", _goal_note(config),
-             _runtime_note(phase, note_state), _time_note(elapsed_s, config.get("max_minutes"))]
+             _runtime_note(phase, note_state), _time_note(elapsed_s, config.get("max_minutes")),
+             clock]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -366,11 +373,12 @@ def _note_state(state, phase):
 
 # --------------------------------------------------------------------------- public API
 
-def open_call(config):
+def open_call(config, now=None):
     """Rudi speaks first — this is an outbound call. Returns (reply, state, info)."""
+    now = now or timeline.now_utc()
     state = new_state(config)
     _, note_state = _note_state(state, state["phase"])
-    system = build_system(state["phase"], note_state, config, elapsed_s=0, opening=True)
+    system = build_system(state["phase"], note_state, config, elapsed_s=0, opening=True, now=now)
 
     result = gateway.generate(
         [{"role": "system", "content": system},
@@ -378,31 +386,37 @@ def open_call(config):
           "content": "(system: they have just picked up and said nothing yet — greet them)"}],
         json_mode=False)
 
-    reply = _speakable(parse_envelope(result["text"])["reply"])
-    state["history"] = [{"role": "assistant", "content": reply}]
+    reply = _speakable(timeline.strip_markers(parse_envelope(result["text"])["reply"]))
+    state["history"] = [{"role": "assistant", "content": reply, "at": timeline.stamp(now)}]
     return reply, state, {"phase": state["phase"], "signals": {}, "model": result.get("model")}
 
 
-def turn(state, user_text, config, elapsed_s=0):
+def turn(state, user_text, config, elapsed_s=0, now=None):
     """Advance one spoken turn. Returns (reply, state, info)."""
     state = dict(state or {})
+    now = now or timeline.now_utc()
     phase = state.get("phase") or "goal"
     if phase == "concluded":
         return "", state, {"phase": "concluded", "signals": {}, "model": None, "ended": True}
 
     history = list(state.get("history", [])) + [
-        {"role": "user", "content": (user_text or "")[:MAX_INPUT_CHARS]}]
+        {"role": "user", "content": (user_text or "")[:MAX_INPUT_CHARS],
+         "at": timeline.stamp(now)}]
 
     clarifiers_left, note_state = _note_state(state, phase)
     disclose = not state.get("disclosed")
-    system = build_system(phase, note_state, config, elapsed_s=elapsed_s, disclose=disclose)
+    system = build_system(phase, note_state, config, elapsed_s=elapsed_s, disclose=disclose,
+                          now=now)
+    tz = config.get("timezone") or ""
 
     result = gateway.generate(
-        [{"role": "system", "content": system}] + history[-MAX_HISTORY:], json_mode=True)
+        [{"role": "system", "content": system}] + timeline.render(history[-MAX_HISTORY:], now, tz),
+        json_mode=True)
     env = parse_envelope(result["text"])
-    reply = _speakable(env["reply"])
+    reply = _speakable(timeline.strip_markers(env["reply"]))
 
-    state["history"] = history + [{"role": "assistant", "content": reply}]
+    state["history"] = history + [{"role": "assistant", "content": reply,
+                                   "at": timeline.stamp(now)}]
     if disclose:
         state["disclosed"] = True
     advance(state, env["signals"], user_text, clarifiers_left)

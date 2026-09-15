@@ -49,6 +49,23 @@ PRE_QUIET_BUFFER = datetime.timedelta(minutes=5)   # keep the nudge clearly befo
 MIN_TEMPLATE_GAP = datetime.timedelta(hours=48)    # cadence cap (~2–3×/week) between templates
 MAX_TEMPLATE_MISSES = 3              # consecutive unanswered templates → dormant (protect quality)
 
+# --- Outreach limits ---------------------------------------------------------------------------
+# Two rules bind EVERY system-initiated WhatsApp send — the 22h keep-warm nudge, a promised
+# check-in, a re-engagement template, an admin recommit — inside the 24h window and outside it:
+#
+#   1. At most MAX_UNANSWERED_OUTREACH reach-outs in a row without the person writing back.
+#      After that Rudi waits, however the schedule would otherwise have it.
+#   2. Never sooner than MIN_OUTREACH_SPACING after the last message we sent them since they
+#      last wrote — including Rudi's own reply. That second part is what the rule is for: a
+#      nudge landing three minutes after Rudi's answer is how "I'll check in soon" turned into a
+#      burst, and a promised 15-minute check-in now waits the full spacing.
+#
+# Reactive replies to an inbound are never held: the person just wrote to us. They do count as
+# the anchor for rule 2, and a reply from the person resets both rules.
+MAX_UNANSWERED_OUTREACH = int(os.environ.get("MAX_UNANSWERED_OUTREACH", "2"))
+MIN_OUTREACH_SPACING = datetime.timedelta(
+    minutes=int(os.environ.get("MIN_OUTREACH_SPACING_MIN", "45")))
+
 # Test mode: schedule a nudge at last_inbound + TEST_LEAD (bypassing anti-drift/quiet hours) so
 # the keep-warm loop can be observed in minutes. Leave off in production.
 TEST_MODE = os.environ.get("PROACTIVE_TEST_MODE", "false").lower() == "true"
@@ -161,6 +178,12 @@ class ContactMeta:
     frozen_kind: str = ""                # wrong_number | unsubscribe | hostile
     frozen_evidence: str = ""            # the phrase that matched, or the classifier's reason
     frozen_source: str = ""              # lexicon | classifier | operator
+    # Outreach limits (see MAX_UNANSWERED_OUTREACH). Both reset when the person writes.
+    unanswered_outreach: int = 0         # system-initiated sends since their last message
+    # Set by claim_outreach() BEFORE the provider is called and cleared once the send is recorded.
+    # If the send goes out but recording it fails, this claim is what still counts and spaces the
+    # attempt — otherwise the runner would see nothing sent and try again on the next 2-min tick.
+    pending_outreach_at: str = ""
     ai_state: dict[str, Any] = field(default_factory=dict)  # AI responder session state (phase, counters, history)
     # Reversible name<->alias map for the CURRENT 24h window only. Reset whenever a new session
     # opens, so no mapping that could re-identify a stored message outlives the window that
@@ -274,6 +297,58 @@ def commitment_from_signals(signals: dict, now: datetime.datetime) -> tuple[str,
     return (to_iso(now + datetime.timedelta(minutes=minutes)), note)
 
 
+def _since_last_inbound(meta: "ContactMeta", iso: str) -> bool:
+    """True when `iso` is a moment after the person last wrote (or they never have)."""
+    if not iso:
+        return False
+    if not meta.last_inbound_at:
+        return True
+    try:
+        return parse_iso(iso) > parse_iso(meta.last_inbound_at)
+    except (ValueError, TypeError):
+        return False
+
+
+def unanswered_outreach(meta: "ContactMeta") -> int:
+    """System-initiated sends since the person last wrote, including one claimed but not yet
+    recorded.
+
+    Contacts written before this counter existed carry 0, so the old per-window markers stand in
+    for it: both reset on inbound, and between them they record the nudge and the templates
+    sent since. Taking the max means a legacy contact is never under-counted into one more send.
+    """
+    legacy = meta.reengage_count + (
+        1 if meta.nudge_sent_for_window and meta.nudge_sent_for_window == meta.window_open_until
+        else 0)
+    pending = 1 if _since_last_inbound(meta, meta.pending_outreach_at) else 0
+    return max(meta.unanswered_outreach, legacy) + pending
+
+
+def outreach_not_before(meta: "ContactMeta") -> Optional[datetime.datetime]:
+    """Earliest moment another reach-out may go, or None when the person wrote last."""
+    anchors = [parse_iso(t) for t in (meta.last_outbound_at, meta.pending_outreach_at)
+               if _since_last_inbound(meta, t)]
+    return (max(anchors) + MIN_OUTREACH_SPACING) if anchors else None
+
+
+def outreach_block(meta: "ContactMeta", now: datetime.datetime) -> str:
+    """Why a system-initiated send may not go right now ("" = it may)."""
+    if unanswered_outreach(meta) >= MAX_UNANSWERED_OUTREACH:
+        return "unanswered-cap"
+    floor = outreach_not_before(meta)
+    if floor is not None and now < floor:
+        return "spacing"
+    return ""
+
+
+def _not_before(when: datetime.datetime, floor: Optional[datetime.datetime],
+                tz: zoneinfo.ZoneInfo) -> datetime.datetime:
+    """Push `when` to the spacing floor, landing on social hours if the floor itself does not."""
+    if floor is not None and when < floor:
+        return next_social_start(floor, tz)
+    return when
+
+
 def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple[str, str]:
     """Precompute the next system-initiated send for a conversation → (iso_when, kind).
 
@@ -284,6 +359,12 @@ def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple
     if (meta.consent_state != "granted" or meta.status != "active"
             or not meta.keep_warm or not meta.window_open_until):
         return ("", "")   # no keep-warm: no consent, inactive, opted out, or never messaged
+
+    # Outreach limits bind every branch below, inside the window and out of it. Checked first so
+    # that no scheduling rule — a promise, the 22h keep-warm, a template — can talk its way past.
+    if unanswered_outreach(meta) >= MAX_UNANSWERED_OUTREACH:
+        return ("", "")   # the last reach-outs went unanswered; wait for them to write
+    spacing_floor = outreach_not_before(meta)
 
     tz = _tz(meta.timezone)
     expiry = parse_iso(meta.window_open_until)
@@ -297,7 +378,8 @@ def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple
     # never past the window (beyond it there is no free-form message to send).
     if meta.commitment_at:
         promised = parse_iso(meta.commitment_at)
-        when = next_social_start(promised if promised > now else now, tz)
+        when = _not_before(next_social_start(promised if promised > now else now, tz),
+                           spacing_floor, tz)
         if when < expiry:
             return (to_iso(when), "nudge")
         # Falls through: the promise cannot be honoured as a check-in, so the normal
@@ -306,12 +388,15 @@ def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple
     # 1) Window still open and not yet nudged → schedule the anti-drift free-form nudge.
     if window_open and not already_nudged:
         if TEST_MODE and meta.last_inbound_at:   # fast, repeatable loop for observing keep-warm
-            return (to_iso(parse_iso(meta.last_inbound_at) + TEST_LEAD), "nudge")
+            when = parse_iso(meta.last_inbound_at) + TEST_LEAD
+            return (to_iso(_not_before(when, spacing_floor, tz)), "nudge")
         target = expiry - NUDGE_LEAD
-        nudge_at = last_social_before(min(target, expiry), tz)
+        nudge_at = _not_before(last_social_before(min(target, expiry), tz), spacing_floor, tz)
         if nudge_at >= now:
-            return (to_iso(nudge_at), "nudge")
-        if not is_quiet(now, tz):
+            if nudge_at < expiry:
+                return (to_iso(nudge_at), "nudge")
+            # Spacing pushed the slot past the window, where no free-form message exists.
+        elif not is_quiet(now, tz):
             return (to_iso(now), "nudge")   # social right now, window still open → nudge immediately
         # else: missed the social slot and it's quiet → fall through to the template fallback.
 
@@ -324,7 +409,7 @@ def compute_next_proactive(meta: "ContactMeta", now: datetime.datetime) -> tuple
         floor = parse_iso(meta.last_reengage_at) + MIN_TEMPLATE_GAP
         if when < floor:
             when = next_social_start(floor, tz)
-    return (to_iso(when), "template")
+    return (to_iso(_not_before(when, spacing_floor, tz)), "template")
 
 
 def _reschedule(meta: "ContactMeta", now: datetime.datetime) -> None:
@@ -537,6 +622,9 @@ class ConversationStore:
         meta.nudge_sent_for_window = ""
         meta.reengage_count = 0
         meta.quiet_since = ""
+        # They answered, so both outreach limits start over (see outreach_block).
+        meta.unanswered_outreach = 0
+        meta.pending_outreach_at = ""
         # The commitment deliberately SURVIVES an inbound. Clearing it here meant a promise died
         # the moment the person acknowledged it: Rudi said "I'll check in 30 minutes", the tester
         # replied "Top!", and that reply cancelled the check-in. A commitment is about an activity
@@ -578,6 +666,11 @@ class ConversationStore:
             meta.locale = locale
         if proactive_kind in ("nudge", "template"):
             meta.proactive_sends += 1
+            # The claim made before the send is now a recorded message: drop the claim and count
+            # the message once. Counted before the nudge/template markers below change, so the
+            # legacy stand-in inside unanswered_outreach() is read as it stood before this send.
+            meta.pending_outreach_at = ""
+            meta.unanswered_outreach = unanswered_outreach(meta) + 1
         if proactive_kind == "nudge":
             meta.nudge_sent_for_window = meta.window_open_until
             meta.quiet_since = meta.quiet_since or msg.at
@@ -639,6 +732,12 @@ class ConversationStore:
             "timestamp_last_user_turn": meta.last_inbound_at,
             "most_recent_development": development if development is not None
             else existing.get("most_recent_development"),
+            # When that line was true. A summary is re-read days later, so it keeps the moment it
+            # describes; only a changed summary moves the stamp, not a rewrite of the same one.
+            "most_recent_development_at": (
+                to_iso(now or now_dt())
+                if development is not None and development != existing.get("most_recent_development")
+                else existing.get("most_recent_development_at")),
             "attitude": existing.get("attitude"),   # reserved (null for now)
             "timestamp_first_message": meta.created_at,
             "messages_count_total": meta.msg_total,
@@ -670,6 +769,36 @@ class ConversationStore:
         _reschedule(meta, now or now_dt())   # disabling clears next_proactive_*; enabling recomputes
         self.put_meta(meta)
         return meta
+
+    def claim_outreach(self, uid: str,
+                       now: Optional[datetime.datetime] = None) -> tuple[bool, str]:
+        """(allowed, reason) — the authoritative outreach check, made right before a
+        system-initiated send.
+
+        It re-reads the contact rather than trusting the copy the caller listed minutes ago, and
+        when allowed it records the claim BEFORE the provider is called. That ordering is the
+        point: a send that reaches the phone but fails to be recorded still counts and still
+        spaces the next attempt, instead of looking unsent and firing again on the next tick.
+
+        When refused, the contact is rescheduled so it stops coming up as due every tick.
+        """
+        now = now or now_dt()
+        meta = self.get_meta(uid)
+        if meta is None:
+            return False, "no-contact"
+        reason = outreach_block(meta, now)
+        if reason:
+            _reschedule(meta, now)
+            self.put_meta(meta)
+            return False, reason
+        # An earlier claim that never became a recorded message was still, as far as anyone can
+        # tell, a message on their phone. Fold it into the count before the new claim replaces
+        # it — otherwise two lost sends would count as one and a third could slip through.
+        if _since_last_inbound(meta, meta.pending_outreach_at):
+            meta.unanswered_outreach = unanswered_outreach(meta)
+        meta.pending_outreach_at = to_iso(now)
+        self.put_meta(meta)
+        return True, ""
 
     def archive(self, uid: str) -> Optional[ContactMeta]:
         """Soft-delete: mark a conversation archived so listings hide it, but keep all its data
