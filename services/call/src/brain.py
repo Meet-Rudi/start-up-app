@@ -16,6 +16,7 @@ leads the system prompt exactly as it does in chat.
 """
 
 import os
+import re
 import json
 import datetime
 
@@ -23,12 +24,16 @@ import boto3
 
 import gateway
 import timeline
+import leakguard
 
 s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 
 GUARDRAILS_KEY = "prompts/rudi_guardrails.md"
-LEARN_KEY = "prompts/rudi_learn_prompt.md"
+# Calls have their own opening prompt: the shared one was written for the website ("a visitor on
+# the website"). The website one stays as the fallback until the call prompt has been seeded.
+LEARN_KEY = "prompts/rudi_learn_prompt_call.md"
+LEGACY_LEARN_KEY = "prompts/rudi_learn_prompt.md"
 GOAL_KEY = "prompts/rudi_goal_prompt.md"
 COMMIT_KEY = "prompts/rudi_commit_prompt.md"
 RUDI_CONTEXT_KEY = "contexts/rudi-context.md"
@@ -227,13 +232,15 @@ def build_system(phase, note_state, config, elapsed_s=0, opening=False, disclose
     Rudi knows today's date, and the model has no other way of knowing it.
     """
     clock = timeline.now_note(now, config.get("timezone") or "")
-    if phase == "learn":
-        base = (_get_s3_text(LEARN_KEY) + "\n\n# About me (context)\n\n"
-                + _get_s3_text(RUDI_CONTEXT_KEY))
-        parts = [base, VOICE_STYLE, _call_brief(config, opening), _goal_note(config), clock]
-        return "\n\n".join(p for p in parts if p)
-
     guardrails = _get_s3_text(GUARDRAILS_KEY)
+    if phase == "learn":
+        # Guardrails lead here too. The opening phase is where a stranger — a wrong number, or
+        # somebody probing — first talks to Rudi, and it used to run with no rules at all.
+        learn = _get_s3_text(LEARN_KEY, optional=True) or _get_s3_text(LEGACY_LEARN_KEY)
+        base = learn + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY)
+        parts = [guardrails, base, VOICE_STYLE, _call_brief(config, opening), _goal_note(config),
+                 clock]
+        return "\n\n".join(p for p in parts if p)
     if phase == "goal":
         body = _get_s3_text(GOAL_KEY)
     elif phase == "commit":
@@ -276,11 +283,27 @@ def parse_envelope(text):
     return {"reply": reply, "signals": signals}
 
 
+_ALIAS = re.compile(r"<\s*\|\s*[A-Za-z0-9_\-]{1,40}\s*\|\s*>")
+
+
 def _speakable(text):
-    """Strip anything the synthesiser would read aloud as punctuation noise."""
-    out = (text or "").replace("**", "").replace("*", "").replace("#", "")
+    """Strip anything the synthesiser would read aloud as punctuation noise.
+
+    Aliases are set aside first. Turning "_" into a space made "<| Person_A |>" into
+    "<| Person A |>", which the vault no longer recognises — so a masked name was spoken as a raw
+    placeholder instead of being restored.
+    """
+    held = []
+
+    def _hold(m):
+        held.append(m.group(0))
+        return "\x00%d\x00" % (len(held) - 1)
+
+    out = _ALIAS.sub(_hold, text or "")
+    out = out.replace("**", "").replace("*", "").replace("#", "")
     out = out.replace("`", "").replace("_", " ")
-    return " ".join(out.split())
+    out = " ".join(out.split())
+    return re.sub(r"\x00(\d+)\x00", lambda m: held[int(m.group(1))], out)
 
 
 # --------------------------------------------------------------------------- state machine
@@ -386,7 +409,11 @@ def open_call(config, now=None):
           "content": "(system: they have just picked up and said nothing yet — greet them)"}],
         json_mode=False)
 
-    reply = _speakable(timeline.strip_markers(parse_envelope(result["text"])["reply"]))
+    # The reply gate (§6) runs BEFORE speech cleanup, which would strip the very characters
+    # ("_", "#") that make an internal marker recognisable.
+    raw, _ = leakguard.guard(timeline.strip_markers(parse_envelope(result["text"])["reply"]),
+                             system, config.get("language"))
+    reply = _speakable(raw)
     state["history"] = [{"role": "assistant", "content": reply, "at": timeline.stamp(now)}]
     return reply, state, {"phase": state["phase"], "signals": {}, "model": result.get("model")}
 
@@ -413,7 +440,11 @@ def turn(state, user_text, config, elapsed_s=0, now=None):
         [{"role": "system", "content": system}] + timeline.render(history[-MAX_HISTORY:], now, tz),
         json_mode=True)
     env = parse_envelope(result["text"])
-    reply = _speakable(timeline.strip_markers(env["reply"]))
+    raw, blocked = leakguard.guard(timeline.strip_markers(env["reply"]), system,
+                                   config.get("language"))
+    if blocked:
+        env["signals"] = {}        # text we refused to say must not move the call along
+    reply = _speakable(raw)
 
     state["history"] = history + [{"role": "assistant", "content": reply,
                                    "at": timeline.stamp(now)}]

@@ -142,6 +142,26 @@ def _restore_outbound(manifest, text):
     return _vault_for(manifest).unmask(text or "", fallback="them")
 
 
+def _model_config(manifest, config):
+    """The call config as the MODEL may see it (§0.1).
+
+    The person's own name becomes an alias from the same vault that masks what they say, so Rudi
+    still greets them by name — restored only in the last breath before Twilio speaks. The
+    free-text topic and notes are scrubbed like any utterance. The stored config is untouched.
+    """
+    vault = _vault_for(manifest)
+    safe = dict(config)
+    name = (config.get("user_name") or "").strip()
+    if name:
+        safe["user_name"] = deid.PLACEHOLDER_FMT % vault.alias_for(name)
+    manifest["_vault"] = vault.to_dict()
+    lang = config.get("language", "en")
+    for key in ("topic", "notes"):
+        if config.get(key):
+            safe[key] = _scrub_inbound(manifest, config[key], lang)
+    return safe
+
+
 def _forget_vault(manifest):
     """Destroy the name-to-alias map when the call ends. Nothing identifying outlives the call."""
     if manifest.pop("_vault", None) is not None:
@@ -204,7 +224,7 @@ def _on_setup(connection_id, message):
 
     started = time.time()
     try:
-        reply, state, info = brain.open_call(config)
+        reply, state, info = brain.open_call(_model_config(manifest, config))
     except gateway.AIError as e:
         return _abandon(connection_id, manifest, config, e,
                         "rate-limited" if isinstance(e, gateway.AllRateLimited)
@@ -257,7 +277,8 @@ def _on_prompt(connection_id, message, manifest):
 
     elapsed = _elapsed_s(manifest)
     try:
-        reply, state, info = brain.turn(state, transcript, config, elapsed_s=elapsed)
+        reply, state, info = brain.turn(state, transcript, _model_config(manifest, config),
+                                        elapsed_s=elapsed)
     except gateway.AIError as e:
         return _abandon(connection_id, manifest, config, e,
                         "rate-limited" if isinstance(e, gateway.AllRateLimited)

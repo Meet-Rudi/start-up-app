@@ -23,6 +23,7 @@ import boto3
 import gateway
 import i18n
 import timeline
+import leakguard
 
 s3 = boto3.client("s3")
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -116,11 +117,12 @@ def _build_system(phase: str, state: dict, personality_block: str = "") -> str:
     # Personality shapes tone/style only. It sits AFTER the guardrails (which lead and take
     # precedence) and BEFORE the role/body, exactly as its header text promises.
     pblock = ("\n\n" + personality_block) if personality_block else ""
-    if phase == "learn":
-        return (_get_s3_text(LEARN_KEY) + pblock
-                + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY))
-
     guardrails = _get_s3_text(GUARDRAILS_KEY)
+    if phase == "learn":
+        # Guardrails lead here too. The opening phase is where a stranger — a wrong number, or
+        # somebody probing — first talks to Rudi, and it used to run with no rules at all.
+        return (guardrails + pblock + "\n\n" + _get_s3_text(LEARN_KEY)
+                + "\n\n# About me (context)\n\n" + _get_s3_text(RUDI_CONTEXT_KEY))
     if phase == "committed":
         agreed = (" " + state["commitment_agreed"]) if state.get("commitment_agreed") else ""
         check_in = ((" You planned to check in on it %s." % state["check_in"])
@@ -343,7 +345,9 @@ def reach_out(state: dict, locale: str = i18n.DEFAULT_LOCALE,
         msgs.append({"role": "user", "content": "(system: time for a gentle check-in)"})
 
     result = gateway.generate(msgs, json_mode=False)
-    text = _to_whatsapp(timeline.strip_markers(_parse_envelope(result["text"])["reply"]))
+    text, _ = leakguard.guard(timeline.strip_markers(_parse_envelope(result["text"])["reply"]),
+                              system, locale)
+    text = _to_whatsapp(text)
     state["history"] = history + [{"role": "assistant", "content": text, "at": timeline.stamp(now)}]
     return (text, state, {"model": result.get("model")})
 
@@ -425,6 +429,12 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
                               + timeline.render(history[-MAX_HISTORY:], now, tz), json_mode=True)
     env = _parse_envelope(result["text"])
     reply, signals = timeline.strip_markers(env["reply"]), env["signals"]
+    # The reply gate (§6). A reply that recites what Rudi was given is replaced, and its signals
+    # go with it — text we refused to send must not move the conversation along.
+    reply, blocked = leakguard.guard(
+        reply, system, i18n.normalize_locale(signals.get("lang")) or locale)
+    if blocked:
+        signals = {"lang": signals["lang"]} if signals.get("lang") else {}
 
     state["history"] = history + [{"role": "assistant", "content": reply,
                                    "at": timeline.stamp(now)}]
