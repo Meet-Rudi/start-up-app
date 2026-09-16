@@ -77,6 +77,7 @@ os.environ["TESTER_WA_NUMBER"] = "+32460221109"
 os.environ["TESTER_WA_JOIN_PHRASE"] = "join olive-tiger"
 
 import store  # noqa: E402
+import deid  # noqa: E402
 import tester_store as ts  # noqa: E402
 import tester_api as api  # noqa: E402
 
@@ -488,6 +489,179 @@ class TestConsoleSurface(unittest.TestCase):
     def test_logout_invalidates_the_session(self):
         call("POST", "/logout", {}, token=self.session)
         self.assertEqual(call("GET", "/me", token=self.session)[0], 401)
+
+
+class TestChatDeidentification(unittest.TestCase):
+    """The web chat reaches the same third-party model as WhatsApp, so it gets the same
+    de-identification (§0.1, §5): identifiers never stored and never sent, names masked on the way
+    to the model and restored only for the tester reading the chat."""
+
+    def setUp(self):
+        reset_world()
+        self.tid, self.session = register_and_activate()
+        self.seen = []
+        # Kept on the instance: read back through the class, a staticmethod unwraps itself.
+        self._orig_respond = _FakeResponder.__dict__["respond"]
+        real, seen = self._orig_respond.__func__, self.seen
+
+        def capture(state, user_text, locale="en", personality_block=""):
+            if user_text:
+                seen.append(user_text)
+            return real(state, user_text, locale, personality_block)
+        _FakeResponder.respond = staticmethod(capture)
+
+    def tearDown(self):
+        _FakeResponder.respond = self._orig_respond
+
+    def _stored(self):
+        return "\n".join(v.decode("utf-8", "replace") for k, v in _FAKE_S3._store.get(BUCKET, {}).items()
+                         if k.startswith("tester-conversations/"))
+
+    def test_identifiers_never_reach_the_model_or_storage(self):
+        text = "mail me at jan.peeters@example.be or call +32 470 12 34 56"
+        status, _ = call("POST", "/chat", {"text": text}, token=self.session)
+        self.assertEqual(status, 200)
+        model_saw = " ".join(self.seen)
+        for raw in ("jan.peeters@example.be", "470 12 34 56"):
+            self.assertNotIn(raw, model_saw, "the model must never receive %r" % raw)
+            self.assertNotIn(raw, self._stored(), "%r must never be written to storage" % raw)
+        self.assertIn(deid.LBL_EMAIL, model_saw)
+
+    def test_names_are_masked_for_the_model_and_restored_for_the_tester(self):
+        status, data = call("POST", "/chat", {"text": "I went with Aleksandra yesterday"},
+                            token=self.session)
+        self.assertEqual(status, 200)
+        self.assertNotIn("Aleksandra", " ".join(self.seen), "a name reached the model")
+        self.assertTrue(any(deid.has_placeholder(t) for t in self.seen))
+        self.assertIn("Aleksandra", data["reply"], "the tester reads the real name back")
+        self.assertNotIn("<|", json.dumps(data), "a raw placeholder reached the browser")
+        _, thread = call("GET", "/chat", token=self.session)
+        self.assertIn("Aleksandra", json.dumps(thread))
+        self.assertNotIn("<|", json.dumps(thread))
+
+    def test_a_removed_identifier_shows_as_removed_not_as_nonsense(self):
+        call("POST", "/chat", {"text": "mail me at jan.peeters@example.be"}, token=self.session)
+        _, thread = call("GET", "/chat", token=self.session)
+        mine = [m["text"] for m in thread["messages"] if m["direction"] == "in"][-1]
+        self.assertIn("[%s removed]" % deid.LBL_EMAIL, mine)
+        self.assertNotIn("them", mine)
+
+
+class TestCallGoalJourney(unittest.TestCase):
+    """Which goal each call gets (product decision): the first connected call gets to know the
+    tester; the second sets a near-term goal, or follows up one already agreed on WhatsApp; every
+    call after that responds to where they are."""
+
+    _real_quiet = staticmethod(api._is_quiet_now)
+
+    def setUp(self):
+        reset_world()
+        self.tid, self.session = register_and_activate()
+        api._is_quiet_now = lambda now=None: False
+
+    def tearDown(self):
+        api._is_quiet_now = TestCallGoalJourney._real_quiet
+
+    # ------------------------------------------------------------------ helpers
+    def _set(self, **kw):
+        t = api.STORE.get(self.tid)
+        for key, value in kw.items():
+            setattr(t, key, value)
+        api.STORE.put(t)
+        return t
+
+    def _whatsapp(self, goal="walk after dinner", last_inbound=None):
+        t = api.STORE.get(self.tid)
+        api.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
+                                          consent_state="granted",
+                                          last_inbound_at=last_inbound or store.iso_now()))
+        if goal:
+            api.WA.write_profile(t.wa_user_id, extracted_goal=goal)
+
+    def _call_with_goal(self, call_id, goal):
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/%s/manifest.json" % call_id,
+                            Body=json.dumps({
+                                "call_id": call_id, "status": "completed", "end_reason": "",
+                                "totals": {"turns": 6},
+                                "telephony": {"answered_by": "human", "call_status": "completed"},
+                                "outcome": {"goal": goal},
+                            }).encode())
+
+    def _goal(self):
+        return api._next_call_goal(api.STORE.get(self.tid))
+
+    # ------------------------------------------------------------------ 1st call
+    def test_the_first_call_gets_to_know_them(self):
+        status, data = call("POST", "/call", {}, token=self.session)
+        self.assertEqual((status, data["state"]), (200, "dialing"))
+        cfg = _DIALED[0]["config"]
+        self.assertEqual(cfg["call_goal"], "GET_TO_KNOW")
+        self.assertEqual(cfg["start_phase"], "learn")
+        t = api.STORE.get(self.tid)
+        self.assertEqual(t.call_goal, "GET_TO_KNOW")
+        self.assertTrue(t.last_call_id, "the dialled call is remembered for the next decision")
+
+    def test_the_first_call_gets_to_know_them_even_after_whatsapp(self):
+        self._whatsapp(goal="walk after dinner")
+        self.assertEqual(self._goal(), "GET_TO_KNOW")
+
+    def test_a_call_that_never_connected_does_not_move_them_on(self):
+        self._set(last_call_id="c_vm")
+        finish_call("c_vm", answered_by="machine_start", turns=0)
+        self.assertEqual(self._goal(), "GET_TO_KNOW")
+
+    # ------------------------------------------------------------------ 2nd call
+    def test_the_second_call_sets_a_near_term_goal(self):
+        self._set(calls_used=1)
+        self.assertEqual(self._goal(), "SET_NEARTERM_GOAL")
+
+    def test_the_second_call_follows_up_a_goal_already_agreed_on_whatsapp(self):
+        self._set(calls_used=1)
+        self._whatsapp(goal="walk after dinner")
+        self.assertEqual(self._goal(), "GOAL_FOLLOWUP")
+
+    def test_a_connected_call_counts_before_the_runner_reconciles_it(self):
+        """calls_used only moves on the runner's five-minute tick. Pressing "call me" again
+        straight after a first call must not get to know them a second time."""
+        self._set(calls_used=0, last_call_id="c1")
+        finish_call("c1")
+        self.assertEqual(self._goal(), "SET_NEARTERM_GOAL")
+        # ...and once the runner has counted it, it is not counted twice.
+        api.STORE.mark_reconciled("c1")
+        self._set(calls_used=1)
+        self.assertEqual(self._goal(), "SET_NEARTERM_GOAL")
+
+    # ------------------------------------------------------------------ 3rd call onwards
+    def test_later_calls_follow_up_a_goal_agreed_on_a_call(self):
+        self._set(calls_used=2, last_call_id="c2", last_call_at=store.iso_now())
+        self._call_with_goal("c2", "a 10-minute walk after lunch")
+        api.STORE.mark_reconciled("c2")
+        self.assertEqual(self._goal(), "GOAL_FOLLOWUP")
+
+    def test_later_calls_set_a_goal_while_there_still_is_none(self):
+        self._set(calls_used=2)
+        self.assertEqual(self._goal(), "SET_NEARTERM_GOAL")
+
+    def test_someone_who_went_quiet_is_reinstated_not_followed_up(self):
+        long_ago = store.to_iso(store.now_dt() - datetime.timedelta(days=10))
+        self._set(calls_used=3, last_call_at=long_ago)
+        self._whatsapp(goal="walk after dinner", last_inbound=long_ago)
+        self.assertEqual(self._goal(), "REINSTATE_TALK")
+        # The same person writing yesterday is simply followed up.
+        self._whatsapp(goal="walk after dinner",
+                       last_inbound=store.to_iso(store.now_dt() - datetime.timedelta(days=1)))
+        self.assertEqual(self._goal(), "GOAL_FOLLOWUP")
+
+    # ------------------------------------------------------------------ admin pin
+    def test_an_admin_pin_holds_until_set_back_to_auto(self):
+        resp = api._admin_action({"action": "set_call_goal", "tester_id": self.tid,
+                                  "call_goal": "GOAL_FOLLOWUP"})
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(self._goal(), "GOAL_FOLLOWUP", "a pin overrides even the first call")
+        resp = api._admin_action({"action": "set_call_goal", "tester_id": self.tid,
+                                  "call_goal": "AUTO"})
+        self.assertEqual(json.loads(resp["body"])["result"]["next_call_goal"], "GET_TO_KNOW")
+        self.assertEqual(api.STORE.get(self.tid).call_goal_override, "")
 
 
 class TestCallGates(unittest.TestCase):

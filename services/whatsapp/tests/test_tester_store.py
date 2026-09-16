@@ -69,10 +69,20 @@ class TestIdentity(unittest.TestCase):
         for junk in ("", "not-a-hash", "pbkdf2_sha256$oops", None):
             self.assertFalse(ts.verify_password("Test1234", junk))
 
-    def test_call_goals_round_robin_over_all_four(self):
-        assigned = [ts.call_goal_for(i) for i in range(8)]
-        self.assertEqual(set(assigned), set(ts.CALL_GOALS))
-        self.assertEqual(assigned[0], assigned[4])
+    def test_call_goal_follows_the_testers_journey(self):
+        c = ts.choose_call_goal
+        self.assertEqual(c(0), "GET_TO_KNOW")
+        self.assertEqual(c(0, whatsapp_goal=True, has_goal=True), "GET_TO_KNOW",
+                         "the first call always gets to know them, whatever WhatsApp already did")
+        self.assertEqual(c(1), "SET_NEARTERM_GOAL")
+        self.assertEqual(c(1, whatsapp_goal=True, has_goal=True), "GOAL_FOLLOWUP")
+        self.assertEqual(c(2), "SET_NEARTERM_GOAL")
+        self.assertEqual(c(2, has_goal=True), "GOAL_FOLLOWUP")
+        self.assertEqual(c(4, has_goal=True, gone_quiet=True), "REINSTATE_TALK")
+        self.assertEqual(c(4, gone_quiet=True), "SET_NEARTERM_GOAL",
+                         "there is nothing to reinstate without a goal")
+        for n in range(6):
+            self.assertIn(c(n, has_goal=True), ts.CALL_GOALS)
 
     def test_mask_phone_keeps_it_unusable(self):
         self.assertEqual(ts.mask_phone("+32479123456"), "+32 479 ••• •56")

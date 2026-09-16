@@ -296,6 +296,52 @@ class AliasVault:
                    prefix=d.get("prefix") or "Person")
 
 
+# ------------------------------------------------------------------------- the channel helpers
+# One implementation for every text channel that talks to the model (§5: a single
+# de-identification helper, never hand-rolled per call). The WhatsApp processor and the tester
+# web chat both go through these three, so the two channels cannot drift apart.
+#
+# The session is the 24h conversation window: a closed window means the previous session is over,
+# so the alias map that could re-identify its messages is dropped with it.
+
+def session_vault(prior_meta) -> tuple["AliasVault", bool]:
+    """(vault, is_new_session) for a conversation record with `is_in_window()` and
+    `alias_vault` (store.ContactMeta)."""
+    if prior_meta is None or not prior_meta.is_in_window():
+        return AliasVault(), True
+    return AliasVault.from_dict(getattr(prior_meta, "alias_vault", None) or None), False
+
+
+def scrub_inbound(vault: "AliasVault", text: str, detector: PersonDetector,
+                  locale: str = "en") -> tuple[str, dict[str, int]]:
+    """Tier 1 then Tier 2, in that order, BEFORE the text is stored or sent anywhere.
+    Returns (masked_text, tier1_counts)."""
+    clean, found = redact(text or "")
+    return vault.mask(clean, detector, locale), found
+
+
+TIER1_LABELS = frozenset((LBL_NATIONAL_ID, LBL_EMAIL, LBL_PHONE, LBL_IBAN, LBL_CARD))
+
+
+def restore_outbound(vault: "AliasVault", text: str, fallback: str = "them",
+                     redacted: str = "") -> str:
+    """Placeholders back to real names, as the last step before a person reads the text. Anything
+    that cannot be resolved becomes `fallback` — a raw placeholder must never reach a person.
+
+    `redacted` (e.g. "[%s removed]") shows a Tier-1 redaction as a visible marker instead. Use it
+    where a person reads back their OWN words: "mail me at [email-address removed]" is honest,
+    whereas the fallback would turn it into "mail me at them".
+    """
+    out = text or ""
+    if redacted:
+        out = PLACEHOLDER_RE.sub(
+            lambda m: (redacted % m.group(1)) if m.group(1) in TIER1_LABELS else m.group(0), out)
+    out = vault.unmask(out, fallback=fallback)
+    if has_placeholder(out):
+        out = PLACEHOLDER_RE.sub(fallback, out)
+    return out
+
+
 def has_placeholder(text: str) -> bool:
     """True if any unresolved placeholder survives — assert this is False before every send."""
     return bool(PLACEHOLDER_RE.search(text or ""))

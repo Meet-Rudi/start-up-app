@@ -72,6 +72,7 @@ import personality
 import gateway
 import tester_store
 import tester_mail
+import deid
 from tester_store import Tester, TesterStore
 
 _s3 = boto3.client("s3")
@@ -96,6 +97,9 @@ DEFAULT_TZ = os.environ.get("DEFAULT_TZ", store.DEFAULT_TZ)
 
 STORE = TesterStore(_s3, DATA_BUCKET)
 CHAT = store.ConversationStore(_s3, DATA_BUCKET, prefix=CHAT_PREFIX)
+# Same detector the WhatsApp processor uses. The web chat reaches the same model, so it gets the
+# same de-identification: identifiers removed and names masked before anything is stored or sent.
+_CHAT_DETECTOR = deid.HeuristicDetector()
 _cache: dict = {}
 
 # The four goals map onto the phases today's brain understands. `call_goal` is passed through
@@ -365,8 +369,6 @@ def _register(payload):
     tester.whatsapp_confirmed = bool(payload.get("whatsapp_confirmed"))
     tester.wa_user_id = store.user_id(phone, SALT)
     tester.status = "pending"
-    if not existing:
-        tester.call_goal = tester_store.call_goal_for(STORE.count())
     STORE.put(tester)
 
     STORE.revoke_links(tid, "verify")          # a resubmission invalidates the earlier link
@@ -506,7 +508,16 @@ def _chat_thread(tester):
                              store.Message(id=store.new_message_id(), direction="out",
                                            type="text", text=reply, operator_id="ai:rudi"),
                              ai_state=ai_state)
-    return [m.to_dict() for m in CHAT.list_messages(tester.tester_id)]
+    vault, _ = deid.session_vault(CHAT.get_meta(tester.tester_id))
+    return [_shown(vault, m) for m in CHAT.list_messages(tester.tester_id)]
+
+
+def _shown(vault, msg):
+    """A stored (de-identified) message as the tester reads it: names restored while this chat
+    session's vault lasts, removed identifiers marked as removed, never a raw placeholder."""
+    d = msg.to_dict()
+    d["text"] = deid.restore_outbound(vault, d.get("text") or "", redacted="[%s removed]")
+    return d
 
 
 def _engine_locale(locale):
@@ -524,10 +535,17 @@ def _chat_send(tester, payload):
 
     # Build the inbound now so it sorts before the reply, but persist NOTHING until we actually
     # have an answer — a rate-limited turn must not leave a question with no reply behind it.
-    in_msg = store.Message(id=store.new_message_id(), direction="in", type="text", text=text)
+    #
+    # De-identify FIRST, exactly as the WhatsApp path does: identifiers are removed for good and
+    # names swapped for aliases before the message is stored, and before the model ever sees it.
+    vault, _ = deid.session_vault(meta)
+    masked, found = deid.scrub_inbound(vault, text, _CHAT_DETECTOR, locale)
+    if found:
+        print("TESTER chat PII redacted tid=%s %s" % (tester.tester_id, sorted(found)))
+    in_msg = store.Message(id=store.new_message_id(), direction="in", type="text", text=masked)
     try:
         block = personality.resolve_block(meta.persona)
-        reply, new_state, info = responder.respond(meta.ai_state, text, locale=locale,
+        reply, new_state, info = responder.respond(meta.ai_state, masked, locale=locale,
                                                    personality_block=block)
     except gateway.AllRateLimited:
         return _resp(503, {"error": "rate_limited"})
@@ -539,9 +557,11 @@ def _chat_send(tester, payload):
                         text=reply, operator_id="ai:rudi")
     CHAT.record_inbound(tester.tester_id, "", in_msg)      # phone stays empty — no PII in chat
     CHAT.record_outbound(tester.tester_id, out, ai_state=new_state,
-                         locale=info.get("lang") or locale)
+                         locale=info.get("lang") or locale, alias_vault=vault.to_dict())
     _track(tester, "chat", "in_progress")
-    return _resp(200, {"reply": reply, "messages": [in_msg.to_dict(), out.to_dict()]})
+    # Stored and model-facing text stays masked; only what goes back to the tester is restored.
+    return _resp(200, {"reply": deid.restore_outbound(vault, reply),
+                       "messages": [_shown(vault, in_msg), _shown(vault, out)]})
 
 
 # --------------------------------------------------------------------------- track B: call
@@ -649,6 +669,60 @@ def _dispatch(tester, call_id_holder):
     return True, payload
 
 
+# A tester who had a goal and then went silent for this long is re-engaged rather than followed
+# up — "how did it go?" about something from weeks ago is not a question anyone can answer.
+REINSTATE_AFTER = datetime.timedelta(days=int(os.environ.get("TESTER_REINSTATE_AFTER_DAYS", "7")))
+
+
+def _connected_calls(tester):
+    """Connected calls so far, counting one that has ended but not yet been reconciled.
+
+    calls_used is written by meetrudi-tester-call-runner every five minutes. Pressing "call me"
+    again inside that gap would otherwise repeat the previous call's goal.
+    """
+    count = tester.calls_used
+    if tester.last_call_id and tester.last_call_id not in STORE.reconciled_calls():
+        outcome, finished = _outcome_of(_call_manifest(tester.last_call_id))
+        if finished and outcome == "connected":
+            count += 1
+    return count
+
+
+def _next_call_goal(tester, now=None):
+    """Goal for the call about to be dialled: an admin pin if there is one, otherwise decided by
+    tester_store.choose_call_goal from the facts gathered here."""
+    if tester.call_goal_override in tester_store.CALL_GOALS:
+        return tester.call_goal_override
+    now = now or store.now_dt()
+
+    wa_goal, wa_last_inbound = "", ""
+    if tester.wa_user_id:
+        try:
+            wa_goal = ((WA.get_profile(tester.wa_user_id) or {})
+                       .get("extracted_goal_commitment") or "")
+            meta = WA.get_meta(tester.wa_user_id)
+            wa_last_inbound = (meta.last_inbound_at if meta else "") or ""
+        except Exception as e:  # noqa: BLE001 - an unreadable thread only means "no WhatsApp facts"
+            print("WARN call-goal WhatsApp read failed tid=%s: %s"
+                  % (tester.tester_id, type(e).__name__))
+
+    last_call = _call_manifest(tester.last_call_id) if tester.last_call_id else None
+    goal_from_call = bool(((last_call or {}).get("outcome") or {}).get("goal"))
+    has_goal = bool(wa_goal) or goal_from_call
+
+    touches = []
+    for iso in (wa_last_inbound, tester.last_call_at):
+        try:
+            if iso:
+                touches.append(store.parse_iso(iso))
+        except (ValueError, TypeError):
+            continue
+    gone_quiet = bool(touches) and (now - max(touches)) > REINSTATE_AFTER
+
+    return tester_store.choose_call_goal(_connected_calls(tester), whatsapp_goal=bool(wa_goal),
+                                         has_goal=has_goal, gone_quiet=gone_quiet)
+
+
 def _call_request(tester):
     settings = STORE.settings()
     if settings.get("calling_paused"):
@@ -672,6 +746,8 @@ def _call_request(tester):
                            "waiting": len(q.get("waiting", []))})
 
     holder = {}
+    # Decided now, at dial time, from where this tester actually is — see _next_call_goal.
+    tester.call_goal = _next_call_goal(tester)
     ok, result = _dispatch(tester, holder)
     if not ok:
         STORE.dequeue(tester.tester_id)
@@ -682,6 +758,7 @@ def _call_request(tester):
 
     STORE.set_active_call(tester.tester_id, holder.get("call_id", ""))
     STORE.bump_calls_today()
+    tester.last_call_id = holder.get("call_id", "") or tester.last_call_id
     tester.last_call_at, tester.last_call_outcome = store.iso_now(), "in_progress"
     STORE.put(tester)
     _track(tester, "call", "in_progress")
@@ -1117,11 +1194,16 @@ def _admin_action(payload):
     elif action == "wipe_commitments":
         result = _wipe_commitments(tester)
     elif action == "set_call_goal":
+        # A pin, not a one-off: it holds for every call until the admin sets it back to AUTO.
         goal = _clean(payload.get("call_goal"), 40)
-        if goal not in tester_store.CALL_GOALS:
+        if goal == tester_store.AUTO_CALL_GOAL:
+            tester.call_goal_override = ""
+        elif goal in tester_store.CALL_GOALS:
+            tester.call_goal_override = goal
+            tester.call_goal = goal
+        else:
             return _resp(400, {"error": "unknown_call_goal"})
-        tester.call_goal = goal
-        result = {"call_goal": goal}
+        result = {"call_goal": goal, "next_call_goal": _next_call_goal(tester)}
     elif action == "drop_from_queue":
         STORE.dequeue(tid)
         result = {"queue": STORE.queue()}

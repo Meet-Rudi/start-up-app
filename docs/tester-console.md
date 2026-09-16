@@ -12,7 +12,10 @@ with one fixed login. This is the *external* cohort console with per-tester acco
 1. **Hosted on GitHub Pages**, admin pane included. Consequence: the API owns all auth, CORS is
    pinned to the Pages origin, and no PII may ever sit in the static bundle.
 2. **Four call goals, system-set**: `GET_TO_KNOW`, `SET_NEARTERM_GOAL`, `GOAL_FOLLOWUP`,
-   `REINSTATE_TALK`. Assigned round-robin at registration, changeable only by an admin, and
+   `REINSTATE_TALK`. Chosen fresh for every call from the tester's journey — 1st connected call
+   `GET_TO_KNOW`; 2nd `SET_NEARTERM_GOAL`, or `GOAL_FOLLOWUP` if a goal was already agreed on
+   WhatsApp; 3rd+ by situation (`GOAL_FOLLOWUP` with a goal on record, `REINSTATE_TALK` after 7
+   days of silence, `SET_NEARTERM_GOAL` while there is still no goal). An admin can pin one, and
    **never shown to the tester** — `Tester.public()` deliberately omits the field.
 3. **Five calls per tester**, and only a **connected** call is deducted. Voicemail, no answer and
    failures cost nothing.

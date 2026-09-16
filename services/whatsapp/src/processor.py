@@ -52,30 +52,25 @@ STORE = store.ConversationStore(_s3, DATA_BUCKET)
 _DETECTOR = deid.HeuristicDetector()
 
 
+# Thin wrappers over the shared helpers in deid.py, which the tester web chat uses too — one
+# implementation for every text channel, so the two cannot drift apart (§5).
 def _session_vault(prior_meta):
     """(vault, is_new_session). A closed window means the previous session is over."""
-    if prior_meta is None or not prior_meta.is_in_window():
-        return deid.AliasVault(), True
-    return deid.AliasVault.from_dict(prior_meta.alias_vault or None), False
+    return deid.session_vault(prior_meta)
 
 
 def _scrub_inbound(vault, text, locale):
     """Clean before ANY persistence: this runs ahead of record_inbound, so the raw message is
     never written to S3, never shown in the operator console and never reaches a model."""
-    clean, found = deid.redact(text or "")
+    masked, found = deid.scrub_inbound(vault, text, _DETECTOR, locale)
     if found:
         print("PII redacted %s" % sorted(found))
-    return vault.mask(clean, _DETECTOR, locale), found
+    return masked, found
 
 
 def _restore_outbound(vault, text):
     """Placeholders back to real names in the last step before the send channel."""
-    out = vault.unmask(text or "", fallback="them")
-    if deid.has_placeholder(out):
-        # Belt and braces: never let a raw placeholder reach a patient's phone.
-        print("WARN: unresolved placeholder suppressed before send")
-        out = deid.PLACEHOLDER_RE.sub("them", out)
-    return out
+    return deid.restore_outbound(vault, text)
 
 
 def _to_message(msg: dict) -> store.Message:

@@ -408,7 +408,8 @@ def place_due(now):
         # Enough model capacity for a conversation, or just the one line?
         line = "" if gateway.has_headroom() else (
             FALLBACK_LINE.get(tester.locale) or FALLBACK_LINE["en"])
-        ok, result = _dispatch(_config_for(entry, tester, speak_only=line, now=now))
+        cfg = _config_for(entry, tester, speak_only=line, now=now)
+        ok, result = _dispatch(cfg)
         if not ok:
             if result == "quiet-hours":
                 when = store.next_social_start(now, store._tz(DEFAULT_TZ))
@@ -429,6 +430,10 @@ def place_due(now):
         # The one reach-back is now spent, whatever happens on the call. An unanswered or
         # abandoned call does NOT buy another one.
         tester.followup_call_at = store.iso_now()
+        # So the console knows this call happened before the next reconcile counts it, and the
+        # roster shows what it was for.
+        tester.last_call_id = (result or {}).get("call_id") or tester.last_call_id
+        tester.call_goal = cfg.get("call_goal") or tester.call_goal
         STORE.put(tester)
         placed += 1
         print("RUNNER placed tid=%s reason=%s call=%s mode=%s"

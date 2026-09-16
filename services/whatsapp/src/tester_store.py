@@ -45,9 +45,11 @@ CONSOLE_PREFIX = "tester-console"
 TRACKS = ("chat", "call", "whatsapp")
 
 # The four call goals. Rudi always receives one as an input parameter; the tester never sees it
-# and can never choose it (product decision). Assigned round-robin at registration so a cohort
-# exercises all four, and changeable by an admin.
+# and can never choose it (product decision). Chosen fresh for every call from where the tester
+# is in their journey (see choose_call_goal), and pinnable by an admin.
 CALL_GOALS = ("GET_TO_KNOW", "SET_NEARTERM_GOAL", "GOAL_FOLLOWUP", "REINSTATE_TALK")
+# The admin's "no pin" value: go back to choosing by call number and situation.
+AUTO_CALL_GOAL = "AUTO"
 
 # Fallback when the tester leaves the free-text goal blank (product decision).
 DEFAULT_GOAL = "Improve my lifestyle to boost my medical condition"
@@ -104,9 +106,31 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
-def call_goal_for(index: int) -> str:
-    """Round-robin assignment, so a cohort of any size exercises all four goals evenly."""
-    return CALL_GOALS[index % len(CALL_GOALS)]
+def choose_call_goal(connected_calls: int, whatsapp_goal: bool = False, has_goal: bool = False,
+                     gone_quiet: bool = False) -> str:
+    """The goal of a tester's next call, from where they are in their journey (product decision).
+
+      1st connected call  GET_TO_KNOW        what matters to them, and which area to work on
+      2nd                 SET_NEARTERM_GOAL  agree one near-term goal — or GOAL_FOLLOWUP when a
+                                             goal was already agreed on WhatsApp
+      3rd and later       by situation:
+                            gone quiet with a goal on record  -> REINSTATE_TALK
+                            a goal on record                  -> GOAL_FOLLOWUP
+                            still no goal                     -> SET_NEARTERM_GOAL
+
+    This replaced a goal assigned round-robin at registration, which could make somebody's very
+    first call a "follow-up" on a goal that did not exist yet.
+
+    Only CONNECTED calls move a tester along. Voicemail, no answer and our own failures were not a
+    conversation they had, which is the same rule the call ledger uses.
+    """
+    if connected_calls <= 0:
+        return "GET_TO_KNOW"
+    if connected_calls == 1:
+        return "GOAL_FOLLOWUP" if whatsapp_goal else "SET_NEARTERM_GOAL"
+    if gone_quiet and has_goal:
+        return "REINSTATE_TALK"
+    return "GOAL_FOLLOWUP" if has_goal else "SET_NEARTERM_GOAL"
 
 
 # --------------------------------------------------------------------------- the record
@@ -122,7 +146,10 @@ class Tester:
     locale: str = DEFAULT_LOCALE          # nl-BE | en — drives console, mails, Rudi's voice
     help_areas: list[str] = field(default_factory=list)
     goal: str = DEFAULT_GOAL
+    # Goal of the most recent call dialled, for the admin roster. The NEXT call's goal is chosen at
+    # dial time (tester_api._next_call_goal) and never read back from here.
     call_goal: str = CALL_GOALS[0]        # system-set, never shown to the tester
+    call_goal_override: str = ""          # admin pin; "" = automatic (choose_call_goal)
     wa_user_id: str = ""                  # store.user_id(phone) — links the WhatsApp thread
     consent_health: bool = False
     consent_recording: bool = False
@@ -146,6 +173,9 @@ class Tester:
     # another follow-up, and an unanswered one just gets retried: either way the person is rung
     # over and over by a system that thinks it is being helpful.
     followup_call_at: str = ""
+    # The last call dialled for this tester. calls_used is only settled by the runner every five
+    # minutes, so this is what lets a call pressed inside that gap still know it is the next one.
+    last_call_id: str = ""
     # --- track progress: not_started | in_progress | done ---
     track_chat: str = "not_started"
     track_call: str = "not_started"
@@ -192,6 +222,7 @@ class Tester:
             "locale": self.locale,
             "status": self.status,
             "call_goal": self.call_goal,
+            "call_goal_override": self.call_goal_override,
             "calls_used": self.calls_used,
             "calls_max": self.calls_max,
             "created_at": self.created_at,

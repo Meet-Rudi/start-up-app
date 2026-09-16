@@ -217,7 +217,8 @@
     document.addEventListener(evt, function () { idleLeft = IDLE; }, true);
   });
 
-  var GOALS = ["GET_TO_KNOW", "SET_NEARTERM_GOAL", "GOAL_FOLLOWUP", "REINSTATE_TALK"];
+  // AUTO = no pin: the goal is chosen per call from the tester's call number and situation.
+  var GOALS = ["AUTO", "GET_TO_KNOW", "SET_NEARTERM_GOAL", "GOAL_FOLLOWUP", "REINSTATE_TALK"];
   var STATE_COLOR = { active: "var(--ok)", pending: "var(--warn)",
                       locked: "var(--err)", revoked: "var(--err)" };
   var testers = [];
@@ -359,8 +360,9 @@
         : (t.queue_position === 0 ? " · on the line" : "");
       var goalSelect = '<select data-goal="' + esc(t.tester_id) + '" style="font-size:.75rem;padding:.2rem .3rem">' +
         GOALS.map(function (g) {
-          return '<option' + (g === t.call_goal ? " selected" : "") + ">" + g + "</option>";
-        }).join("") + "</select>";
+          return '<option' + (g === (t.call_goal_override || "AUTO") ? " selected" : "") + ">" + g + "</option>";
+        }).join("") + "</select>" +
+        (t.last_call_at ? '<div class="hint">last call: ' + esc(t.call_goal) + "</div>" : "");
       return "<tr>" +
         "<td><b>" + esc(t.name) + '</b><div class="hint">' + esc(t.email) + "</div>" +
         '<div class="hint mono">' + esc(t.phone_masked) + "</div></td>" +
@@ -441,7 +443,9 @@
         load();                      // put the dropdown back to what the server actually holds
         return;
       }
-      R.banner($("#banner"), "good", "Call goal set to " + chosen);
+      R.banner($("#banner"), "good", chosen === "AUTO"
+        ? "Call goal back to automatic — chosen per call from the tester's progress"
+        : "Call goal pinned to " + chosen + " for every call until set back to AUTO");
     });
   });
 

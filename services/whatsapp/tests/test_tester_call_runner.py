@@ -233,6 +233,16 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.dispatch.calls, [], "never dial while the freeze state is unknown")
         self.assertEqual(len(runner.STORE.scheduled_calls()), 1, "still queued for the next tick")
 
+    def test_a_placed_call_is_remembered_on_the_tester(self):
+        """The console works out the next call's number from this, before reconcile has run."""
+        self._tester()
+        runner.STORE.schedule_call("tst_a", store.to_iso(NOW), "promise", note="the bike ride")
+        placed, _ = runner.place_due(NOW)
+        self.assertEqual(placed, 1)
+        t = runner.STORE.get("tst_a")
+        self.assertEqual(t.last_call_id, "call_new_1")
+        self.assertEqual(t.call_goal, "GOAL_FOLLOWUP")
+
     def test_the_reminder_is_placed_if_they_stayed_silent(self):
         t = self._tester()
         runner.WA.put_meta(store.ContactMeta(user_id=t.wa_user_id, phone=t.phone,
