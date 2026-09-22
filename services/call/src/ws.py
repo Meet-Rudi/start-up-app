@@ -30,7 +30,14 @@ DATA_BUCKET = os.environ["DATA_BUCKET"]
 WS_ENDPOINT = os.environ.get("WS_MANAGEMENT_ENDPOINT", "")
 
 # Recoverable: one turn failed but the call is fine. Rudi asks them to repeat and carries on.
-FRIENDLY_ERROR = "Sorry, I lost my train of thought there. Could you say that again?"
+# One per language for the same reason as the pause line below: an English sentence dropped into
+# the middle of a Flemish call is its own small failure.
+LOST_THREAD = {
+    "en": "Sorry, I lost my train of thought there. Could you say that again?",
+    "nl": "Sorry, ik was de draad even kwijt. Kun je dat nog eens zeggen?",
+    "fr": "Désolé, j'ai perdu le fil. Pouvez-vous répéter ?",
+    "de": "Entschuldigung, ich habe kurz den Faden verloren. Können Sie das wiederholen?",
+}
 
 # NOT recoverable: the call has to end. One message for every such fault — a patient should not
 # get a different apology depending on which internal thing broke, and "the model is rate
@@ -56,6 +63,12 @@ def operational_pause(config):
     """The one thing Rudi says whenever a call has to end for our reasons rather than theirs."""
     lang = str((config or {}).get("language") or "en").strip().lower()[:2]
     return OPERATIONAL_PAUSE.get(lang, OPERATIONAL_PAUSE["en"])
+
+
+def lost_thread(config):
+    """What Rudi says when ONE turn failed and the conversation can still carry on."""
+    lang = str((config or {}).get("language") or "en").strip().lower()[:2]
+    return LOST_THREAD.get(lang, LOST_THREAD["en"])
 
 
 _api = None
@@ -280,16 +293,38 @@ def _on_prompt(connection_id, message, manifest):
         reply, state, info = brain.turn(state, transcript, _model_config(manifest, config),
                                         elapsed_s=elapsed)
     except gateway.AIError as e:
-        return _abandon(connection_id, manifest, config, e,
-                        "rate-limited" if isinstance(e, gateway.AllRateLimited)
-                        else "ai-unavailable")
+        # One bad turn is not a dead call. Ending the conversation because a single generation
+        # stalled costs the patient the rest of their session over something usually momentary.
+        # So the first failure gets a human sentence and the call carries on; a second failure in
+        # a row means something is actually wrong, and stopping beats apologising on a loop.
+        fails = int(manifest.get("ai_failures") or 0) + 1
+        manifest["ai_failures"] = fails
+        reason = "rate-limited" if isinstance(e, gateway.AllRateLimited) else "ai-unavailable"
+        if fails >= 2:
+            return _abandon(connection_id, manifest, config, e, reason)
+        print("WARN: turn %d failed (%s); asking them to repeat: %s" % (seq, reason, e))
+        _send(connection_id, relay.say(lost_thread(config)))
+        calllog.record_turn(manifest, seq, {
+            "at": calllog.iso(), "kind": "turn-failed", "transcript": transcript, "reply": None,
+            "signals": {}, "phase": state.get("phase"), "state": state, "model": None,
+            "timings": {"llm_ms": int((time.time() - started) * 1000)},
+            "error": reason, "elapsed_s": elapsed,
+        })
+        return _ok()
     except Exception as e:  # noqa: BLE001 — a dropped turn must not drop the call
         print("ERROR: turn failed: %s" % e)
-        _send(connection_id, relay.say(FRIENDLY_ERROR))
+        _send(connection_id, relay.say(lost_thread(config)))
         return _ok()
 
+    manifest["ai_failures"] = 0          # a good turn clears the slate
     if reply:
         _send(connection_id, relay.say(_restore_outbound(manifest, reply)))
+    elif not info.get("ended"):
+        # An empty reply that is NOT the end of the call would be heard as silence, which is the
+        # one thing a voice call must never do. (At the end it is correct: the goodbye already
+        # went out and the hang-up follows.)
+        print("WARN: empty reply on %s; asking them to repeat" % manifest["call_id"])
+        _send(connection_id, relay.say(lost_thread(config)))
 
     calllog.record_turn(manifest, seq, {
         "at": calllog.iso(), "kind": "turn", "transcript": transcript, "reply": reply,
@@ -352,6 +387,7 @@ def handler(event, context):
 
     message = relay.parse(event.get("body") or "{}")
     kind = message.get("type")
+    manifest = None          # bound before the try so the catch below can still localise its line
 
     try:
         if kind == "setup":
@@ -381,5 +417,5 @@ def handler(event, context):
 
     except Exception as e:  # noqa: BLE001 — never let an exception drop a live call silently
         print("ERROR: unhandled %s on %s: %s" % (kind, connection_id, e))
-        _send(connection_id, relay.say(FRIENDLY_ERROR))
+        _send(connection_id, relay.say(lost_thread((manifest or {}).get("config"))))
         return _ok()

@@ -63,6 +63,7 @@ for _key, _text in {
     _FAKE_S3.put_object(Bucket=BUCKET, Key=_key, Body=_text.encode("utf-8"))
 
 import brain      # noqa: E402
+import gateway    # noqa: E402
 import deid       # noqa: E402
 import calllog    # noqa: E402
 import relay      # noqa: E402
@@ -82,6 +83,9 @@ def _fake_generate(messages, json_mode=False):
     return {"text": reply, "model": "fake"}
 
 
+# Keep the genuine cascade before the stub replaces it. `brain.gateway` IS the gateway module,
+# so the line below rebinds gateway.generate for the whole suite; TurnBudget needs the real one.
+_REAL_GENERATE = gateway.generate
 brain.gateway.generate = _fake_generate
 dispatcher._twilio_post = lambda path, form, creds: (
     _TWILIO_CALLS.append((path, form)) or {"sid": "CA999", "status": "queued"})
@@ -481,7 +485,7 @@ class LiveCall(unittest.TestCase):
             self.relay.prompt("are you there")
         finally:
             brain.turn = original
-        self.assertIn(ws.FRIENDLY_ERROR, _spoken())
+        self.assertIn(ws.LOST_THREAD["en"], _spoken())
         self.assertFalse(_ended(), "a bad turn must not hang up on the patient")
 
 
@@ -556,6 +560,121 @@ class Clock(unittest.TestCase):
         with open(mine, "rb") as a, open(theirs, "rb") as b:
             self.assertEqual(a.read(), b.read(),
                              "copy services/whatsapp/src/timeline.py over the call service's copy")
+
+
+class TurnBudget(unittest.TestCase):
+    """The cascade runs against a clock, and answers that only look valid are refused."""
+
+    def _answer(self, content="Alright.", finish="stop"):
+        seen = {}
+
+        def post(url, headers, payload, timeout):
+            seen["payload"], seen["timeout"] = payload, timeout
+            return {"choices": [{"message": {"content": content}, "finish_reason": finish}]}
+
+        gateway._registry._post_json = post
+        return seen
+
+    def tearDown(self):
+        gateway._registry.__dict__.pop("_post_json", None)   # drop the instance override
+
+    def test_output_is_capped_and_the_attempt_is_timed(self):
+        seen = self._answer()
+        _REAL_GENERATE([{"role": "user", "content": "hi"}])
+        self.assertEqual(seen["payload"]["max_tokens"], 250)
+        self.assertEqual(seen["timeout"], gateway.ATTEMPT_TIMEOUT_S)
+
+    def test_an_empty_completion_is_a_failure_not_a_reply(self):
+        """A reasoning model can spend the whole cap thinking; empty text would be spoken as
+        silence, which is indistinguishable from Rudi having hung up."""
+        self._answer(content="")
+        with self.assertRaises(gateway.AIError):
+            _REAL_GENERATE([{"role": "user", "content": "hi"}])
+
+    def test_json_truncated_by_the_cap_is_refused(self):
+        """Half an envelope parses as prose, so the braces would be read aloud."""
+        self._answer(content='{"reply": "half a sen', finish="length")
+        with self.assertRaises(gateway.AIError):
+            _REAL_GENERATE([{"role": "user", "content": "hi"}], json_mode=True)
+
+    def test_truncated_prose_is_still_usable(self):
+        self._answer(content="Alright, that sounds", finish="length")
+        self.assertEqual(_REAL_GENERATE([{"role": "user", "content": "hi"}])["text"],
+                         "Alright, that sounds")
+
+    def test_no_attempt_is_started_once_the_budget_is_gone(self):
+        seen = self._answer()
+        with self.assertRaises(gateway.AIError) as caught:
+            _REAL_GENERATE([{"role": "user", "content": "hi"}], budget_s=0)
+        self.assertIn("budget", str(caught.exception))
+        self.assertEqual(seen, {}, "a spent budget must not start another provider")
+
+
+class TurnFailure(unittest.TestCase):
+    """A stalled turn must never be heard as silence, and must not end the call by itself."""
+
+    def setUp(self):
+        _REPLIES[:] = [("Hello Filip.", {})]
+        self.payload = _new_call()
+        self.relay = Relay(self.payload["call_id"])
+        self.relay.connect()
+        self.relay.setup()
+        self._turn = brain.turn
+
+    def tearDown(self):
+        brain.turn = self._turn
+
+    def _stall(self):
+        def boom(*a, **k):
+            raise gateway.AIError("provider stalled")
+        brain.turn = boom
+
+    def test_one_stalled_turn_asks_them_to_repeat_and_the_call_lives(self):
+        self._stall()
+        _SENT.clear()
+        self.relay.prompt("I walked yesterday")
+        self.assertIn(ws.LOST_THREAD["en"], _spoken())
+        self.assertEqual(_ended(), [], "a single bad turn must not hang up on the patient")
+
+    def test_two_in_a_row_end_the_call_with_the_pause_line(self):
+        self._stall()
+        self.relay.prompt("I walked yesterday")
+        _SENT.clear()
+        self.relay.prompt("are you still there")
+        self.assertIn(ws.OPERATIONAL_PAUSE["en"], _spoken())
+        self.assertTrue(_ended())
+
+    def test_a_good_turn_clears_the_slate(self):
+        """Failures have to be consecutive: one stall an hour apart is not a broken call."""
+        self._stall()
+        self.relay.prompt("first")
+        brain.turn = self._turn
+        _REPLIES[:] = [("Good to hear.", {})]
+        self.relay.prompt("second")
+        self._stall()
+        _SENT.clear()
+        self.relay.prompt("third")
+        self.assertIn(ws.LOST_THREAD["en"], _spoken())
+        self.assertEqual(_ended(), [])
+
+    def test_an_empty_reply_is_not_left_as_silence(self):
+        brain.turn = lambda state, text, cfg, **k: (
+            "", dict(state or {}, phase="goal"), {"signals": {}, "ended": False, "model": "fake"})
+        _SENT.clear()
+        self.relay.prompt("hello")
+        self.assertIn(ws.LOST_THREAD["en"], _spoken())
+
+    def test_the_apology_is_in_the_language_of_the_call(self):
+        _REPLIES[:] = [("Hallo Filip.", {})]
+        payload = _new_call(language="nl")
+        relay_nl = Relay(payload["call_id"])
+        relay_nl.connect()
+        relay_nl.setup()
+        self._stall()
+        _SENT.clear()
+        relay_nl.prompt("ik heb gisteren gewandeld")
+        self.assertIn(ws.LOST_THREAD["nl"], _spoken())
+        self.assertNotIn(ws.LOST_THREAD["en"], _spoken())
 
 
 class Farewell(unittest.TestCase):
@@ -665,6 +784,8 @@ class ProviderOutage(unittest.TestCase):
             self.assertNotIn(leak, spoken, "leaked %r to the patient" % leak)
 
     def test_outage_mid_call_apologises_and_closes(self):
+        """A real outage still ends the call properly — but not on the first stumble. One failed
+        turn asks them to repeat; the second in a row is when we accept the line is dead."""
         _REPLIES[:] = [("Hallo.", {})]
         self.r.setup()
         _SENT.clear()
@@ -672,6 +793,10 @@ class ProviderOutage(unittest.TestCase):
         brain.turn = self._break_the_cascade()
         try:
             self.r.prompt("I want to walk more")
+            self.assertIn(ws.LOST_THREAD["en"], _spoken())
+            self.assertFalse(_ended(), "one failed turn is recoverable")
+            _SENT.clear()
+            self.r.prompt("I said I want to walk more")
         finally:
             brain.turn = original
         self.assertIn("for operational reasons", " ".join(_spoken()))
@@ -758,7 +883,10 @@ class Deidentification(unittest.TestCase):
         original = brain.turn
         brain.turn = lambda *a, **k: (_ for _ in ()).throw(brain.gateway.AIError("dead"))
         try:
+            # Two in a row: the first failure is recoverable, so the call — and with it the
+            # vault — legitimately lives on. The second is what collapses the call.
             self.r.prompt("my daughter Anneke walks with me")
+            self.r.prompt("are you still there")
         finally:
             brain.turn = original
         self.assertNotIn("_vault", calllog.load(self.payload["call_id"]))

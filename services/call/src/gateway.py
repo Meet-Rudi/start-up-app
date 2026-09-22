@@ -10,6 +10,7 @@ self-contained per service for now; a shared Lambda Layer is a sensible future r
 
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 
@@ -21,6 +22,24 @@ _secret_cache = {}
 
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 ENDPOINTS_KEY = os.environ.get("ENDPOINTS_CONFIG_KEY", "config/ai_endpoints.json")
+
+# A spoken turn runs against a wall clock. The Lambda is killed at 25s, and a turn that has not
+# produced words by then is dead air on a live call: the patient hears nothing, then asks whether
+# anyone is there. So the cascade gets a BUDGET rather than an open-ended wait — each attempt is
+# capped, the cascade as a whole is capped, and the remainder is Rudi's room to say something
+# human instead of failing silently.
+#
+# 7s per attempt comes from measurement, not taste: across 345 recorded turns the slowest real
+# generation was 2.7s and the 99th percentile 2.3s, so 7s is about three times anything genuine.
+# Past that it is a stall, and waiting longer only lengthens the silence.
+TURN_BUDGET_S = float(os.environ.get("AI_TURN_BUDGET_S", "18"))
+ATTEMPT_TIMEOUT_S = float(os.environ.get("AI_ATTEMPT_TIMEOUT_S", "7"))
+MIN_ATTEMPT_S = float(os.environ.get("AI_MIN_ATTEMPT_S", "2"))
+# Replies are one or two spoken sentences; the longest ever recorded was 35 words. 250 tokens is
+# several times that, so it cannot clip real speech — it is there to stop a runaway generation
+# from eating the whole budget.
+MAX_OUTPUT_TOKENS = int(os.environ.get("AI_MAX_OUTPUT_TOKENS", "250"))
+
 GROQ_FALLBACK = {
     "name": "groq-fallback",
     "kind": "groq",
@@ -101,11 +120,28 @@ class ProviderRegistry:
             "model": cfg["model"],
             "messages": messages,
             "temperature": cfg.get("temperature", 0.5),
+            "max_tokens": int(cfg.get("max_tokens") or MAX_OUTPUT_TOKENS),
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         resp = self._post_json(cfg["endpoint"], headers, payload, timeout)
-        return resp["choices"][0]["message"]["content"]
+        choice = (resp.get("choices") or [{}])[0]
+        content = ((choice.get("message") or {}).get("content") or "").strip()
+        finish = choice.get("finish_reason")
+
+        # Two answers that look like success and are not. Both have to fail over rather than be
+        # passed on, because nothing above this line can tell them from a real reply.
+        #
+        # Empty content: a reasoning model can spend its whole completion budget thinking and
+        # return nothing at all. An empty string is spoken as silence — precisely the failure
+        # this change exists to remove.
+        if not content:
+            raise AIError("%s returned no content (finish_reason=%s)" % (cfg.get("name"), finish))
+        # Truncated JSON: the envelope parser treats unparseable text as the reply itself, so
+        # half an object would be read aloud to the patient, braces and all.
+        if finish == "length" and json_mode:
+            raise AIError("%s hit the token cap mid-JSON" % cfg.get("name"))
+        return content
 
     _call_groq = _call_openai_compatible
 
@@ -124,20 +160,36 @@ def _load_endpoints():
         return []
 
 
-def generate(messages, json_mode=False):
-    """Run the provider cascade (config endpoints, then Groq fallback). Returns
-    {"text": ..., "model": ...}. Raises AllRateLimited if every attempt was 429,
-    or AIError if all failed for other reasons."""
+def generate(messages, json_mode=False, budget_s=None):
+    """Run the provider cascade (config endpoints, then Groq fallback) inside a time budget.
+
+    Returns {"text": ..., "model": ...}. Raises AllRateLimited if every attempt was 429, or
+    AIError if they all failed, ran out of budget, or answered with something unusable.
+
+    The budget is what stops a stall becoming dead air: no attempt may outlast its timeout, and
+    the cascade gives up once too little time remains to be worth another try — leaving the
+    caller enough of the Lambda's 25s to speak instead of being killed mid-wait.
+    """
     cascade = _load_endpoints()
     cascade.append(GROQ_FALLBACK)
+    # `is None`, not `or`: a caller passing 0 means "no time left, do not start", and `or` would
+    # read that as "unset" and hand it the full budget — the opposite instruction.
+    deadline = time.monotonic() + (TURN_BUDGET_S if budget_s is None else float(budget_s))
 
     errors = []
     attempts = 0
     rate_limited = 0
     for ep in cascade:
+        left = deadline - time.monotonic()
+        if left < MIN_ATTEMPT_S:
+            errors.append("out of turn budget after %d attempt(s)" % attempts)
+            break
+        # Per-endpoint override exists because the providers are not equally quick, and one slow
+        # entry should not be able to spend everyone else's share of the budget.
+        timeout = min(float(ep.get("timeout") or ATTEMPT_TIMEOUT_S), left)
         attempts += 1
         try:
-            text = _registry.call(ep, messages, json_mode=json_mode)
+            text = _registry.call(ep, messages, timeout=timeout, json_mode=json_mode)
             return {"text": text, "model": ep.get("name")}
         except RateLimitError as e:
             rate_limited += 1

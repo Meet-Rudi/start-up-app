@@ -95,6 +95,11 @@ Resources:
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
           GROQ_MODEL: openai/gpt-oss-120b
           GROQ_SECRET: meetrudi-groq-firstkey
+          # The turn budget (see gateway.py). Capped per attempt and across the cascade, so what
+          # is left of the 25s above is Rudi's room to speak rather than be killed mid-wait.
+          AI_ATTEMPT_TIMEOUT_S: "7"
+          AI_TURN_BUDGET_S: "18"
+          AI_MAX_OUTPUT_TOKENS: "250"
           WS_MANAGEMENT_ENDPOINT: !Sub "https://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
 
   DispatcherLogGroup:
