@@ -3,6 +3,8 @@
 
   "_incident_2026_08_17": "Groq decommissioned llama-3.3-70b-versatile and llama-3.1-8b-instant (announced 17 Jun, effective Aug 2026) and EVERY service went down at once. The cascade looked redundant and was not: three entries, one vendor, two models, both on the same deprecation notice — three doors into the same room. The lesson is that redundancy means a second PROVIDER, not a second model. ovh-gpt-oss-120b below is that second provider: EU-hosted (Gravelines), serving the same open-weight model, so a Groq decision can no longer take the product offline. Enabled 21 Sep 2026, paid and uncapped, which also ends the free-tier daily-quota cliff.",
 
+  "_rejected_2026_09_21": "Qwen3.5-9B (OVH, EUR 0.10/0.15, 262k context) looked like the cheapest way to add a third family and was tested and rejected: its reply carries no 'content' field at all, so gateway's choices[0].message.content lookup gets nothing and every call through it fails. Any future candidate must be checked for two things before it is enabled - a populated 'content', and response_format json_object actually honoured - because the WhatsApp and call paths both generate in JSON mode and a model that quietly answers in prose returns no signals, which stalls the phase machine instead of erroring.",
+
   "endpoints": [
     {
       "name": "groq-gpt-oss-120b",
@@ -29,6 +31,24 @@
       "secret": "meetrudi-groq-firstkey",
       "enabled": true,
       "_note": "Smaller and faster; last Groq resort before the in-code fallback."
+    },
+    {
+      "name": "ovh-gpt-oss-20b",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "model": "gpt-oss-20b",
+      "secret": "meetrudi-ovh-firstkey",
+      "enabled": true,
+      "_note": "Paid twin of the free Groq 20b above it, at EUR 0.04/0.15 per million tokens. Covers the narrow case where OVH is healthy but the 120b specifically is not - overloaded, or briefly pulled. It does NOT cover the gpt-oss family going away, because it IS gpt-oss; that is what the Llama entry below is for."
+    },
+    {
+      "name": "ovh-llama-3.3-70b",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "model": "Meta-Llama-3_3-70B-Instruct",
+      "secret": "meetrudi-ovh-firstkey",
+      "enabled": true,
+      "_note": "The bottom of the cascade, and deliberately a DIFFERENT model family: everything above this line is gpt-oss, so a single deprecation notice could empty the whole cascade - which is precisely how August 2026 happened. EUR 0.67 per million tokens each way, roughly 8x the 120b, which is still cents per call and is only ever paid when everything cheaper is already down. JSON mode verified 21 Sep 2026. Mind the underscores in the model id: Meta-Llama-3_3, not 3.3."
     },
     {
       "name": "mistral-small",
