@@ -73,6 +73,7 @@ import gateway
 import tester_store
 import tester_mail
 import deid
+import webchat
 from tester_store import Tester, TesterStore
 
 _s3 = boto3.client("s3")
@@ -538,21 +539,23 @@ def _chat_send(tester, payload):
     #
     # De-identify FIRST, exactly as the WhatsApp path does: identifiers are removed for good and
     # names swapped for aliases before the message is stored, and before the model ever sees it.
+    # webchat.chat_turn does both — the same function the Training Arena drives — and is handed
+    # this module's engine references so the tests' doubles still apply.
     vault, _ = deid.session_vault(meta)
-    masked, found = deid.scrub_inbound(vault, text, _CHAT_DETECTOR, locale)
-    if found:
-        print("TESTER chat PII redacted tid=%s %s" % (tester.tester_id, sorted(found)))
-    in_msg = store.Message(id=store.new_message_id(), direction="in", type="text", text=masked)
+    asked_at = store.iso_now()
     try:
-        block = personality.resolve_block(meta.persona)
-        reply, new_state, info = responder.respond(meta.ai_state, masked, locale=locale,
-                                                   personality_block=block)
+        turn = webchat.chat_turn(vault, meta.ai_state, text, locale, meta.persona,
+                                 detector=_CHAT_DETECTOR, engine=responder, personas=personality)
     except gateway.AllRateLimited:
         return _resp(503, {"error": "rate_limited"})
     except Exception as e:  # noqa: BLE001 - surface engine failure honestly, don't 500 blankly
         print("ERROR tester-chat tid=%s: %s" % (tester.tester_id, type(e).__name__))
         return _resp(502, {"error": "engine_failed"})
-
+    if turn["found"]:
+        print("TESTER chat PII redacted tid=%s %s" % (tester.tester_id, sorted(turn["found"])))
+    masked, reply, new_state, info = turn["masked"], turn["reply_masked"], turn["state"], turn["info"]
+    in_msg = store.Message(id=store.new_message_id(), direction="in", type="text", text=masked,
+                           at=asked_at)
     out = store.Message(id=store.new_message_id(), direction="out", type="text",
                         text=reply, operator_id="ai:rudi")
     CHAT.record_inbound(tester.tester_id, "", in_msg)      # phone stays empty — no PII in chat

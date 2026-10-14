@@ -61,6 +61,12 @@ Parameters:
     Type: String
     Default: ""
     Description: Function URL of meetrudi-call-dispatcher (DispatchUrl output of meetrudi-call).
+  Release:
+    Type: String
+    Default: "unknown"
+    Description: >
+      Git commit this stack was deployed from (deploy.py fills it in). The Training Arena writes
+      it into every result, so a result always says which Rudi release answered.
 
 Globals:
   Function:
@@ -136,6 +142,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/meetrudi-tester-call-runner
+      RetentionInDays: 30
+
+  EngineTurnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-engine-turn
       RetentionInDays: 30
 
   WaWebhookFunction:
@@ -399,6 +411,34 @@ Resources:
             # the reconciliation pass cheap.
             Schedule: rate(5 minutes)
 
+  # One chat turn of the deployed Rudi engine, for the Training Arena. Invoke-only: no Function
+  # URL, so only a role granted lambda:InvokeFunction on it (meetrudi-arena-runner) can call it.
+  # Stateless — it reads Rudi's prompts like every other Rudi function and writes nothing. The
+  # arena supplies its own cascade; the function refuses any key outside meetrudi/arena/rudi- and
+  # any provider live Rudi does not already use, and never falls back to the live Groq key.
+  EngineTurnFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: EngineTurnLogGroup
+    Properties:
+      FunctionName: meetrudi-engine-turn
+      Description: Training Arena — one chat turn of the deployed Rudi engine, on the arena's keys.
+      Handler: engine_turn.handler
+      CodeUri: src/
+      Timeout: 90
+      MemorySize: 256
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          RELEASE: !Ref Release
+          ARENA_SECRET_PREFIX: meetrudi/arena/rudi-
+          DEFAULT_PERSONALITY_SLUG: seed-rudi-v2
+          ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
+          GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
+          GROQ_MODEL: openai/gpt-oss-20b
+          GROQ_SECRET: meetrudi-groq-firstkey
+          HEALTH_GUIDANCE_KEY: contexts/diabetes-t2d-guidance.md
+
   # Throwaway outbound tester (token-gated). Remove once WhatsApp sending is confirmed.
   WaSendTestFunction:
     Type: AWS::Serverless::Function
@@ -434,3 +474,6 @@ Outputs:
     Value: !GetAtt TesterApiFunctionUrl.FunctionUrl
   InboundQueueName:
     Value: !GetAtt WaInboundQueue.QueueName
+  EngineTurnFunctionName:
+    Description: Invoked by the Training Arena's case runner (meetrudi-training-arena stack)
+    Value: !Ref EngineTurnFunction

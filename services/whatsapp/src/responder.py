@@ -77,14 +77,25 @@ CHECKIN_NOTE = (
     "the same day. Never name a time you have not reported in check_in_minutes.]")
 
 _asset_cache: dict = {}
+# S3 version id of each prompt asset as it was read into the cache above. Warm containers keep
+# serving the cached text after the object changes in S3, so this — not the bucket — is the
+# truth about which prompt a reply was written with. The Training Arena records it per batch.
+_asset_versions: dict = {}
 
 
 def _get_s3_text(key: str) -> str:
     if key in _asset_cache:
         return _asset_cache[key]
-    text = s3.get_object(Bucket=DATA_BUCKET, Key=key)["Body"].read().decode("utf-8")
+    obj = s3.get_object(Bucket=DATA_BUCKET, Key=key)
+    text = obj["Body"].read().decode("utf-8")
     _asset_cache[key] = text
+    _asset_versions[key] = obj.get("VersionId")
     return text
+
+
+def asset_versions() -> dict:
+    """{prompt key: S3 version id} for every asset this container has read so far."""
+    return dict(_asset_versions)
 
 
 def _get_s3_text_optional(key: str) -> str:
@@ -444,6 +455,9 @@ def respond(state: dict, user_text: str, locale: str = i18n.DEFAULT_LOCALE,
     check_in_at = timeline.after_minutes(signals.get("check_in_minutes"), now)
     if check_in_at:
         state["check_in_at"] = check_in_at
+    # phase_before, leak_blocked and usage are read only by the Training Arena; every other
+    # caller ignores them.
     return (_to_whatsapp(reply), state,
             {"phase": state["phase"], "signals": signals, "model": result.get("model"),
-             "lang": i18n.normalize_locale(signals.get("lang"))})
+             "lang": i18n.normalize_locale(signals.get("lang")),
+             "phase_before": phase, "leak_blocked": bool(blocked), "usage": result.get("usage")})

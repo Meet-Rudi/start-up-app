@@ -11,6 +11,8 @@ self-contained per service for now; a shared Lambda Layer is a sensible future r
 import os
 import json
 import time
+import contextlib
+import contextvars
 import urllib.request
 import urllib.error
 
@@ -76,6 +78,10 @@ def get_secret(secret_id):
 
 
 class ProviderRegistry:
+    # Token counts the provider reported for the last successful call, or None. Kept beside the
+    # return value rather than in it, so `call()` keeps returning plain text for every caller.
+    last_usage = None
+
     def call(self, cfg, messages, timeout=25, json_mode=False):
         kind = cfg.get("kind", "openai_compatible")
         method = getattr(self, "_call_" + kind, None)
@@ -112,6 +118,8 @@ class ProviderRegistry:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         resp = self._post_json(cfg["endpoint"], headers, payload, timeout)
+        usage = resp.get("usage") if isinstance(resp, dict) else None
+        self.last_usage = usage if isinstance(usage, dict) else None
         return resp["choices"][0]["message"]["content"]
 
     _call_groq = _call_openai_compatible
@@ -131,12 +139,37 @@ def _load_endpoints():
         return []
 
 
+# A cascade supplied by the caller for the duration of one block, replacing the S3 one. Only the
+# Training Arena sets it (through meetrudi-engine-turn), so its conversations run on the arena's
+# own keys. Live callers never touch it and behave exactly as before.
+_override = contextvars.ContextVar("gateway_cascade_override", default=None)
+
+
+@contextlib.contextmanager
+def using(cascade):
+    """Run generate() on `cascade` — and ONLY on it — inside this block.
+
+    The in-code Groq fallback is deliberately not appended: it carries the live key, and an arena
+    turn that silently fell back to it would spend live Rudi's quota. An arena cascade that fails
+    therefore fails, loudly, instead.
+    """
+    token = _override.set([dict(e) for e in (cascade or [])])
+    try:
+        yield
+    finally:
+        _override.reset(token)
+
+
 def generate(messages, json_mode=False):
     """Run the provider cascade (config endpoints, then Groq fallback). Returns
-    {"text": ..., "model": ...}. Raises AllRateLimited if every attempt was 429,
-    or AIError if all failed for other reasons."""
-    cascade = _load_endpoints()
-    cascade.append(GROQ_FALLBACK)
+    {"text": ..., "model": ..., "usage": {...} | None}. Raises AllRateLimited if every attempt
+    was 429, or AIError if all failed for other reasons."""
+    override = _override.get()
+    if override is not None:
+        cascade = [e for e in override if e.get("enabled", True)]
+    else:
+        cascade = _load_endpoints()
+        cascade.append(GROQ_FALLBACK)
 
     errors = []
     attempts = 0
@@ -147,8 +180,9 @@ def generate(messages, json_mode=False):
         other_error = None    # a non-429 failure → don't retry, just fail over
         for attempt in range(MAX_RETRIES + 1):
             try:
+                _registry.last_usage = None
                 text = _registry.call(ep, messages, json_mode=json_mode)
-                return {"text": text, "model": ep.get("name")}
+                return {"text": text, "model": ep.get("name"), "usage": _registry.last_usage}
             except RateLimitError as e:
                 rl_error = e
                 if attempt < MAX_RETRIES:
