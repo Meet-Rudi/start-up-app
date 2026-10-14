@@ -154,15 +154,36 @@
     }).join("");
   }
   var QUIET_NOTE = "It waits for quiet hours and starts at 21:30 (Europe/Brussels). “Start now” on its page lifts the wait.";
-  var FREE_NOTE = "Free slow mode: every model call waits for its free tier — about one Rudi reply a minute and roughly 40 a day. “Speed up” on its page lets paid models take over.";
-  // What free slow means for this batch: ~1 Rudi reply a minute, ~40 a day (Groq's free tier for Rudi).
-  function freeHint(b) {
-    var n = (b && b.validation && b.validation.rudi_replies) || 0;
-    if (!n) return "";
-    return ". This batch: about " + fmt(n) + " Rudi replies — at least " + (n < 60 ? n + " min" : Math.round(n / 6) / 10 + " h") +
-      (n > 40 ? ", over about " + Math.ceil(n / 40) + " days" : "");
+  var FREE_NOTE = "Free slow mode: every model call waits for its free tier — one or two Rudi replies a minute and roughly 40 a day. “Speed up” on its page lets paid models take over.";
+  // A launch estimate's duration: "45 s", "13 min", "2 h 10 min", "1 day 4 h".
+  function span(s) {
+    if (s == null) return "—";
+    if (s < 90) return Math.max(1, Math.round(s)) + " s";
+    var m = Math.round(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+    if (m < 90) return m + " min";
+    if (d) return d + " day" + (d > 1 ? "s" : "") + (h % 24 ? " " + (h % 24) + " h" : "");
+    return h + " h" + (m % 60 ? " " + (m % 60) + " min" : "");
   }
-  var FREE_LABEL = "<b>Free slow mode</b> — pace every model call to stay within the free tiers: about one Rudi reply a minute, roughly 40 a day, one case at a time (chat channel)";
+  // GET /batches/{id}/estimate, drawn for the boxes ticked: both modes, the selected one marked.
+  function estimateHtml(e, slow, quiet) {
+    if (!e) return "";
+    var pick = function (s) { return e.plans.filter(function (x) { return x.free_slow === s && x.quiet === quiet; })[0]; };
+    var rows = [false, true].map(function (s) {
+      var p = pick(s);
+      if (!p) return "";
+      return '<tr class="' + (s === slow ? "sel" : "") + '"><td>' + (s ? "Free slow" : "Normal") + (s === slow ? " ✓" : "") + "</td>" +
+        "<td>≈ " + span(p.work_s) + "</td>" +
+        "<td>≈ " + eur(p.eur) + '</td><td class="mono">' + (p.end ? esc(p.end) : "never — see below") + "</td></tr>";
+    }).join("");
+    var sel = pick(slow) || {}, r = sel.by_role || {}, fs = sel.free_share || {};
+    return '<div class="estbox"><div class="esthead">Estimate if launched now (' + esc(e.now) + ", Europe/Brussels)" +
+      (quiet ? " — quiet hours only, so it starts " + esc((sel.start || "").slice(11)) + (sel.start && sel.start.slice(0, 10) !== e.now.slice(0, 10) ? " on " + esc(sel.start.slice(0, 10)) : "") : "") + "</div>" +
+      '<table class="esttbl"><thead><tr><th>Mode</th><th>Duration</th><th>Cost</th><th>Ends ≈</th></tr></thead><tbody>' + rows + "</tbody></table>" +
+      '<div class="hint">' + (slow ? "Free slow" : "Normal") + ": Rudi " + eur(r.rudi) + " · tester " + eur(r.tester) + " · judge " + eur(r.judge) + " · AWS " + eur(r.infra) +
+      " — free tiers carry ≈ " + Math.round(100 * (fs.rudi || 0)) + "% of Rudi's replies. " + fmt(e.counts.rudi_replies) + " Rudi replies at worst.</div>" +
+      "<details><summary>How this is estimated</summary><ul>" + e.assumptions.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul></details></div>";
+  }
+  var FREE_LABEL = "<b>Free slow mode</b> — pace every model call to stay within the free tiers: one or two Rudi replies a minute, about 35 a day, one case at a time (chat channel)";
   // Start now / pause / resume / cancel, for whoever may use them (the API re-checks).
   function controls(b, cancelLabel) {
     var mine = b.by === sess.username || isSA, dis = mine ? "" : " disabled title='Only the submitter or a super-admin'", id = esc(b.id), out = "";
@@ -767,7 +788,7 @@
     $("filepill").hidden = false;
     $("filepill").innerHTML = "<div><b>" + esc(name) + '</b><div class="hint">' + (kb ? kb + " · " : "") + esc(origin) + '</div></div><span class="sp"></span><button class="btn xs ghost" type="button" id="file-clear">Remove</button>';
     $("file-clear").addEventListener("click", function () {
-      sub = { file: null, report: null, batchId: null, busy: "", gen: sub.gen + 1 };
+      sub = { file: null, report: null, batchId: null, busy: "", gen: sub.gen + 1, estimate: null };
       $("filepill").hidden = true; $("file").value = ""; renderSubmit();
     });
     if (!$("bname").value) {
@@ -906,6 +927,11 @@
     }).then(function (r) {
       if (!r || gen !== sub.gen) return;
       sub.busy = ""; sub.report = liveReport(r); renderSubmit();
+      if (r.batch.status === "ready") {
+        get("/batches/" + enc(r.batch.id) + "/estimate").then(function (e) {
+          if (gen === sub.gen) { sub.estimate = e; renderSubmit(); }
+        }, function () { /* the estimate is a help, not a gate */ });
+      }
     }).catch(function (e) {
       if (gen !== sub.gen) return;
       sub.busy = ""; renderSubmit(); fail(e, "The file was not checked");
@@ -937,8 +963,8 @@
         (r.ok ? '<div class="banner good">✓ ' + (r.example ? "" : esc(sub.file.name) + " — ") + r.n + " cases, no errors" + (r.warns ? ", " + r.warns + " warning" + (r.warns > 1 ? "s" : "") : "") + ". Ready to launch.</div>"
           : '<div class="banner bad">✕ ' + (r.example ? "Example of a failing file — " : "") + r.errs + " error" + (r.errs === 1 ? "" : "s") + " — fix the file and validate again. Nothing was sent to Rudi.</div>") +
         '<div class="vstats"><div class="vstat"><b>' + fmt(r.n) + '</b><span>cases</span></div><div class="vstat"><b>' + r.by.scripted + " · " + r.by.intent + " · " + r.by.hybrid + '</b><span>scripted · intent · hybrid</span></div>' +
-        '<div class="vstat"><b>≈ ' + fmt(r.turns + r.n) + '</b><span>Rudi replies</span></div><div class="vstat"><b>≈ ' + eur(r.eur) + '</b><span>estimated cost · ≈ ' + dur(Math.round(r.secs)) + "</span></div></div>" +
-        '<p class="hint">Budget: <b>' + eur(r.budget.batch, 2) + "</b> for the batch (" + esc(r.budget.batchSrc) + "), <b>" + eur(r.budget["case"], 2) + "</b> per case (" + esc(r.budget.caseSrc) + "). Estimates include the AWS overhead and are on the safe side.</p>" +
+        '<div class="vstat"><b>≤ ' + fmt(r.turns) + '</b><span>Rudi replies (worst case)</span></div><div class="vstat"><b>≤ ' + eur(r.eur) + '</b><span>at most — worst case, all on paid models</span></div></div>' +
+        '<p class="hint">Budget: <b>' + eur(r.budget.batch, 2) + "</b> for the batch (" + esc(r.budget.batchSrc) + "), <b>" + eur(r.budget["case"], 2) + "</b> per case (" + esc(r.budget.caseSrc) + "). Goal-based cases are counted at their worst case (every turn up to max_turns); the AWS overhead is included.</p>" +
         (r.issues.length ? '<ul class="issues">' + r.issues.map(function (x) {
           return '<li class="' + x[0] + '"><span class="sev">' + (x[0] === "e" ? "Error" : "Warning") + '</span><span class="ln">' + (x[1] ? "line " + esc(x[1]) : "file") + "</span><span>" + esc(x[2]) + "</span></li>";
         }).join("") + "</ul>" : "") +
@@ -970,6 +996,7 @@
     var ok = passed && $("synthetic").checked && !sub.busy;
     $("launch").disabled = !ok;
     $("launch-hint").textContent = ok ? "" : !sub.file ? "Choose a file, validate it and tick the confirmation." : !passed ? "Validate the file first." : "Tick the synthetic-data confirmation.";
+    $("est").innerHTML = LIVE && passed && sub.estimate ? estimateHtml(sub.estimate, $("freeslow").checked, $("quiet").checked) : "";
     var ahead = D.batches.filter(isActive).length;
     $("pace-note").textContent = "Current pace: " + S.max_parallel + " cases in parallel, up to " + S.launch_rate + " new cases a minute. " +
       (ahead ? ahead + " batch" + (ahead > 1 ? "es are" : " is") + " ahead of yours; slots are shared fairly between batches." : "Nothing else is running.");
@@ -980,8 +1007,10 @@
     renderSubmit();
   });
   $("synthetic").addEventListener("change", renderSubmit);
+  $("quiet").addEventListener("change", renderSubmit);
+  $("freeslow").addEventListener("change", renderSubmit);
   function resetSubmit() {
-    sub = { file: null, report: null, batchId: null, busy: "", gen: sub.gen + 1 };
+    sub = { file: null, report: null, batchId: null, busy: "", gen: sub.gen + 1, estimate: null };
     $("bname").value = ""; $("synthetic").checked = false; $("quiet").checked = false; $("freeslow").checked = false; $("filepill").hidden = true; $("file").value = "";
   }
   $("launch").addEventListener("click", function () {
@@ -1046,7 +1075,7 @@
   function pendingNote(b) {
     var v = b.validation || {};
     if (b.status === "invalid") return "The file did not pass the check: " + fmt(num(v.errors)) + " error" + (num(v.errors) === 1 ? "" : "s") + ". Fix it and submit it again.";
-    if (b.status === "ready") return "Passed the check: " + fmt(num(v.cases)) + " cases, ≈ " + eur(num(v.cost_eur)) + " estimated. Launch it when you are ready.";
+    if (b.status === "ready") return "Passed the check: " + fmt(num(v.cases)) + " cases, at most " + eur(num(v.cost_eur)) + " (worst case, all on paid models). Launch shows the estimate for each mode.";
     return "The file is being checked.";
   }
   function renderBatchDetail(id) {
@@ -1075,7 +1104,7 @@
       ["Tags", b.tags.map(function (t) { return '<span class="tag">' + esc(t) + "</span>"; }).join(" ") || "—"],
       ["Rudi release", LIVE ? (b.rudi_release ? '<span class="mono">whatsapp@' + esc(b.rudi_release) + "</span> · chat channel" : "recorded when the first case runs") : '<span class="mono">whatsapp@0154d7e</span> · chat channel'],
       ["Pace at launch", D.settings.max_parallel + " in parallel · " + D.settings.launch_rate + "/min · think " + D.settings.think_time + " s"],
-      ["Pacing", b.free_slow ? "<b>Free slow</b> — every model call waits for its free tier; one case at a time, about one Rudi reply a minute" : "normal — paid models take over when a free tier is busy"]];
+      ["Pacing", b.free_slow ? "<b>Free slow</b> — every model call waits for its free tier; one case at a time, one or two Rudi replies a minute" : "normal — paid models take over when a free tier is busy"]];
     var ran = casesOf(b).filter(function (c) { return c.cost > 0; }).length, avg = ran ? b.spent / ran : 0;   // cases that actually ran
     kv.push(["Spend", spendHtml(b) + '<div class="hint">' + rolesLine(b.roles) + "</div>"]);
     kv.push(["Per case", "average " + eur(avg, 4) + (running && ran ? " · projected batch total ≈ " + eur(avg * b.total) : "") +
@@ -1137,7 +1166,8 @@
     var b = batchById(id);
     modal("Launch " + id + "?", '<label class="checkline"><input type="checkbox" id="lc-syn"> <span>I confirm this file contains <b>synthetic data only</b> — no real people, numbers or health records</span></label>' +
       '<label class="checkline"><input type="checkbox" id="lc-quiet"' + (b && b.quiet_only ? " checked" : "") + "> <span>Run only during quiet hours (21:30–06:30, Europe/Brussels)</span></label>" +
-      '<label class="checkline"><input type="checkbox" id="lc-free"' + (b && b.free_slow ? " checked" : "") + "> <span>" + FREE_LABEL + freeHint(b) + "</span></label>",
+      '<label class="checkline"><input type="checkbox" id="lc-free"' + (b && b.free_slow ? " checked" : "") + "> <span>" + FREE_LABEL + "</span></label>" +
+      '<div id="lc-est"><p class="hint">Estimating duration, cost and end time…</p></div>',
       [{ label: "Not now" }, { label: "Launch batch", cls: "pink", on: function () {
         if (!$("lc-syn").checked) { toast("Tick the synthetic-data confirmation first."); return false; }
         var quiet = $("lc-quiet").checked, freeSlow = $("lc-free").checked;
@@ -1145,6 +1175,13 @@
           toast("Batch " + id + " launched", quiet ? QUIET_NOTE : freeSlow ? FREE_NOTE : "Cases start as slots free up."); route();
         }, function (er) { fail(er, "The batch was not launched"); });
       } }]);
+    var estimate = null, paintEst = function () {
+      if (estimate && $("lc-est")) $("lc-est").innerHTML = estimateHtml(estimate, $("lc-free").checked, $("lc-quiet").checked);
+    };
+    $("lc-free").addEventListener("change", paintEst);
+    $("lc-quiet").addEventListener("change", paintEst);
+    get(path + "/estimate").then(function (e) { estimate = e; paintEst(); },
+      function () { if ($("lc-est")) $("lc-est").innerHTML = '<p class="hint">No estimate available.</p>'; });
   });
 
   // ================================================================== CASE VIEWER

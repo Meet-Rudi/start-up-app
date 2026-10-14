@@ -79,6 +79,16 @@ about one Rudi reply a minute); `false` speeds the batch up again. Also accepted
 
 `GET /batches` → `{batches: [batch view …]}` (most recent first).
 
+`GET /batches/{id}/estimate` → the launch estimate, as if launched now (409 `not_ready` before the
+check):
+
+```
+{ now: "2026-10-14 17:47",
+  plans: [ {free_slow, quiet, eur, by_role: {rudi, tester, judge, infra}, start, end,   // "yyyy-mm-dd hh:mm", Europe/Brussels
+            duration_s, work_s, parallel, free_share: {rudi, tester, judge}} … ],     // normal / free slow × now / quiet hours
+  assumptions: [text …], counts: {cases, rudi_replies, tester_calls, judge_calls} }   // worst case
+```
+
 `GET /batches/{id}/cases?offset=0&limit=2000` → `{total, rows: [{seq, id, key, title, mode, loc,
 persona, outcome, stop, turns, dur, errs, cost, cap, roles, tags}]}` — `outcome` includes `queued`
 and `running` for cases not finished yet.

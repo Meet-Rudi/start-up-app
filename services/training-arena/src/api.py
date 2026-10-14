@@ -18,6 +18,7 @@ Routes (session token in X-Arena-Token):
     POST /batches/{id}/quiet {quiet_only}           → hold for / release from quiet hours
     POST /batches/{id}/free_slow {on}               → pace to the free tiers / back to normal speed
     GET  /batches/{id}/cases?offset=&limit=         GET /batches/{id}/files/{name}
+    GET  /batches/{id}/estimate                     → duration, cost, end time: normal / free slow × now / quiet
     GET  /cases/{case_id}                           GET /cases/{case_id}/download
     --- super-admin ---
     GET/PUT /admin/settings                         POST /admin/engine/{pause,resume,drain,kill}
@@ -31,6 +32,8 @@ import json
 import base64
 import datetime
 
+import arena_estimate
+import arena_llm
 from arena_auth import Auth, AuthError
 from arena_common import (iso, log, display, local_day, new_batch_id, slug, file_stem, split_case_id,
                           BATCH_ID_RE, parse_iso, now_utc, TZ, in_quiet_hours)
@@ -148,6 +151,8 @@ class Api:
                 return resp(200, self._batch_action(m, parts[2], body))
             if len(parts) == 3 and parts[2] == "cases":
                 return resp(200, self._cases(m, q))
+            if len(parts) == 3 and parts[2] == "estimate":
+                return resp(200, self._estimate(m))
             if len(parts) == 4 and parts[2] == "files":
                 return resp(200, {"url": self._file_url(m, parts[3])})
         if len(parts) >= 2 and parts[0] == "cases":
@@ -205,6 +210,15 @@ class Api:
                 "quiet_only": bool(m.get("quiet_only")), "free_slow": bool(m.get("free_slow")), "stem": m.get("stem"), "input_file": m.get("input_file"),
                 "validation": m.get("validation") or {}, "rudi_release": (m.get("engine") or {}).get("rudi_release") or "",
                 "snapshots": m.get("snapshots") or []}
+
+    def _estimate(self, m):
+        """Duration, cost and end time if launched now: normal / free slow × now / quiet hours."""
+        v = self.store.validation(m["id"]) or {}
+        if not v.get("cases"):
+            raise Http(409, "not_ready", "The file has not been checked yet.")
+        st = self.store
+        return arena_estimate.estimate(v, m.get("cascades") or st.cascades(), st.engine_settings(), st.budgets(),
+                                       now_utc().timestamp(), arena_llm.LimitTracker(st.b))
 
     def _batch_detail(self, m):
         return {"batch": self._batch_view(m), "validation": self.store.validation(m["id"])}

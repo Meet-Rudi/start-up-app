@@ -195,7 +195,7 @@ class Validator:
         r = self.report
         header, seq, seen = None, 0, {}
         stats = {"cases": 0, "by_mode": {}, "by_locale": {}, "by_persona": {}, "turns": 0,
-                 "rudi_replies": 0, "llm_calls": 0, "cost_eur": 0.0}
+                 "rudi_replies": 0, "tester_calls": 0, "judge_calls": 0, "llm_calls": 0, "cost_eur": 0.0}
         pending_scan = []
         try:
             for line, doc in docs:
@@ -216,7 +216,7 @@ class Validator:
                 est = arena_costs.estimate_case(spec, self.prices)
                 spec["estimate"] = est
                 if est["eur"] > spec["limits"]["max_cost_eur"]:
-                    r.add("w", line, "%s: estimated €%.4f is above its €%.2f ceiling — it will probably stop as over budget."
+                    r.add("w", line, "%s: at worst €%.4f, above its €%.2f ceiling — it may stop as over budget."
                           % (spec["key"], est["eur"], spec["limits"]["max_cost_eur"]))
                 for k, v in (("by_mode", spec["mode"]), ("by_locale", spec["locale"]),
                              ("by_persona", (spec.get("persona") or {}).get("display_name") or "(none)")):
@@ -224,6 +224,8 @@ class Validator:
                 stats["cases"] += 1
                 stats["turns"] += est["turns"]
                 stats["rudi_replies"] += est["turns"] + 1
+                stats["tester_calls"] += est["tester_calls"]
+                stats["judge_calls"] += est["judge_calls"]
                 stats["llm_calls"] += est["calls"]
                 stats["cost_eur"] += est["eur"]
                 if on_case is not None and r.errors == 0:

@@ -227,6 +227,14 @@ table.t tr.sel{background:var(--navy-soft)}
 .vstat{background:var(--sunk);border-radius:.5rem;padding:.55rem .7rem}
 .vstat b{display:block;font-size:1.15rem}
 .vstat span{font-size:.72rem;color:var(--muted)}
+.estbox{border:1px solid var(--border);border-radius:.5rem;padding:.6rem .75rem;display:grid;gap:.45rem}
+.estbox .esthead{font-size:.8rem;font-weight:700;color:var(--ink2)}
+.esttbl{width:100%;border-collapse:collapse;font-size:.82rem}
+.esttbl th{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:.2rem .45rem}
+.esttbl td{padding:.32rem .45rem;border-top:1px solid var(--border);white-space:nowrap}
+.esttbl tr.sel td{background:var(--navy-soft);color:var(--navy);font-weight:700}
+.estbox details{font-size:.76rem;color:var(--muted)}
+.estbox details ul{margin:.3rem 0 0 1rem;padding:0}
 .issues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.35rem}
 .issues li{display:grid;grid-template-columns:4.6rem 4.2rem minmax(0,1fr);gap:.5rem;font-size:.82rem;padding:.4rem .55rem;border-radius:.4rem;background:var(--sunk);align-items:baseline}
 .issues li.e{background:var(--err-soft)}.issues li.w{background:var(--warn-soft)}

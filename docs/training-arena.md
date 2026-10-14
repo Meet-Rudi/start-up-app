@@ -342,9 +342,28 @@ measurement — Lambda time for the runner and `engine-turn`, queues, S3 — set
 
 ### 6.4 Before launch
 
-Validation estimates each case from its mode and length, priced at the first entry of each
-cascade plus the AWS overhead, and shows the batch estimate next to its budget — with a warning
-when a batch or a case looks set to exceed its ceiling.
+Validation counts each case at its **worst case** — a goal-based case runs every turn up to its
+`max_turns` (the runner's hard stop; 12 when the file sets none), each with a tester message and,
+when it has criteria, a judge call — and prices it as if every call went to a paid model, plus the
+AWS overhead. That ceiling is shown next to the budget, with a warning when a batch or a case could
+pass it.
+
+**The launch estimate** (`GET /batches/{id}/estimate`, `src/arena_estimate.py`) is the realistic
+one, shown in the New batch form once the file passes and in the launch dialog, and it follows the
+free slow and quiet-hours boxes. For both modes it gives the duration, the cost by role and the
+end time as `yyyy-mm-dd hh:mm` (Europe/Brussels), as if launched now — or from the next 21:30 when
+held for quiet hours, with work only progressing between 21:30 and 06:30.
+
+| | Normal | Free slow |
+|---|---|---|
+| Cases at once | the parallel ceiling | one |
+| Rudi's replies | the free entry serves what its minute holds, the rest goes to the paid entry | all on the free entry, about 1.5 a minute (85% of 8K tokens ÷ ≈ 4.6K a reply) |
+| Free daily allowance | caps the free share (what the arena already used today is read from the LimitTracker) | when it runs out, the rest continues after 00:00 UTC |
+| Cost | paid share × paid price + AWS | AWS (+ any turn a free model refuses) |
+
+Timing constants (seconds per Rudi reply on Groq ≈ 2 and on OVH ≈ 12, tester ≈ 3, judge ≈ 4, ≈ 1 per
+step) are calibrated on the 2026-10-14 runs. The crisis batch (4 cases, 18 Rudi replies at worst):
+normal ≈ 3 min, €0.010; free slow ≈ 13 min, €0.0035 (AWS only).
 
 ### 6.5 What it costs
 

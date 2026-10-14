@@ -9,8 +9,6 @@ the total and of every budget check; its unit prices are settings, not measureme
 All amounts are euro.
 """
 
-import math
-
 ROLES = ("rudi", "tester", "judge", "infra")
 
 # Assumed AWS overhead (Lambda GB-seconds for the runner and engine-turn, SQS, S3 requests).
@@ -54,12 +52,13 @@ def infra(budgets):
 
 
 def estimate_model(cascades, budgets):
-    """Per-unit estimates for planning: priced at the FIRST enabled entry (the expected path)."""
+    """Per-unit prices for the validator's budget checks: the DEAREST enabled entry, as if every
+    call went to a paid model — the safe side. The launch estimate (arena_estimate) is the
+    realistic one, mode by mode."""
     out = {}
     for role in ("rudi", "tester", "judge"):
-        live = enabled((cascades or {}).get(role))
         tin, tout = TYPICAL[role]
-        out[role] = call_cost(live[0], tin, tout) if live else 0.0
+        out[role] = expected_cost((cascades or {}).get(role), tin, tout)
     i = infra(budgets)
     out["infra_turn"], out["infra_case"] = i["per_turn_eur"], i["per_case_eur"]
     return out
@@ -70,16 +69,14 @@ def max_turns(spec):
 
 
 def estimate_case(spec, model):
-    """{"turns", "calls", "eur"} for one resolved case — on the safe side."""
+    """{"turns", "tester_calls", "judge_calls", "calls", "eur"} for one resolved case — its WORST
+    case: a goal-based case runs every turn up to max_turns (the runner's hard stop)."""
     limit = max_turns(spec)
     script = spec.get("script") or []
     scripted = min(len(script), limit)
     improvised = 0
     if spec.get("mode") in ("intent", "hybrid"):
-        improvised = max(0, int(math.ceil((limit - scripted) * 0.6)))
-        attempts = (spec.get("stop") or {}).get("max_attempts")
-        if attempts:
-            improvised = min(improvised, attempts + 1)
+        improvised = max(0, limit - scripted)
     turns = scripted + improvised
     stop = spec.get("stop") or {}
     if stop.get("success_when") or stop.get("abort_when"):
@@ -88,7 +85,8 @@ def estimate_case(spec, model):
         judge_calls = sum(1 for e in script[:scripted] if e.get("expect")) + (1 if spec.get("expect") else 0)
     eur = (turns * (model["rudi"] + model["infra_turn"]) + improvised * model["tester"]
            + judge_calls * model["judge"] + model["infra_case"])
-    return {"turns": turns, "calls": turns + improvised + judge_calls, "eur": round(eur, 6)}
+    return {"turns": turns, "tester_calls": improvised, "judge_calls": judge_calls,
+            "calls": turns + improvised + judge_calls, "eur": round(eur, 6)}
 
 
 class Spend:
