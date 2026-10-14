@@ -70,7 +70,8 @@ answers 403 `must_change_password`.
 
 Other actions (submitter or super-admin): `POST /batches/{id}/validate`, `/pause`, `/resume`,
 `/cancel`, `/rerun {only: "not_ok" | "all"}` → `{batch}` (a new batch), `/snapshot` (partial
-results of a running batch).
+results of a running batch), `/quiet {quiet_only}` — hold a batch for quiet hours (21:30–06:30,
+Europe/Brussels) or, with `false`, let a held one start now. A held batch's `eta` says so.
 
 `GET /batches` → `{batches: [batch view …]}` (most recent first).
 

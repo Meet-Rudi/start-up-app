@@ -238,6 +238,8 @@ class Dispatcher:
         elif action == "cancel":
             self._close_remaining(m, "cancelled", "cancelled")
             m["status"], m["final_status"] = "cancelled", "cancelled"
+        elif action == "quiet":
+            m["quiet_only"] = bool(msg.get("quiet_only"))
         self._touch(m)
         log("dispatch.control", batch=m["id"], action=action)
 

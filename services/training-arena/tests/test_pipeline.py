@@ -261,6 +261,29 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(m["status"], "cancelled")
         self.assertEqual(m["c"]["cancelled"], 5)
 
+    def test_quiet_hours_batch_says_so_and_can_be_started_now(self):
+        w = World()
+        tok = w.login()
+        bid = w.submit(tok, cases_yaml(2))
+        code, body = w.call("POST", "/batches/%s/launch" % bid, {"synthetic": True, "quiet_only": True}, tok)
+        self.assertEqual(code, 200, body)
+        w.drain_invocations()
+        saved = disp_mod.in_quiet_hours, api_mod.in_quiet_hours
+        disp_mod.in_quiet_hours = api_mod.in_quiet_hours = lambda *a, **k: False   # mid-afternoon
+        try:
+            self.assertEqual(w.tick(), 0)
+            view = w.call("GET", "/batches/" + bid, token=tok)[1]["batch"]
+            self.assertTrue(view["quiet_only"])
+            self.assertIn("starts at 21:30", view["eta"])
+            code, _ = w.call("POST", "/batches/%s/quiet" % bid, {"quiet_only": False}, tok)
+            self.assertEqual(code, 200)
+            self.assertEqual(w.tick(), 2)                               # released in the tick that read the control
+            view = w.call("GET", "/batches/" + bid, token=tok)[1]["batch"]
+            self.assertFalse(view["quiet_only"])
+            self.assertNotIn("21:30", view["eta"])
+        finally:
+            disp_mod.in_quiet_hours, api_mod.in_quiet_hours = saved
+
     def test_lost_runner_is_requeued_once_then_errors(self):
         w, tok, bid = self._launched(1)
         w.tick()

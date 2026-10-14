@@ -153,9 +153,11 @@
       return '<span><i class="sw ' + k + '">' + (GLYPH[k] || "") + "</i>" + LABEL[k] + (counts ? " <b class='num'>" + fmt(counts[k] || 0) + "</b>" : "") + "</span>";
     }).join("");
   }
-  // Pause / resume / cancel, for whoever may use them (the API re-checks).
+  var QUIET_NOTE = "It waits for quiet hours and starts at 21:30 (Europe/Brussels). “Start now” on its page lifts the wait.";
+  // Start now / pause / resume / cancel, for whoever may use them (the API re-checks).
   function controls(b, cancelLabel) {
     var mine = b.by === sess.username || isSA, dis = mine ? "" : " disabled title='Only the submitter or a super-admin'", id = esc(b.id), out = "";
+    if (LIVE && b.quiet_only && /^(launching|queued|running)$/.test(b.status)) out += '<button class="btn sm pink" data-act="start-now" data-id="' + id + '"' + dis + ' title="Launched for quiet hours only (21:30–06:30, Europe/Brussels)">Start now</button>';
     if (/^(running|paused)$/.test(b.status)) out += '<button class="btn sm ghost" data-act="' + (b.status === "paused" ? "resume" : "pause") + '" data-id="' + id + '"' + dis + ">" + (b.status === "paused" ? "Resume" : "Pause") + "</button>";
     if (/^(queued|running|paused|draft|invalid|ready)$/.test(b.status)) out += '<button class="btn sm danger" data-act="cancel" data-id="' + id + '"' + dis + ">" + cancelLabel + "</button>";
     return out;
@@ -417,6 +419,11 @@
           audit("batch.cancel", id); toast("Batch cancelled"); route();
         } }]);
       return;
+    }
+    if (act === "start-now") {
+      return API.call("POST", "/batches/" + enc(id) + "/quiet", { quiet_only: false }).then(function () {
+        toast("Starting " + id + " now", "No longer waiting for quiet hours — cases start as slots free up."); route();
+      }, function (e) { fail(e, "The batch was not started"); });
     }
     if (LIVE) return liveBatchAction(act, id);
     if (act === "pause") { b.status = "paused"; audit("batch.pause", id); toast("Batch paused", "Running cases finish; no new ones start."); }   // API: POST /batches/{id}/pause
@@ -960,11 +967,11 @@
   }
   $("launch").addEventListener("click", function () {
     if (LIVE) {
-      var bid = sub.batchId;
+      var bid = sub.batchId, quiet = $("quiet").checked;
       $("launch").disabled = true;
-      API.call("POST", "/batches/" + enc(bid) + "/launch", { synthetic: true, quiet_only: $("quiet").checked }).then(function () {
+      API.call("POST", "/batches/" + enc(bid) + "/launch", { synthetic: true, quiet_only: quiet }).then(function () {
         resetSubmit();
-        toast("Batch " + bid + " launched", "Cases start as slots free up.");
+        toast("Batch " + bid + " launched", quiet ? QUIET_NOTE : "Cases start as slots free up.");
         location.hash = "#batches/" + bid;
       }, function (e) { renderSubmit(); fail(e, "The batch was not launched"); });
       return;
@@ -1112,8 +1119,9 @@
       '<label class="checkline"><input type="checkbox" id="lc-quiet"' + (b && b.quiet_only ? " checked" : "") + "> <span>Run only during quiet hours (21:30–06:30, Europe/Brussels)</span></label>",
       [{ label: "Not now" }, { label: "Launch batch", cls: "pink", on: function () {
         if (!$("lc-syn").checked) { toast("Tick the synthetic-data confirmation first."); return false; }
-        API.call("POST", path + "/launch", { synthetic: true, quiet_only: $("lc-quiet").checked }).then(function () {
-          toast("Batch " + id + " launched", "Cases start as slots free up."); route();
+        var quiet = $("lc-quiet").checked;
+        API.call("POST", path + "/launch", { synthetic: true, quiet_only: quiet }).then(function () {
+          toast("Batch " + id + " launched", quiet ? QUIET_NOTE : "Cases start as slots free up."); route();
         }, function (er) { fail(er, "The batch was not launched"); });
       } }]);
   });

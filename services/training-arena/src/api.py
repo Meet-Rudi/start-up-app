@@ -15,6 +15,7 @@ Routes (session token in X-Arena-Token):
     POST /batches {key | s3_uri, name, quiet_only}  → draft batch, validation started
     GET  /batches                                   GET /batches/{id}
     POST /batches/{id}/{validate,launch,pause,resume,cancel,rerun,snapshot}
+    POST /batches/{id}/quiet {quiet_only}           → hold for / release from quiet hours
     GET  /batches/{id}/cases?offset=&limit=         GET /batches/{id}/files/{name}
     GET  /cases/{case_id}                           GET /cases/{case_id}/download
     --- super-admin ---
@@ -31,7 +32,7 @@ import datetime
 
 from arena_auth import Auth, AuthError
 from arena_common import (iso, log, display, local_day, new_batch_id, slug, file_stem, split_case_id,
-                          BATCH_ID_RE, parse_iso, now_utc, TZ)
+                          BATCH_ID_RE, parse_iso, now_utc, TZ, in_quiet_hours)
 from arena_store import ArenaStore, ENGINE_DEFAULTS
 
 ARENA_BUCKET = os.environ.get("ARENA_BUCKET", "")
@@ -177,6 +178,11 @@ class Api:
             return ""
         if m.get("hold"):
             return "held — " + m["hold"]
+        if not in_quiet_hours():
+            if m.get("quiet_only"):
+                return "waits for quiet hours — starts at 21:30 (Europe/Brussels)"
+            if self.store.engine_settings().get("quiet_only"):
+                return "waits for quiet hours (arena setting) — starts at 21:30 (Europe/Brussels)"
         started = parse_iso(m.get("started_at"))
         if not started or not done:
             return "starts when a slot frees" if m.get("status") == "queued" else "after the first cases finish"
@@ -331,6 +337,18 @@ class Api:
             else:
                 self.send_dispatch({"type": "control", "action": action, "batch": m["id"], "by": u})
             self.store.audit(u, "batch." + action, m["id"])
+            return {"ok": True}
+        if action == "quiet":
+            self._owner_or_sa(m)
+            if m["status"] in ("assembling", "completed", "completed_with_errors", "budget_exhausted", "cancelled"):
+                raise Http(409, "conflict", "This batch has finished.")
+            quiet = bool(body.get("quiet_only"))
+            if m["status"] in ("draft", "invalid", "ready"):
+                m["quiet_only"] = quiet
+                self.store.put_manifest(m)                       # never launched: the API still owns it
+            else:
+                self.send_dispatch({"type": "control", "action": "quiet", "quiet_only": quiet, "batch": m["id"], "by": u})
+            self.store.audit(u, "batch.quiet", m["id"], "quiet hours only" if quiet else "start now")
             return {"ok": True}
         if action == "rerun":
             self._owner_or_sa(m)
