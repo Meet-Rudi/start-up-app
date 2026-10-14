@@ -360,6 +360,18 @@ class FreeSlowTests(unittest.TestCase):
         self.assertEqual(run_to_end(h), "finished")
         self.assertEqual(h.record["result"]["counts"]["user_turns"], 4)
 
+    def test_a_free_entry_that_fails_hands_the_turn_to_the_paid_one(self):
+        broken = {"ok": False, "error": "engine_failed", "detail": "HTTP 400 json_validate_failed"}
+        h = Harness(SCRIPTED, engine=FakeEngine(replies=["Hello!", broken, "Please call 1813."]))
+        free_rudi(h)
+        self.assertEqual(run_to_end(h), "finished")
+        r = h.record["result"]
+        self.assertEqual(r["outcome"], "completed")
+        self.assertEqual([(e["code"], e["recovered"]) for e in r["errors"]], [("engine_failed", True)])
+        turns = [c for c in h.engine.calls if c.get("op") == "turn"]
+        self.assertEqual([len(c["cascade"]) for c in turns[1:3]], [1, 2])   # free first, then the whole cascade
+        self.assertEqual(h.slept, [])                                       # retried at once
+
     def test_repeated_429s_back_off(self):
         h = Harness(SCRIPTED, engine=FakeEngine(replies=["Hello!", "!rate_limited", "!rate_limited"]))
         free_rudi(h)

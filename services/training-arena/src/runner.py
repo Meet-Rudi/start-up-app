@@ -370,7 +370,8 @@ class CaseRun:
                    "trace": {"case": cp["case_id"], "turn": turn}}
         started = self.d.clock()
         try:
-            out = self._engine(payload, retries=cp["settings"]["retries"], free_entries=free_rudi)
+            out = self._engine(payload, retries=cp["settings"]["retries"], free_entries=free_rudi,
+                               fallback=_rudi_engine_cascade(cp["cascades"].get("rudi")) if free_rudi else None)
         except StepFailed as f:
             user_entry["meta"]["unanswered"] = True
             cp["pending_user"] = None
@@ -574,9 +575,11 @@ class CaseRun:
                 self.d.sleep(delay)
         raise StepFailed(code, str(last))
 
-    def _engine(self, payload, retries, free_entries=()):
+    def _engine(self, payload, retries, free_entries=(), fallback=None):
         """`free_entries`: free slow mode, Rudi on his free entries only — a 429 parks the turn
-        (no breaker: in this mode a 429 is pacing, not trouble)."""
+        (no breaker: in this mode a 429 is pacing, not trouble). Any other failure of the free
+        entries retries at once on the whole cascade (`fallback`): free slow waits for capacity,
+        it does not refuse the paid entries a reply the free one could not give."""
         backoff = float(self.cp["settings"].get("backoff") or 4)
         timeout = int(self.spec["limits"].get("turn_timeout_s") or self.cp["settings"].get("turn_timeout") or 60)
         for attempt in range(int(retries) + 1):
@@ -593,6 +596,11 @@ class CaseRun:
                 for e in free_entries:
                     self.tracker.block(e, {"retry-after": str(int(wait))})
                 raise Park(self.d.clock() + wait, "Rudi's free tier answered 429")
+            if free_entries and fallback and code not in ("bad_cascade", "bad_request"):
+                self._error(code, out.get("detail"), retried_after_ms=0)
+                payload, free_entries = dict(payload, cascade=fallback), ()
+                self.cp["retries"] += 1
+                continue
             if code == "rate_limited":
                 self.cp["rl_streak"] += 1
                 if self.cp["settings"].get("breaker") and self.cp["rl_streak"] >= BREAKER_STREAK:
