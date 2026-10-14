@@ -120,6 +120,19 @@ class MidFlightFailoverTests(unittest.TestCase):
         self.assertEqual(res.model, "tester-ovh-llama-3.3-70b")
         self.assertEqual(res.attempts[0]["detail"], "empty reply")
 
+    def test_rejected_json_is_asked_again_without_json_mode_on_the_same_entry(self):
+        bad = arena_llm.LLMError("HTTP 400 json_validate_failed: Failed to generate JSON.")
+        t = FakeTransport([bad, chat('<think>stay in role</think>Sure: {"message": "b", "pushing": false}')])
+        cas, _tr, _c = tester_cascade(t)
+        res = cas.chat(MSGS)
+        self.assertEqual(res.model, "tester-groq-qwen3.8-27b")
+        self.assertEqual(arena_llm.parse_json_reply(res.text)["message"], "b")
+        self.assertIn("response_format", t.sent[0]["payload"])
+        self.assertNotIn("response_format", t.sent[1]["payload"])
+        t2 = FakeTransport([bad, bad, chat({"message": "c"})])          # rejected twice: next entry
+        cas2, _tr2, _c2 = tester_cascade(t2)
+        self.assertEqual(cas2.chat(MSGS).model, "tester-ovh-llama-3.3-70b")
+
     def test_missing_key_fails_over_instead_of_failing(self):
         t = FakeTransport([chat({"message": "b"})])
         tracker = arena_llm.LimitTracker(None, clock=Clock())
@@ -174,6 +187,20 @@ class HeaderTests(unittest.TestCase):
     def test_kong_minute_headers(self):
         w = arena_llm.header_windows({"X-RateLimit-Remaining-Minute": "0", "RateLimit-Reset": "10"}, 100.0)
         self.assertEqual(w["requests_minute"], {"remaining": 0, "reset_at": 110.0})
+
+    def test_error_hint_keeps_code_and_message_never_the_generation(self):
+        class Err:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def read(self):
+                return self.raw
+
+        groq = (b'{"error": {"message": "Failed to generate JSON.", "type": "invalid_request_error",'
+                b' "code": "json_validate_failed", "failed_generation": "I want to die"}}')
+        self.assertEqual(arena_llm._error_hint(Err(groq)), " json_validate_failed: Failed to generate JSON.")
+        self.assertEqual(arena_llm._error_hint(Err(b"<html>Bad Gateway</html>")), "")
+        self.assertEqual(arena_llm._error_hint(Err(b'{"detail": "x"}')), "")
 
 
 def judge_registry(transport, config=None):

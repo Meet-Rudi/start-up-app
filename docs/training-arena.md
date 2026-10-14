@@ -664,8 +664,12 @@ in memory) and `python -m unittest discover -s services/whatsapp/tests -v` (435 
 | A7 | Assembler: plan, stream, index CSV, snapshots, downloads | ✅ built, tested |
 | A8 | Console wired to the API; dashboard stats and cost section | ✅ built; live mode tested against a fake API |
 
-Not yet proven: real provider calls (header names, free-tier pacing), sign-in and the console
-against the real API, and a batch end to end — all wait on the secrets.
+Proven in AWS on 2026-10-14: the crisis batch end to end (`TA-20261014-KXSA`, 4 cases, €0.0136,
+4 min) — real Groq and OVH calls, Rudi failing over Groq → OVH, the free-tier pacing waiting
+instead of failing, the LLM judge, results parts and the index CSV. Found on the way: the Groq
+tester model (Qwen3) had its thinking eat the token budget and Groq rejected the cut-off JSON
+(`json_validate_failed`); its reasoning is now off, such a rejection is asked again without JSON
+mode, and provider errors keep their code. Not yet proven: the console against the real API.
 
 ---
 

@@ -56,7 +56,8 @@
       "checked": "2026-10-14",
       "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
       "max_tokens_param": "max_completion_tokens",
-      "note": "The only non-gpt-oss chat model on Groq's free tier (Preview — may be withdrawn at short notice; failover covers it). A different family from Rudi's, so Rudi is not talking to himself."
+      "params": {"reasoning_effort": "none"},
+      "note": "The only non-gpt-oss chat model on Groq's free tier (Preview — may be withdrawn at short notice; failover covers it). A different family from Rudi's, so Rudi is not talking to himself. Reasoning off: with it on, its thinking ate the token budget and Groq rejected the cut-off JSON (json_validate_failed, 2026-10-14)."
     },
     {
       "name": "tester-ovh-llama-3.3-70b",

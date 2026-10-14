@@ -199,6 +199,21 @@ def _next_utc_midnight(now):
     return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc).timestamp()
 
 
+def _error_hint(err):
+    """The provider's error code and the start of its message, e.g. " json_validate_failed: Failed
+    to generate JSON…". Never the rest of the body: Groq echoes the generation in failed_generation."""
+    try:
+        body = json.loads(err.read().decode("utf-8", "replace") or "{}")
+    except Exception:  # noqa: BLE001 - no readable body: the status code alone will do
+        return ""
+    e = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(e, dict):
+        return ""
+    code = str(e.get("code") or e.get("type") or "")[:40]
+    msg = " ".join(str(e.get("message") or "").split())[:120]
+    return " " + ": ".join(x for x in (code, msg) if x) if (code or msg) else ""
+
+
 class HttpTransport:
     """OpenAI-compatible chat completions over urllib. Returns (json, headers)."""
 
@@ -214,7 +229,7 @@ class HttpTransport:
             headers = dict(e.headers.items()) if e.headers else {}
             if e.code == 429:
                 raise _RateLimited(headers)
-            raise LLMError("HTTP %s" % e.code)
+            raise LLMError("HTTP %s%s" % (e.code, _error_hint(e)))
         except urllib.error.URLError as e:
             raise LLMError("network: %s" % getattr(e, "reason", e))
         except TimeoutError:
@@ -290,7 +305,7 @@ class Cascade:
                 attempts.append({"entry": e.get("name"), "outcome": "no_key", "detail": "key unavailable (%s)" % type(err).__name__})
                 continue
             try:
-                body, headers = self.transport.post(e["endpoint"], key, payload, timeout)
+                body, headers = self._post(e, key, payload, timeout)
             except _RateLimited as rl:
                 self.tracker.block(e, rl.headers)
                 attempts.append({"entry": e.get("name"), "outcome": "rate_limited"})
@@ -320,13 +335,26 @@ class Cascade:
             raise Busy(min(retry_at) if retry_at else self.clock() + 60, attempts, skipped)
         raise CascadeFailed(attempts, skipped)
 
+    def _post(self, e, key, payload, timeout):
+        try:
+            return self.transport.post(e["endpoint"], key, payload, timeout)
+        except LLMError as err:
+            if "json_validate_failed" not in str(err) or "response_format" not in payload:
+                raise
+        # The provider refused its own malformed JSON (Groq: json_validate_failed). Ask the same
+        # entry once more without JSON mode; parse_json_reply digs the object out of plain text.
+        return self.transport.post(e["endpoint"], key, {k: v for k, v in payload.items() if k != "response_format"}, timeout)
+
+
+_THINK = re.compile(r"<think>.*?(?:</think>|$)", re.S)
+
 
 def _content(body):
     try:
         c = body["choices"][0]["message"].get("content")
     except (KeyError, IndexError, TypeError, AttributeError):
         return ""
-    return c.strip() if isinstance(c, str) else ""
+    return _THINK.sub("", c).strip() if isinstance(c, str) else ""
 
 
 def parse_json_reply(text):
