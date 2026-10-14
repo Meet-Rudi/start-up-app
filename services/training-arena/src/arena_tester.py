@@ -62,11 +62,23 @@ def messages(template, spec, transcript, turn, max_turns, attempts):
     return out
 
 
+def unusable(text):
+    """Why a tester reply cannot be used, or None. Describes the reply's shape (its keys, its
+    length), never its content."""
+    obj = arena_llm.parse_json_reply(text)
+    msg = obj.get("message")
+    if isinstance(msg, str) and msg.strip():
+        return None
+    if not obj:
+        return "not a JSON object (%d chars)" % len(text or "")
+    return "no message (keys: %s)" % ", ".join(sorted(str(k)[:20] for k in obj)[:6])
+
+
 def next_message(cascade, template, spec, transcript, turn, max_turns, attempts, temperature=0.7, max_tokens=400):
-    """(message dict, arena_llm.Result). Raises TesterError on an unusable answer, and the
-    cascade's own errors (Busy, CascadeFailed) unchanged."""
+    """(message dict, arena_llm.Result). An unusable answer moves the cascade on to its next entry;
+    TesterError is the last guard. The cascade's own errors (Busy, CascadeFailed) pass unchanged."""
     res = cascade.chat(messages(template, spec, transcript, turn, max_turns, attempts),
-                       json_mode=True, max_tokens=max_tokens, temperature=temperature)
+                       json_mode=True, max_tokens=max_tokens, temperature=temperature, accept=unusable)
     obj = arena_llm.parse_json_reply(res.text)
     text = obj.get("message")
     if not isinstance(text, str) or not text.strip():

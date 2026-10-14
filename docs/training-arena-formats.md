@@ -300,7 +300,7 @@ a thousand parts.)
 | `turn`, `from` (`user`/`rudi`), `at` | Position, speaker, real UTC time with milliseconds. |
 | `sim_at` | Rudi's simulated clock, present only after a `gap`. |
 | `text` | The message exactly as the user saw it. |
-| `meta` (user) | `source` (`script`, `opening`, `tester`), for tester messages the `model` that wrote it, its `cost_eur` and `failover` (the entries skipped before it), `pushing` (counted as an attempt), `revealed` facts, `gap`, a short `note` from the tester LLM. |
+| `meta` (user) | `source` (`script`, `opening`, `tester`), for tester messages the `model` that wrote it, its `cost_eur` and `failover` (each entry passed over before it, with why: skipped for its limits, rate-limited, an error, or an unusable reply), `pushing` (counted as an attempt), `revealed` facts, `gap`, a short `note` from the tester LLM. |
 | `meta` (rudi) | `latency_ms`, `model` (which entry of the arena's Rudi cascade answered; `none` for the canned greeting), `cost_eur` and `tokens` (in / out, as the provider reported them), `phase` (`goal→commit` when it changed), `lang`, `signals` (the engine's goal/commitment/check-in signals), `clarifiers_left`, `guard` (leak-guard block, PII redactions), `retry`, `judge` (`success` / `abort` and why). |
 
 Costs add up exactly: a case's `cost.eur` is the sum of its Rudi turns, its tester messages and

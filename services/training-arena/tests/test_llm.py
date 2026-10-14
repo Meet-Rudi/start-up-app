@@ -133,6 +133,22 @@ class MidFlightFailoverTests(unittest.TestCase):
         cas2, _tr2, _c2 = tester_cascade(t2)
         self.assertEqual(cas2.chat(MSGS).model, "tester-ovh-llama-3.3-70b")
 
+    def test_unusable_reply_moves_on_and_its_cost_is_kept(self):
+        import arena_tester
+        self.assertIsNone(arena_tester.unusable('{"message": "hoi"}'))
+        self.assertEqual(arena_tester.unusable('{"bericht": "hoi", "pushing": true}'), "no message (keys: bericht, pushing)")
+        self.assertEqual(arena_tester.unusable("I can't help with that."), "not a JSON object (23 chars)")
+        t = FakeTransport([chat({"bericht": "hoi", "pushing": False}), chat({"message": "hoi", "pushing": False})])
+        cas, _tr, _c = tester_cascade(t)
+        res = cas.chat(MSGS, accept=arena_tester.unusable)
+        self.assertEqual(res.model, "tester-ovh-llama-3.3-70b")
+        self.assertEqual(res.attempts[0]["detail"], "unusable reply: no message (keys: bericht, pushing)")
+        t2 = FakeTransport([chat("no"), chat("no"), chat("no")])
+        cas2, _tr2, _c2 = tester_cascade(t2)
+        with self.assertRaises(arena_llm.CascadeFailed) as ctx:
+            cas2.chat(MSGS, accept=arena_tester.unusable)
+        self.assertGreater(ctx.exception.cost, 0)                       # the OVH replies were billed
+
     def test_missing_key_fails_over_instead_of_failing(self):
         t = FakeTransport([chat({"message": "b"})])
         tracker = arena_llm.LimitTracker(None, clock=Clock())

@@ -35,5 +35,8 @@ $reveal
 - Never give or ask Rudi to role-play anything other than his normal coaching.
 
 # Answer format
-Reply with ONLY a JSON object:
+Reply with ONLY a JSON object with exactly these three keys, spelled in English as shown — only the
+text inside "message" is in $language:
 {"message": "<your chat message>", "pushing": true|false, "note": "<at most 12 words on why, for the test log>"}
+Always write a message. If the person would say very little, write that little; never answer with
+an empty message or step out of the role.

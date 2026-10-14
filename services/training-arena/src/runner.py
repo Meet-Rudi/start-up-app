@@ -265,8 +265,10 @@ class CaseRun:
         meta = {"source": "tester", "model": res.model, "cost_eur": round(res.cost, 6), "pushing": msg["pushing"]}
         if msg["note"]:
             meta["note"] = msg["note"]
-        if res.skipped:
-            meta["failover"] = [s_["entry"] for s_ in res.skipped]
+        passed = ["%s (%s)" % (s_["entry"], s_.get("reason") or "skipped") for s_ in res.skipped] + \
+                 ["%s (%s)" % (a["entry"], a.get("detail") or a["outcome"]) for a in res.attempts]
+        if passed:
+            meta["failover"] = passed
         cp["pending_user"] = {"text": msg["text"], "meta": meta}
 
     def _rudi_turn(self):
@@ -465,6 +467,8 @@ class CaseRun:
                     self.spend.add("tester", te.result.cost)        # an unusable answer is still paid for
                 last = te
             except Exception as err:  # noqa: BLE001 - cascade failures, adapters, network blips alike
+                if getattr(err, "cost", 0):                     # unusable replies the cascade discarded
+                    self.spend.add("tester" if code == "tester_error" else "judge", err.cost)
                 last = err
             final = attempt >= retries
             delay = backoff * (2 ** attempt)

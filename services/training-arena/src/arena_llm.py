@@ -50,11 +50,12 @@ class Busy(LLMError):
 
 
 class CascadeFailed(LLMError):
-    """Every entry was tried and failed for reasons other than limits."""
+    """Every entry was tried and failed for reasons other than limits. `cost` is what the
+    unusable replies among them were billed."""
 
-    def __init__(self, attempts, skipped):
+    def __init__(self, attempts, skipped, cost=0.0):
         super().__init__("; ".join("%s: %s" % (a["entry"], a.get("detail") or a["outcome"]) for a in attempts) or "no entry")
-        self.attempts, self.skipped = attempts, skipped
+        self.attempts, self.skipped, self.cost = attempts, skipped, cost
 
 
 class _RateLimited(Exception):
@@ -279,10 +280,12 @@ class Cascade:
         self.transport = transport or HttpTransport()
         self.clock = clock
 
-    def chat(self, messages, json_mode=True, max_tokens=500, temperature=None, timeout=DEFAULT_TIMEOUT):
+    def chat(self, messages, json_mode=True, max_tokens=500, temperature=None, timeout=DEFAULT_TIMEOUT, accept=None):
+        """`accept(text)` returns None for a usable reply, or a short reason — naming the reply's
+        shape, never its content — and the call moves on to the next entry, as on an error."""
         prompt = sum(len(m.get("content") or "") for m in messages)
         need = est_tokens(prompt) + int(max_tokens or 0)
-        attempts, skipped, retry_at = [], [], []
+        attempts, skipped, retry_at, discarded = [], [], [], 0.0
         for e in self.entries:
             ok, reason, free_at = self.tracker.check(e, need)
             if not ok:
@@ -327,13 +330,18 @@ class Cascade:
             if not text:
                 attempts.append({"entry": e.get("name"), "outcome": "error", "detail": "empty reply"})
                 continue
-            return Result(text, e, tin, tout, estimated, arena_costs.call_cost(e, tin, tout),
+            why = accept(text) if accept else None
+            if why:
+                discarded += arena_costs.call_cost(e, tin, tout)
+                attempts.append({"entry": e.get("name"), "outcome": "error", "detail": "unusable reply: " + why})
+                continue
+            return Result(text, e, tin, tout, estimated, arena_costs.call_cost(e, tin, tout) + discarded,
                           attempts, skipped, int((self.clock() - started) * 1000))
         # Only limits (and entries whose key is not configured yet) stood in the way: that is a
         # matter of waiting for a window, not a failure. A missing key on its own is a failure.
         if not any(a["outcome"] == "error" for a in attempts) and (retry_at or not attempts):
             raise Busy(min(retry_at) if retry_at else self.clock() + 60, attempts, skipped)
-        raise CascadeFailed(attempts, skipped)
+        raise CascadeFailed(attempts, skipped, discarded)
 
     def _post(self, e, key, payload, timeout):
         try:
