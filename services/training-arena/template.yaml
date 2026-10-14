@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI Training Arena — mass-simulated conversations with the deployed Rudi engine.
+  Its own bucket, queues and functions; Rudi's replies come from meetrudi-engine-turn in the
+  meetrudi-whatsapp stack. Requires the console-created role meetrudi-arena-runner
+  (infra/iam/meetrudi-arena-runner.*.json) — this template creates no IAM objects.
+
+Parameters:
+  PagesOrigin:
+    Type: String
+    Default: "https://meet-rudi.github.io"
+    Description: Origin the console is served from. The only origin the API and the bucket accept.
+  Release:
+    Type: String
+    Default: "unknown"
+    Description: Git commit this stack was deployed from (deploy.py fills it in).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    # Role and CodeUri are set per function (SAM does not allow Role in Globals).
+
+Resources:
+
+  # ------------------------------------------------------------------ storage
+  ArenaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "meetrudi-arena-data-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # The console uploads batch files and downloads results through short-lived signed links.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: [!Ref PagesOrigin]
+            AllowedMethods: [PUT, GET]
+            AllowedHeaders: ["*"]
+            MaxAge: 600
+      LifecycleConfiguration:
+        Rules:
+          - Id: inbox-30-days
+            Status: Enabled
+            Prefix: inbox/
+            ExpirationInDays: 30
+          - Id: runtime-2-days
+            Status: Enabled
+            Prefix: runtime/leases/
+            ExpirationInDays: 2
+          - Id: audit-2-years
+            Status: Enabled
+            Prefix: audit/
+            ExpirationInDays: 730
+          - Id: abort-stale-multipart
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 2
+
+  # ------------------------------------------------------------------ queues
+  DispatchDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-arena-dispatch-dlq.fifo
+      FifoQueue: true
+
+  # One message group, so dispatcher ticks never overlap: the dispatcher is the single writer of
+  # progress, spend and stats.
+  DispatchQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-arena-dispatch.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DispatchDlq.Arn
+        maxReceiveCount: 5
+
+  CasesDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-arena-cases-dlq
+      MessageRetentionPeriod: 1209600
+
+  # One message per released case. Visibility outlasts the runner's 15 minutes, so a runner that
+  # dies is redelivered and resumes from its checkpoint.
+  CasesQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: meetrudi-arena-cases
+      VisibilityTimeout: 960
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CasesDlq.Arn
+        maxReceiveCount: 3
+
+  # ------------------------------------------------------------------ code
+  ArenaDepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: meetrudi-arena-deps
+      Description: PyYAML for the Training Arena (linux x86_64, built by build_layer.py).
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-api
+      RetentionInDays: 30
+  IngestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-ingest
+      RetentionInDays: 30
+  DispatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-dispatcher
+      RetentionInDays: 30
+  RunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-case-runner
+      RetentionInDays: 30
+  AssemblerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-assembler
+      RetentionInDays: 30
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ApiLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-api
+      Description: Training Arena API — sign-in, batches, results, costs, super-admin settings.
+      Handler: api.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 30
+      MemorySize: 1024              # PBKDF2 at 600k rounds is CPU-bound; more memory = more CPU
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          DISPATCH_QUEUE_URL: !Ref DispatchQueue
+          INGEST_FUNCTION: meetrudi-arena-ingest
+          ASSEMBLER_FUNCTION: meetrudi-arena-assembler
+          ENGINE_FUNCTION: meetrudi-engine-turn
+          BOOTSTRAP_SECRET: meetrudi/arena/bootstrap
+          ARENA_SESSION_IDLE_MIN: "30"
+          RELEASE: !Ref Release
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref PagesOrigin]
+          AllowMethods: [GET, POST, PUT, DELETE]
+          AllowHeaders: [content-type, x-arena-token]
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: IngestLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-ingest
+      Description: Training Arena — stream, validate and lay out a batch input.
+      Handler: ingest.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 900
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          DISPATCH_QUEUE_URL: !Ref DispatchQueue
+          ENGINE_FUNCTION: meetrudi-engine-turn
+          INGEST_FUNCTION: meetrudi-arena-ingest
+          RELEASE: !Ref Release
+
+  DispatcherFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DispatcherLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-dispatcher
+      Description: Training Arena — pace, budgets and progress; one tick at a time.
+      Handler: dispatcher.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 60
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          DISPATCH_QUEUE_URL: !Ref DispatchQueue
+          CASES_QUEUE_URL: !Ref CasesQueue
+          ASSEMBLER_FUNCTION: meetrudi-arena-assembler
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DispatchQueue.Arn
+            BatchSize: 10
+        Tick:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)      # only drops a tick on the FIFO queue
+
+  RunnerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RunnerLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-case-runner
+      Description: Training Arena — runs one case against the deployed Rudi engine.
+      Handler: runner.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 900
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          DISPATCH_QUEUE_URL: !Ref DispatchQueue
+          CASES_QUEUE_URL: !Ref CasesQueue
+          ENGINE_FUNCTION: meetrudi-engine-turn
+          RELEASE: !Ref Release
+      Events:
+        Cases:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CasesQueue.Arn
+            BatchSize: 1
+
+  AssemblerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: AssemblerLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-assembler
+      Description: Training Arena — plans and streams the results files of a batch.
+      Handler: assembler.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 900
+      MemorySize: 1024
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          DISPATCH_QUEUE_URL: !Ref DispatchQueue
+          ASSEMBLER_FUNCTION: meetrudi-arena-assembler
+          RELEASE: !Ref Release
+
+Outputs:
+  ApiUrl:
+    Description: Put this into site/training-arena/config.js (API_BASE)
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  ArenaBucketName:
+    Description: The arena's own bucket (never the live data bucket)
+    Value: !Ref ArenaBucket
+  DispatchQueueUrl:
+    Value: !Ref DispatchQueue
+  CasesQueueUrl:
+    Value: !Ref CasesQueue

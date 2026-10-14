@@ -1,0 +1,12 @@
+{
+  "_comment": "Add this statement to rudi-deployer's policy (RudiDeployPolicy) so SAM can attach meetrudi-arena-runner to the arena's Lambdas.",
+  "Statement": [
+    {
+      "Sid": "PassArenaRunnerRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::949753869755:role/meetrudi-arena-runner",
+      "Condition": { "StringEquals": { "iam:PassedToService": "lambda.amazonaws.com" } }
+    }
+  ]
+}

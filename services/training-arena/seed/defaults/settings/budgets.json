@@ -1,0 +1,12 @@
+{
+  "month_budget": 150.0,
+  "user_day_budget": 20.0,
+  "case_default": 0.05,
+  "batch_default": 10.0,
+  "case_ceiling": 0.50,
+  "batch_ceiling": 100.0,
+  "infra": {
+    "per_turn_eur": 0.00015,
+    "per_case_eur": 0.0002
+  }
+}

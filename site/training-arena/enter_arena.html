@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Training Arena — sign in</title>
+<link rel="icon" href="../favicon.ico">
+<link rel="stylesheet" href="arena.css">
+</head>
+<body>
+<main class="center">
+  <div class="card tight">
+    <div class="brandrow">
+      <div class="brandlogo">TA</div>
+      <div>
+        <h1>Training Arena</h1>
+        <p class="hint">Mass-simulate conversations with Rudi</p>
+      </div>
+    </div>
+
+    <!-- Step 1: sign in -->
+    <form id="login" autocomplete="on" novalidate>
+      <div class="banner info" id="note" hidden style="margin-bottom:.9rem"></div>
+      <div class="banner bad" id="err" hidden style="margin-bottom:.9rem"></div>
+      <div class="field">
+        <label for="u">Username</label>
+        <input id="u" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      </div>
+      <div class="field">
+        <label for="p">Password</label>
+        <input id="p" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn block" type="submit" id="login-go">Enter the arena</button>
+      <p class="hint" style="margin-top:.8rem">Forgot your password? Ask a super-admin to reset it — there is no e-mail reset, the arena keeps no addresses.</p>
+    </form>
+
+    <!-- Step 2: first sign-in with a temporary password -->
+    <form id="change" hidden novalidate>
+      <div class="banner info">You signed in with a temporary password. Choose your own to continue.</div>
+      <div class="field" id="n0-field" hidden style="margin-top:.9rem">
+        <label for="n0">Temporary password</label>
+        <input id="n0" type="password" autocomplete="current-password">
+        <span class="hint">The one a super-admin gave you.</span>
+      </div>
+      <div class="field" style="margin-top:.9rem">
+        <label for="n1">New password</label>
+        <input id="n1" type="password" autocomplete="new-password">
+        <span class="hint">At least 12 characters, with a lower-case letter, an upper-case letter and a digit.</span>
+      </div>
+      <div class="field">
+        <label for="n2">Repeat new password</label>
+        <input id="n2" type="password" autocomplete="new-password">
+      </div>
+      <div class="banner bad" id="err2" hidden style="margin-bottom:.9rem"></div>
+      <button class="btn block" type="submit" id="change-go">Save and enter</button>
+    </form>
+
+    <div class="demo-box" id="demo-box">
+      <p class="lbl" style="color:var(--accent)">Prototype — no services connected</p>
+      <p class="d" style="margin:.35rem 0 .65rem">Any password works. Username <b>admin</b> signs in as super-admin, <b>newuser</b> shows the temporary-password step, anything else signs in as a tester.</p>
+      <div class="row">
+        <button class="btn sm pink" type="button" data-demo="superadmin">Demo super-admin</button>
+        <button class="btn sm ghost" type="button" data-demo="tester">Demo tester</button>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="config.js"></script>
+<script src="arena-api.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var API = window.ArenaAPI, LIVE = API.live;
+  var pending = null, pendingPw = null;
+  var query = location.search;
+
+  // Keeps only the opaque token the API issued, plus what the console needs to draw itself.
+  // Role decides which panes the console draws — the API re-checks it on every request, so a
+  // hand-edited value buys nothing.
+  function store(token, username, role) {
+    sessionStorage.setItem("arena.session", JSON.stringify({ token: token, username: username, role: role, since: new Date().toISOString() }));
+  }
+  function enter(username, role) {
+    if (!LIVE) store("demo-" + Math.random().toString(36).slice(2), username, role);   // PROTOTYPE: a made-up token
+    location.href = "arena.html#dashboard";
+  }
+  function showErr(id, msg) { $(id).textContent = msg; $(id).hidden = false; }
+  function busy(id, on, label) { $(id).disabled = on; $(id).textContent = label; }
+  function askNewPassword(needCurrent) {
+    $("login").hidden = true;
+    $("change").hidden = false;
+    $("n0-field").hidden = !needCurrent;
+    (needCurrent ? $("n0") : $("n1")).focus();
+  }
+
+  function roleFor(u) { return /^admin|^filip$/.test(u) ? "superadmin" : "tester"; }
+
+  $("login").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var u = $("u").value.trim().toLowerCase(), p = $("p").value;
+    $("err").hidden = true;
+    if (!u || !p) return showErr("err", "Enter your username and password.");
+    if (LIVE) {
+      busy("login-go", true, "Signing in…");
+      API.call("POST", "/login", { username: u, password: p }).then(function (r) {
+        store(r.token, r.user.u, r.user.role);
+        pending = r.user; pendingPw = p;
+        if (r.user.must_change) { busy("login-go", false, "Enter the arena"); return askNewPassword(false); }
+        enter(r.user.u, r.user.role);
+      }, function (err) {
+        busy("login-go", false, "Enter the arena");
+        showErr("err", err.detail || "Signing in did not work. Try again.");
+      });
+      return;
+    }
+    if (u === "newuser") {
+      pending = u;
+      askNewPassword(false);
+      return;
+    }
+    enter(u, roleFor(u));
+  });
+
+  $("change").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var a = $("n1").value, b = $("n2").value;
+    $("err2").hidden = true;
+    var ok = a.length >= 12 && /[a-z]/.test(a) && /[A-Z]/.test(a) && /\d/.test(a);
+    if (!ok) return showErr("err2", "That password does not meet the rules above.");
+    if (a !== b) return showErr("err2", "The two passwords differ.");
+    if (!LIVE) return enter(pending, "tester");
+    var current = pendingPw || $("n0").value;
+    if (!current) return showErr("err2", "Enter the temporary password you were given.");
+    busy("change-go", true, "Saving…");
+    API.call("POST", "/account/password", { current: current, "new": a }).then(function () {
+      var s = JSON.parse(sessionStorage.getItem("arena.session") || "{}");
+      enter(s.username, s.role);
+    }, function (err) {
+      busy("change-go", false, "Save and enter");
+      showErr("err2", err.detail || "The password was not changed. Try again.");
+    });
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-demo]"), function (b) {
+    b.addEventListener("click", function () {
+      var r = b.getAttribute("data-demo");
+      enter(r === "superadmin" ? "filip" : "anke", r);
+    });
+  });
+
+  $("demo-box").hidden = LIVE;
+  if (/[?&]expired=1/.test(query)) { $("note").textContent = "Your session ended — sign in again."; $("note").hidden = false; }
+  // Sent here by the console: this session still has a temporary password. Without a session
+  // there is nothing to change yet, so sign in first (the API then asks for the new password).
+  if (/[?&]change=1/.test(query) && LIVE) {
+    if (sessionStorage.getItem("arena.session")) askNewPassword(true);
+    else { $("note").textContent = "Sign in with your temporary password, then choose your own."; $("note").hidden = false; }
+  }
+  if (sessionStorage.getItem("arena.session") && $("change").hidden) $("u").placeholder = "already signed in — this starts a new session";
+})();
+</script>
+</body>
+</html>

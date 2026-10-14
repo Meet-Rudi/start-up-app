@@ -1,0 +1,137 @@
+{
+  "_comment": [
+    "The Training Arena's OWN model cascades. Seeded to defaults/config/cascades.json; a super-admin's edits",
+    "in Engine control are saved to config/cascades.json and are never overwritten by a deploy.",
+    "",
+    "None of these keys is live Rudi's. rudi: answers as Rudi through meetrudi-engine-turn, which refuses any",
+    "key outside meetrudi/arena/rudi- and any host live Rudi does not already use. tester / judge: the arena's",
+    "simulation side; the API refuses a tester or judge entry that names a Rudi key.",
+    "",
+    "Prices are euro per million tokens. 'free tier' entries cost nothing and are tried first; 'limits' are",
+    "the provider's published free-tier ceilings (Groq, checked 2026-10-14) and drive preventive failover",
+    "together with the rate-limit headers Groq returns. OVH: 400 requests per minute per project and model.",
+    "Groq takes max_completion_tokens; OVH takes max_tokens."
+  ],
+  "rudi": [
+    {
+      "name": "groq-gpt-oss-120b",
+      "model": "openai/gpt-oss-120b",
+      "provider": "Groq · arena Rudi organisation",
+      "kind": "groq",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "key": "meetrudi/arena/rudi-groq",
+      "on": true,
+      "in": 0.13,
+      "out": 0.52,
+      "basis": "list",
+      "checked": "2026-10-14",
+      "note": "Groq list price USD 0.15 / 0.60, converted at an assumed 0.86. Set both to 0 if this organisation stays on the free tier."
+    },
+    {
+      "name": "ovh-gpt-oss-120b",
+      "model": "gpt-oss-120b",
+      "provider": "OVH · Gravelines · arena Rudi project",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "key": "meetrudi/arena/rudi-ovh",
+      "on": true,
+      "in": 0.08,
+      "out": 0.40,
+      "basis": "list",
+      "checked": "2026-09-21"
+    }
+  ],
+  "tester": [
+    {
+      "name": "tester-groq-qwen3.8-27b",
+      "model": "qwen/qwen3.8-27b",
+      "provider": "Groq · tester & judge organisation (free tier)",
+      "kind": "openai_compatible",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "key": "meetrudi-groq-tester_and_judge",
+      "on": true,
+      "in": 0.0,
+      "out": 0.0,
+      "basis": "free tier",
+      "checked": "2026-10-14",
+      "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+      "max_tokens_param": "max_completion_tokens",
+      "note": "The only non-gpt-oss chat model on Groq's free tier (Preview — may be withdrawn at short notice; failover covers it). A different family from Rudi's, so Rudi is not talking to himself."
+    },
+    {
+      "name": "tester-ovh-llama-3.3-70b",
+      "model": "Meta-Llama-3_3-70B-Instruct",
+      "provider": "OVH · Gravelines · arena simulation project",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "key": "meetrudi/arena/sim-ovh",
+      "on": true,
+      "in": 0.67,
+      "out": 0.67,
+      "basis": "list",
+      "checked": "2026-09-21",
+      "limits": {"rpm": 400}
+    },
+    {
+      "name": "tester-ovh-gpt-oss-20b",
+      "model": "gpt-oss-20b",
+      "provider": "OVH · Gravelines · arena simulation project",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "key": "meetrudi/arena/sim-ovh",
+      "on": true,
+      "in": 0.04,
+      "out": 0.15,
+      "basis": "list",
+      "checked": "2026-09-21",
+      "limits": {"rpm": 400}
+    }
+  ],
+  "judge": [
+    {
+      "name": "judge-groq-gpt-oss-120b",
+      "model": "openai/gpt-oss-120b",
+      "provider": "Groq · tester & judge organisation (free tier)",
+      "kind": "openai_compatible",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "key": "meetrudi-groq-tester_and_judge",
+      "on": true,
+      "in": 0.0,
+      "out": 0.0,
+      "basis": "free tier",
+      "checked": "2026-10-14",
+      "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+      "max_tokens_param": "max_completion_tokens",
+      "params": {"reasoning_effort": "low"},
+      "note": "Low reasoning effort keeps the verdict inside the reply ceiling and the per-minute token allowance."
+    },
+    {
+      "name": "judge-ovh-gpt-oss-120b",
+      "model": "gpt-oss-120b",
+      "provider": "OVH · Gravelines · arena simulation project",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "key": "meetrudi/arena/sim-ovh",
+      "on": true,
+      "in": 0.08,
+      "out": 0.40,
+      "basis": "list",
+      "checked": "2026-09-21",
+      "limits": {"rpm": 400}
+    },
+    {
+      "name": "judge-ovh-llama-3.3-70b",
+      "model": "Meta-Llama-3_3-70B-Instruct",
+      "provider": "OVH · Gravelines · arena simulation project",
+      "kind": "openai_compatible",
+      "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+      "key": "meetrudi/arena/sim-ovh",
+      "on": true,
+      "in": 0.67,
+      "out": 0.67,
+      "basis": "list",
+      "checked": "2026-09-21",
+      "limits": {"rpm": 400}
+    }
+  ]
+}

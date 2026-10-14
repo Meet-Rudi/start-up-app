@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Training Arena</title>
+<link rel="icon" href="../favicon.ico">
+<link rel="stylesheet" href="arena.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================== top bar ============================== -->
+  <header class="topbar">
+    <div class="brand"><div class="brandlogo">TA</div>Rudi · Training Arena</div>
+    <span class="proto-pill" id="proto-pill" title="No services are connected. Every button works against demo data.">Prototype · no services connected</span>
+    <span class="sp"></span>
+    <div class="whoami">
+      <div class="av" id="who-av">?</div>
+      <div><b id="who-name">—</b> <span class="rolechip" id="who-role">—</span></div>
+      <button class="btn sm ghost" id="signout" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <!-- ============================== left menu ============================== -->
+  <nav class="side" aria-label="Arena sections">
+    <div class="navgroup">
+      <span class="lbl">Testing</span>
+      <a class="nav" href="#dashboard" data-pane="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg><span class="t">Dashboard</span></a>
+      <a class="nav" href="#submit" data-pane="submit"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg><span class="t">New batch</span></a>
+      <a class="nav" href="#batches" data-pane="batches"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="t">Batches &amp; results</span><span class="badge" id="nav-running" title="Batches running or queued">2</span></a>
+      <a class="nav" href="#case" data-pane="case"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="t">Case viewer</span></a>
+    </div>
+    <div class="navgroup">
+      <span class="lbl">Reference</span>
+      <a class="nav" href="#formats" data-pane="formats"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="t">Formats &amp; templates</span></a>
+      <a class="nav" href="#account" data-pane="account"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="t">My account</span></a>
+    </div>
+    <div class="navgroup sa" id="nav-sa" hidden>
+      <span class="lbl">🔒 Super-admin</span>
+      <a class="nav" href="#engine" data-pane="engine"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span class="t">Engine control</span></a>
+      <a class="nav" href="#users" data-pane="users"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="t">Users</span></a>
+      <a class="nav" href="#audit" data-pane="audit"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span class="t">Audit &amp; storage</span></a>
+    </div>
+    <p class="side-foot" id="side-foot"></p>
+  </nav>
+
+  <main class="main">
+
+    <!-- ============================== DASHBOARD ============================== -->
+    <section id="p-dashboard" class="pane" hidden>
+      <div class="pane-head">
+        <div>
+          <h1>Dashboard</h1>
+          <p>Progress of running batches and how past testing went. Figures update each time a case finishes — there is no live stream.</p>
+        </div>
+        <span class="sp"></span>
+        <span class="refresh">Last update <b id="dash-stamp">10:42:07</b></span>
+        <button class="btn sm ghost" id="dash-refresh" type="button">Refresh</button>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card" style="margin-bottom:1rem">
+        <header>
+          <div><h2>Running and queued batches</h2><p class="sub">One bar per batch; each segment is a group of cases.</p></div>
+          <div class="acts"><div class="legend" id="run-legend"></div></div>
+        </header>
+        <div id="running"></div>
+      </div>
+
+      <div class="filterbar">
+        <span class="lbl">Past testing</span>
+        <div class="seg" id="range" role="group" aria-label="Time range">
+          <button type="button" data-d="7">7 days</button><button type="button" data-d="14" class="on">14 days</button><button type="button" data-d="30">30 days</button>
+        </div>
+        <span class="hint" id="range-note"></span>
+      </div>
+
+      <div class="grid g-12-8" style="margin-bottom:1rem">
+        <div class="card">
+          <header>
+            <div><h2>Case outcomes per day</h2><p class="sub">Cases finished each day, by outcome.</p></div>
+            <div class="acts"><div class="seg" id="oc-view"><button type="button" class="on" data-v="chart">Chart</button><button type="button" data-v="table">Table</button></div></div>
+          </header>
+          <div class="legend" id="oc-legend" style="margin-bottom:.6rem"></div>
+          <div class="chart" id="ch-outcomes"></div>
+          <div class="tblwrap" id="tb-outcomes" hidden></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Rudi reply latency</h2><p class="sub">Seconds from user message to Rudi's reply, per day.</p></div></header>
+          <div class="legend" id="lat-legend" style="margin-bottom:.6rem"></div>
+          <div class="chart" id="ch-latency"></div>
+        </div>
+      </div>
+
+      <div class="grid g3" style="margin-bottom:1rem">
+        <div class="card">
+          <header><div><h2>Errors by type</h2><p class="sub">Error events in the selected period.</p></div></header>
+          <div class="hbars" id="ch-errors"></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Which model answered as Rudi</h2><p class="sub">Share of Rudi replies per entry of the arena's Rudi cascade.</p></div></header>
+          <div class="hbars" id="ch-models"></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Cases that keep failing</h2><p class="sub">Same case key, across batches, last 30 days.</p></div></header>
+          <div class="tblwrap"><table class="t" id="tb-failing"></table></div>
+        </div>
+      </div>
+
+      <div class="section-label"><span class="lbl">Costs</span><span class="hint">Model spend as the providers bill it, priced per cascade entry, plus an estimate of the AWS overhead — both count towards every budget. Same period as above.</span></div>
+
+      <div class="grid g-8-12" style="margin-bottom:1rem">
+        <div class="card">
+          <header><div><h2>Budget this month</h2><p class="sub" id="bud-sub"></p></div></header>
+          <div id="bud-body"></div>
+        </div>
+        <div class="card">
+          <header>
+            <div><h2>Spend per day</h2><p class="sub">Euro of model spend by who the call was for, plus the AWS overhead estimate.</p></div>
+            <div class="acts"><div class="seg" id="sp-view"><button type="button" class="on" data-v="chart">Chart</button><button type="button" data-v="table">Table</button></div></div>
+          </header>
+          <div class="legend" id="sp-legend" style="margin-bottom:.6rem"></div>
+          <div class="chart" id="ch-spend"></div>
+          <div class="tblwrap" id="tb-spend" hidden></div>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-bottom:1rem">
+        <div class="stack" style="gap:1rem">
+          <div class="card">
+            <header><div><h2>Cost per case</h2><p class="sub">By mode, in the selected period.</p></div></header>
+            <div class="tblwrap"><table class="t" id="tb-percase"></table></div>
+            <p class="hint" id="percase-note" style="margin-top:.6rem"></p>
+          </div>
+          <div class="card">
+            <header><div><h2>Spend by model</h2><p class="sub">All three cascades, plus the AWS overhead estimate. Free-tier entries cost €0.</p></div></header>
+            <div class="hbars" id="ch-costmodels"></div>
+          </div>
+        </div>
+        <div class="card">
+          <header><div><h2>Most expensive cases</h2><p class="sub">The back-and-forth a case budget is there to stop.</p></div></header>
+          <div class="tblwrap"><table class="t" id="tb-expensive"></table></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <header><div><h2>Recently finished batches</h2></div><div class="acts"><a class="btn sm ghost" href="#batches">All batches</a></div></header>
+        <div class="tblwrap"><table class="t" id="tb-recent"></table></div>
+      </div>
+    </section>
+
+    <!-- ============================== NEW BATCH ============================== -->
+    <section id="p-submit" class="pane" hidden>
+      <div class="pane-head">
+        <div>
+          <h1>New batch</h1>
+          <p>Submit a file of test cases. The arena checks it, gives the batch and every case an ID, then runs each case as its own conversation with Rudi.</p>
+        </div>
+      </div>
+
+      <div class="grid g2">
+        <div class="stack">
+          <div class="card">
+            <header><span class="stepno">1</span><div><h2>Choose the input</h2><p class="sub">YAML (recommended), JSON or JSONL. No size limit — the file is read case by case.</p></div></header>
+            <div class="seg" id="src-tabs" style="margin-bottom:.8rem"><button type="button" class="on" data-s="upload">Upload a file</button><button type="button" data-s="s3">Point to S3</button></div>
+            <div id="src-upload">
+              <label class="drop" id="drop">
+                <b>Drop a batch file here, or click to choose</b>
+                <span class="hint">.yaml · .yml · .json · .jsonl</span>
+                <input type="file" id="file" accept=".yaml,.yml,.json,.jsonl" hidden>
+              </label>
+              <div class="row" style="margin-top:.7rem">
+                <button class="btn sm ghost" type="button" id="use-sample">Use the sample file</button>
+                <a class="btn sm ghost" href="samples/TA-20261013-K7QX__goal-setting-smoke__input.yaml" download>Download template</a>
+              </div>
+            </div>
+            <div id="src-s3" hidden>
+              <div class="field">
+                <label for="s3path">S3 location inside the arena bucket</label>
+                <input type="text" id="s3path" class="mono" spellcheck="false">
+                <span class="hint">Only the arena's own <code>inbox/</code> is readable. Copy a file there with the command shown under <a href="#formats">Formats &amp; templates</a>.</span>
+              </div>
+              <button class="btn sm ghost" type="button" id="s3-check">Find file</button>
+            </div>
+            <div class="filepill" id="filepill" hidden style="margin-top:.8rem"></div>
+          </div>
+
+          <div class="card">
+            <header><span class="stepno">2</span><div><h2>Name the batch <span class="hint">(optional)</span></h2><p class="sub">The name travels into every file name of this batch.</p></div></header>
+            <div class="field">
+              <label for="bname">Batch name</label>
+              <input type="text" id="bname" maxlength="80" placeholder="e.g. Goal setting smoke">
+            </div>
+            <div class="namegrid" id="namegrid"></div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <header><span class="stepno">3</span><div><h2>Check the file</h2><p class="sub">Nothing is sent to Rudi until the file passes.</p></div>
+              <div class="acts"><button class="btn sm" type="button" id="validate" disabled>Validate</button></div></header>
+            <div id="vreport"><p class="hint">Choose a file first.</p></div>
+          </div>
+
+          <div class="card">
+            <header><span class="stepno">4</span><div><h2>Launch</h2><p class="sub">Cases start as slots free up, at the pace a super-admin has set.</p></div></header>
+            <div class="stack">
+              <div class="banner info" id="pace-note"></div>
+              <label class="checkline"><input type="checkbox" id="quiet"> <span>Run only during quiet hours (21:30–06:30, Europe/Brussels), when live Rudi traffic is lowest</span></label>
+              <label class="checkline"><input type="checkbox" id="synthetic"> <span>I confirm this file contains <b>synthetic data only</b> — no real people, numbers or health records</span></label>
+              <div class="row">
+                <button class="btn pink" type="button" id="launch" disabled>Launch batch</button>
+                <span class="hint" id="launch-hint">Validate the file and tick the confirmation.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== BATCHES ============================== -->
+    <section id="p-batches" class="pane" hidden>
+      <div id="batch-list">
+        <div class="pane-head">
+          <div><h1>Batches &amp; results</h1><p>Every batch ever submitted. Open one to follow its cases and download its results.</p></div>
+          <span class="sp"></span><a class="btn" href="#submit">New batch</a>
+        </div>
+        <div class="card">
+          <div class="toolbar">
+            <input type="search" id="b-q" placeholder="Search ID, name or tag">
+            <select id="b-status" aria-label="Status"><option value="">Any status</option><option value="ready">Ready to launch</option><option value="invalid">Invalid</option><option value="running">Running</option><option value="queued">Queued</option><option value="paused">Paused</option><option value="completed">Completed</option><option value="completed_with_errors">Completed with errors</option><option value="budget_exhausted">Budget exhausted</option><option value="cancelled">Cancelled</option></select>
+            <div class="seg" id="b-mine"><button type="button" class="on" data-m="all">Everyone's</button><button type="button" data-m="mine">Mine</button></div>
+            <span class="sp"></span><span class="hint" id="b-count"></span>
+          </div>
+          <div class="tblwrap"><table class="t" id="tb-batches"></table></div>
+        </div>
+      </div>
+
+      <div id="batch-detail" hidden>
+        <div class="crumbs"><a href="#batches">Batches &amp; results</a> › <span id="bd-crumb"></span></div>
+        <div class="pane-head">
+          <div><h1 id="bd-title"></h1><p id="bd-desc"></p></div>
+          <span class="sp"></span>
+          <div class="row" id="bd-acts"></div>
+        </div>
+        <div class="grid g-12-8" style="margin-bottom:1rem">
+          <div class="card">
+            <header><div><h2>Progress</h2><p class="sub" id="bd-progress-sub"></p></div></header>
+            <div class="pbar lg" id="bd-bar"></div>
+            <div class="legend" id="bd-legend" style="margin-top:.7rem"></div>
+            <div class="kv" id="bd-kv" style="margin-top:1rem"></div>
+          </div>
+          <div class="card">
+            <header><div><h2>Files</h2><p class="sub">Stored in the arena's own bucket, apart from live Rudi data.</p></div></header>
+            <div class="stack" id="bd-files"></div>
+          </div>
+        </div>
+        <div class="card">
+          <header><div><h2>Cases</h2><p class="sub" id="bd-cases-sub"></p></div></header>
+          <div class="toolbar">
+            <div class="seg" id="c-filter"></div>
+            <input type="search" id="c-q" placeholder="Search case ID or key">
+          </div>
+          <div class="tblwrap"><table class="t" id="tb-cases"></table></div>
+          <div class="more" id="c-more"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== CASE VIEWER ============================== -->
+    <section id="p-case" class="pane" hidden>
+      <div class="crumbs" id="cv-crumbs"></div>
+      <div class="pane-head">
+        <div><h1 id="cv-title">Case viewer</h1><p id="cv-sub">Read one conversation turn by turn, with what the engine recorded around every message.</p></div>
+        <span class="sp"></span>
+        <form class="row" id="cv-go"><input type="search" id="cv-id" class="mono" placeholder="TA-20261013-K7QX-0003" style="width:16rem"><button class="btn sm ghost" type="submit">Open case</button></form>
+      </div>
+      <div id="cv-empty" class="card"><p class="d" id="cv-empty-text">Open a case from a batch, or paste a case ID above. Try one of these:</p><div class="row" id="cv-picks" style="margin-top:.7rem"></div></div>
+      <div id="cv-body" class="grid g-12-8" hidden>
+        <div class="card">
+          <header><div><h2>Conversation</h2><p class="sub" id="cv-convo-sub"></p></div>
+            <div class="acts"><button class="btn sm ghost" type="button" id="cv-dl">Download case</button></div></header>
+          <div class="convo" id="cv-convo"></div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <header><div><h2>Result</h2></div><div class="acts" id="cv-outcome"></div></header>
+            <p class="d" id="cv-verdict" style="margin-bottom:.85rem"></p>
+            <div class="kv" id="cv-kv"></div>
+          </div>
+          <div class="card">
+            <header><div><h2>Checks</h2><p class="sub">Criteria from the input file and how each was judged.</p></div></header>
+            <ul class="checks" id="cv-checks"></ul>
+          </div>
+          <div class="card" id="cv-err-card">
+            <header><div><h2>Errors</h2></div></header>
+            <div id="cv-errors"></div>
+          </div>
+          <div class="card">
+            <header><div><h2>Actions</h2></div></header>
+            <div class="row">
+              <button class="btn sm ghost" type="button" data-proto="Queues just this case again, as a one-case batch that keeps a link to the original.">Re-run this case</button>
+              <button class="btn sm ghost" type="button" id="cv-copy">Copy case ID</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== FORMATS ============================== -->
+    <section id="p-formats" class="pane" hidden>
+      <div class="pane-head"><div><h1>Formats &amp; templates</h1><p>How to write a batch file and how to read the results. The full specification is <code>docs/training-arena-formats.md</code> in the repository.</p></div></div>
+      <div class="grid g2">
+        <div class="card">
+          <header><div><h2>Downloads</h2><p class="sub">A worked example of each file.</p></div></header>
+          <div class="stack">
+            <div class="filepill"><div><b>Input template</b><div class="hint mono">TA-20261013-K7QX__goal-setting-smoke__input.yaml</div></div><span class="sp"></span><a class="btn sm ghost" href="samples/TA-20261013-K7QX__goal-setting-smoke__input.yaml" download>Download</a></div>
+            <div class="filepill"><div><b>Results example · part 1 of 2</b><div class="hint mono">…__results__p01of02.yaml</div></div><span class="sp"></span><a class="btn sm ghost" href="samples/TA-20261013-K7QX__goal-setting-smoke__results__p01of02.yaml" download>Download</a></div>
+            <div class="filepill"><div><b>Results example · part 2 of 2</b><div class="hint mono">…__results__p02of02.yaml</div></div><span class="sp"></span><a class="btn sm ghost" href="samples/TA-20261013-K7QX__goal-setting-smoke__results__p02of02.yaml" download>Download</a></div>
+          </div>
+        </div>
+        <div class="card">
+          <header><div><h2>File names</h2><p class="sub">Batch ID, optional name, kind, part — joined by double underscores.</p></div></header>
+          <div class="namegrid">
+            <span class="k">Batch ID</span><code>TA-20261013-K7QX</code>
+            <span class="k">Case ID</span><code>TA-20261013-K7QX-0003</code>
+            <span class="k">Input</span><code>TA-20261013-K7QX__goal-setting-smoke__input.yaml</code>
+            <span class="k">Results</span><code>TA-20261013-K7QX__goal-setting-smoke__results__p01of02.yaml</code>
+          </div>
+          <p class="hint" style="margin-top:.8rem">The date is the day of submission in Brussels. Results split into parts before 500k tokens; a case is never cut in two.</p>
+        </div>
+        <div class="card">
+          <header><div><h2>The three kinds of case</h2></div></header>
+          <div class="tblwrap"><table class="t">
+            <thead><tr><th>Mode</th><th>Who writes the user's messages</th><th>Ends when</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag">scripted</span></td><td>You — fixed replicas, sent in order whatever Rudi answers</td><td>The script runs out</td></tr>
+              <tr><td><span class="tag">intent</span></td><td>A tester LLM playing a persona with an objective</td><td>Success or abort criterion met, or a limit is hit</td></tr>
+              <tr><td><span class="tag">hybrid</span></td><td>Your script first, then the tester LLM</td><td>As for intent</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Stopping an intent case</h2></div></header>
+          <div class="tblwrap"><table class="t">
+            <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>success_when</code></td><td>Desired outcome, in plain words. Judged by an LLM after every Rudi reply.</td></tr>
+              <tr><td><code>abort_when</code></td><td>A breach, e.g. medical advice. Ends the case as a <span class="chip violation">violation</span>.</td></tr>
+              <tr><td><code>max_turns</code></td><td>Ceiling on user messages.</td></tr>
+              <tr><td><code>max_attempts</code></td><td>Ceiling on messages in which the user pushes for the objective.</td></tr>
+              <tr><td><code>on_limit</code></td><td><code>fail</code> (default) or <code>pass</code> — for probes where holding out is the win.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Budgets</h2><p class="sub">Optional ceilings, in euro: model spend plus the AWS overhead estimate.</p></div></header>
+          <pre class="mono" style="background:var(--sunk);border:1px solid var(--border);border-radius:.5rem;padding:.7rem;overflow-x:auto;margin:0 0 .7rem">batch:
+  max_cost_eur: 2.00      # the whole batch
+defaults:
+  limits:
+    max_cost_eur: 0.05    # each case (a case can set its own)</pre>
+          <p class="d">Budgets count model spend plus the AWS overhead estimate (a small unit price per turn and per case). A case that would pass its ceiling stops as <span class="chip over_budget">Over budget</span> — the cure for an objective that is never reached. When the batch budget is spent, cases not yet started are not started. Leave them out and the arena's defaults apply.</p>
+        </div>
+        <div class="card">
+          <header><div><h2>Who plays which part</h2><p class="sub">Three cascades, all the arena's own, tried in this order.</p></div></header>
+          <div class="tblwrap"><table class="t">
+            <thead><tr><th>Role</th><th>Does</th><th>Models</th></tr></thead>
+            <tbody>
+              <tr><td><b>Rudi</b></td><td>Answers — the deployed Rudi engine, on the arena's keys</td><td class="mono">groq-gpt-oss-120b → ovh-gpt-oss-120b</td></tr>
+              <tr><td><b>Tester</b></td><td>Writes the simulated user's messages (intent, hybrid)</td><td class="mono">tester-groq-qwen3.8-27b (free tier) → tester-ovh-llama-3.3-70b → tester-ovh-gpt-oss-20b</td></tr>
+              <tr><td><b>Judge</b></td><td>Checks Rudi's replies against expect / success_when / abort_when</td><td class="mono">judge-groq-gpt-oss-120b (free tier) → judge-ovh-gpt-oss-120b → judge-ovh-llama-3.3-70b</td></tr>
+            </tbody>
+          </table></div>
+          <p class="hint" style="margin-top:.6rem">The tester and judge try Groq's free tier first and move on to OVH before a call would go over a free-tier limit, or when a call fails.</p>
+        </div>
+        <div class="card" style="grid-column:1/-1">
+          <header><div><h2>Submitting from S3</h2><p class="sub">For files too large to upload comfortably, or produced by a script.</p></div></header>
+          <p class="d" style="margin-bottom:.6rem">Copy the file into your folder of the arena inbox, then choose <b>Point to S3</b> under <a href="#submit">New batch</a>. Windows <code>cmd</code>:</p>
+          <pre class="mono" style="background:var(--sunk);border:1px solid var(--border);border-radius:.5rem;padding:.7rem;overflow-x:auto;margin:0" id="s3cmd"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== ACCOUNT ============================== -->
+    <section id="p-account" class="pane" hidden>
+      <div class="pane-head"><div><h1>My account</h1><p>Your sign-in and this session.</p></div></div>
+      <div class="grid g2">
+        <div class="card">
+          <header><div><h2>Profile</h2></div></header>
+          <div class="kv" id="acc-kv"></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Change password</h2><p class="sub">At least 12 characters, with a lower-case letter, an upper-case letter and a digit.</p></div></header>
+          <form id="pw-form">
+            <div class="field"><label for="pw0">Current password</label><input type="password" id="pw0" autocomplete="current-password"></div>
+            <div class="field"><label for="pw1">New password</label><input type="password" id="pw1" autocomplete="new-password"></div>
+            <div class="field"><label for="pw2">Repeat new password</label><input type="password" id="pw2" autocomplete="new-password"></div>
+            <button class="btn" type="submit">Change password</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== ENGINE CONTROL (super-admin) ============================== -->
+    <section id="p-engine" class="pane" hidden>
+      <div class="pane-head"><div><h1>Engine control <span class="sa-flag">🔒 Super-admin only</span></h1><p>How hard the arena may push. These settings apply to every batch from the next case onward; running cases finish under the settings they started with.</p></div></div>
+
+      <div class="card" style="margin-bottom:1rem">
+        <header><div><h2>Global controls</h2><p class="sub" id="eng-state"></p></div></header>
+        <div class="big-controls">
+          <button class="bigbtn" type="button" data-ctl="pause"><b>Pause all</b><span>No new cases start. Running cases continue.</span></button>
+          <button class="bigbtn" type="button" data-ctl="resume"><b>Resume</b><span>Start cases again at the configured pace.</span></button>
+          <button class="bigbtn" type="button" data-ctl="drain"><b>Drain</b><span>Finish running cases, then hold everything.</span></button>
+          <button class="bigbtn kill" type="button" data-ctl="kill"><b>Kill switch</b><span>Stop every running case after its current turn.</span></button>
+        </div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card">
+          <header><div><h2>Throughput</h2><p class="sub">Parallelism and speed of case launches.</p></div></header>
+          <div class="setrow"><div class="t">Cases in parallel</div><div class="h">How many conversations run at once, across all batches.</div>
+            <div class="slider"><input type="range" id="s-par" min="1" max="2" step="1"><output id="o-par"></output></div></div>
+          <div class="setrow"><div class="t">Parallel cases per batch</div><div class="h">Stops one large batch from taking every slot.</div>
+            <div class="slider"><input type="range" id="s-pbp" min="1" max="2" step="1"><output id="o-pbp"></output></div></div>
+          <div class="setrow"><div class="t">Launch rate</div><div class="h">New cases started per minute, at most.</div>
+            <div class="slider"><input type="range" id="s-rate" min="1" max="60" step="1"><output id="o-rate"></output></div></div>
+          <div class="setrow"><div class="t">Think time between turns</div><div class="h">Pause before each user message. Spreads model calls out; 0 is as fast as possible.</div>
+            <div class="slider"><input type="range" id="s-think" min="0" max="30" step="1"><output id="o-think"></output></div></div>
+          <div class="banner info" id="thr-note" style="margin-top:.8rem"></div>
+        </div>
+
+        <div class="card">
+          <header><div><h2>Lambda concurrency budget</h2><p class="sub">The arena shares the AWS account's concurrent executions with live Rudi.</p></div></header>
+          <div class="meter" id="meter"></div>
+          <div class="legend" style="margin:.6rem 0 .9rem"><span><i class="sw" style="background:var(--navy)"></i>Reserved for live Rudi</span><span><i class="sw" style="background:var(--accent)"></i>Arena</span><span><i class="sw queued"></i>Unused</span></div>
+          <div class="setrow"><div class="t">Kept free for live Rudi</div><div class="h">Executions the arena will never use: WhatsApp, calls, tester console.</div>
+            <div class="slider"><input type="range" id="s-reserve" min="4" max="8" step="1"><output id="o-reserve"></output></div></div>
+          <div class="banner warn" id="conc-note" style="margin-top:.8rem"></div>
+        </div>
+
+        <div class="card">
+          <header><div><h2>Protect live Rudi</h2><p class="sub">What the arena shares with live Rudi, and how it stays out of the way.</p></div></header>
+          <div class="banner good" style="margin-bottom:.8rem"><span>✓ Model quota is not shared: every arena call runs on the arena's own cascades and keys. The Rudi engine refuses any key outside <code>meetrudi/arena/</code>.</span></div>
+          <div class="setrow"><label class="toggle"><input type="checkbox" id="t-breaker"> Back off when rate-limited</label>
+            <div class="h" style="margin-top:.3rem">Pause the arena when its Rudi cascade is rate-limited on 3 turns in a row — the arena's own quota is spent.</div>
+            <div class="row"><span class="d">Pause for</span><input type="number" id="n-breaker" min="1" max="120" style="width:5rem"><span class="d">minutes</span></div></div>
+          <div class="setrow"><label class="toggle"><input type="checkbox" id="t-quiet"> Run only in quiet hours</label>
+            <div class="h" style="margin-top:.3rem">Hold every batch outside 21:30–06:30 Europe/Brussels. Lambda concurrency is still shared with live Rudi (right).</div></div>
+        </div>
+
+        <div class="card">
+          <header><div><h2>Budgets</h2><p class="sub">Euro of model spend plus the AWS overhead estimate. Reaching one holds or stops work — it never overspends.</p></div></header>
+          <div class="grid g2" style="gap:.2rem 1rem">
+            <div class="field"><label for="b-month">Arena budget per month (€)</label><input type="number" id="b-month" min="1" step="10"></div>
+            <div class="field"><label for="b-user">Per user per day (€)</label><input type="number" id="b-user" min="1" step="1"></div>
+            <div class="field"><label for="b-case">Default per case (€)</label><input type="number" id="b-case" min="0.01" step="0.01"><span class="hint">when the file sets none</span></div>
+            <div class="field"><label for="b-batch">Default per batch (€)</label><input type="number" id="b-batch" min="0.1" step="1"><span class="hint">when the file sets none</span></div>
+            <div class="field"><label for="b-caseceil">Highest a file may set per case (€)</label><input type="number" id="b-caseceil" min="0.01" step="0.05"></div>
+            <div class="field"><label for="b-batchceil">Highest a file may set per batch (€)</label><input type="number" id="b-batchceil" min="1" step="10"></div>
+            <div class="field"><label for="b-infra">AWS overhead per turn (€)</label><input type="number" id="b-infra" min="0" step="0.00001"><span class="hint">estimated unit price — counted in totals and budgets</span></div>
+            <div class="field"><label for="b-infracase">AWS overhead per case (€)</label><input type="number" id="b-infracase" min="0" step="0.00001"><span class="hint">estimated unit price — counted in totals and budgets</span></div>
+          </div>
+          <div class="banner info" id="bud-note"></div>
+        </div>
+
+        <div class="card">
+          <header><div><h2>Limits</h2><p class="sub">Ceilings a batch file cannot exceed.</p></div></header>
+          <div class="grid g2" style="gap:.2rem 1rem">
+            <div class="field"><label for="n-turns">Max turns per case</label><input type="number" id="n-turns" min="1" max="200"></div>
+            <div class="field"><label for="n-timeout">Turn timeout (seconds)</label><input type="number" id="n-timeout" min="10" max="300"></div>
+            <div class="field"><label for="n-retries">Retries per turn</label><input type="number" id="n-retries" min="0" max="5"></div>
+            <div class="field"><label for="n-backoff">First retry after (seconds)</label><input type="number" id="n-backoff" min="1" max="60"></div>
+            <div class="field"><label for="n-quota">Cases per user per day</label><input type="number" id="n-quota" min="1" step="50"></div>
+            <div class="field"><label for="n-part">Results part budget (tokens)</label><input type="number" id="n-part" min="50000" max="480000" step="10000"></div>
+          </div>
+          <p class="hint">Results files split before the part budget; 450,000 keeps every part safely under 500k tokens.</p>
+        </div>
+
+        <div class="card" style="grid-column:1/-1">
+          <header><div><h2>Model cascades &amp; prices</h2><p class="sub">The arena's own models, in failover order, with their keys and prices. None of these keys belongs to live Rudi.</p></div>
+            <div class="acts"><div class="field" style="margin:0;flex-direction:row;align-items:center;gap:.5rem"><label for="n-temp" style="white-space:nowrap">Tester temperature</label><input type="number" id="n-temp" min="0" max="1.5" step="0.1" style="width:5rem"></div></div></header>
+          <div id="cascades"></div>
+          <p class="hint" style="margin-top:.6rem">Prices are euro per million tokens. <b>list</b> = the provider's published price; <b>estimate</b> = our best figure, not yet confirmed; <b>free tier</b> = no charge, within the provider's published limits. Limits are requests (rpm, rpd) and tokens (tpm, tpd) per minute and per day. Prices not checked for 90 days are flagged. Separate keys only separate quota when they come from a separate Groq organisation or OVH project.</p>
+        </div>
+
+        <div class="card" style="grid-column:1/-1">
+          <header><div><h2>Evaluators</h2><p class="sub">Who decides whether a criterion is met. Read-only here — the choice is part of the arena's configuration.</p></div></header>
+          <div class="tblwrap"><table class="t">
+            <thead><tr><th>Evaluator</th><th>Kind</th><th>Runs at</th><th>State</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">llm-judge</td><td>The judge cascade above</td><td>Groq free tier, then OVH · Gravelines</td><td><span class="chip on">On · default</span></td><td>Judges every criterion unless the criterion names another evaluator.</td></tr>
+              <tr><td class="mono">eu-jev</td><td>Decision model · System One API</td><td>eu-jev · Germany</td><td><span class="chip off">Off</span></td><td>Candidate. Answers yes / no with a probability; unsure answers go to llm-judge.</td></tr>
+              <tr><td class="mono">typesafe-jev</td><td>Decision model · System One API</td><td>United States</td><td><span class="chip off">Off</span></td><td>Candidate. Outside the EU — stays off until it is signed off after a data-transfer review.</td></tr>
+              <tr><td class="mono">qwen3guard-ovh</td><td>Safety classifier</td><td>OVH · Gravelines</td><td><span class="chip off">Off</span></td><td>Candidate. Flags unsafe replies, self-harm included.</td></tr>
+              <tr><td class="mono">mistral-moderation</td><td>Moderation API</td><td>Mistral</td><td><span class="chip off">Off</span></td><td>Candidate. Scores each reply per category.</td></tr>
+            </tbody>
+          </table></div>
+          <p class="hint" style="margin-top:.6rem">A switched-off evaluator that a criterion names falls back to llm-judge, and the verdict says so.</p>
+        </div>
+      </div>
+
+      <div class="savebar"><span class="d" id="save-state">No unsaved changes.</span><span class="sp"></span>
+        <button class="btn ghost" type="button" id="eng-discard" disabled>Discard</button><button class="btn" type="button" id="eng-save" disabled>Save settings</button></div>
+    </section>
+
+    <!-- ============================== USERS (super-admin) ============================== -->
+    <section id="p-users" class="pane" hidden>
+      <div class="pane-head"><div><h1>Users <span class="sa-flag">🔒 Super-admin only</span></h1><p>Named accounts for the arena. There is no self sign-up and no e-mail: you create an account, hand over a one-time password, and the user sets their own at first sign-in.</p></div>
+        <span class="sp"></span><button class="btn" type="button" id="u-create">Create user</button></div>
+      <div class="card">
+        <div class="toolbar"><input type="search" id="u-q" placeholder="Search username"><span class="sp"></span><span class="hint" id="u-count"></span></div>
+        <div class="tblwrap"><table class="t" id="tb-users"></table></div>
+      </div>
+    </section>
+
+    <!-- ============================== AUDIT & STORAGE (super-admin) ============================== -->
+    <section id="p-audit" class="pane" hidden>
+      <div class="pane-head"><div><h1>Audit &amp; storage <span class="sa-flag">🔒 Super-admin only</span></h1><p>Who did what, where the arena's data lives, and which Rudi release it is testing.</p></div></div>
+      <div class="card" style="margin-bottom:1rem">
+        <header><div><h2>Audit log</h2><p class="sub">Sign-ins, batch actions, user changes and settings changes.</p></div>
+          <div class="acts"><select id="a-kind" aria-label="Filter"><option value="">All events</option><option value="batch">Batches</option><option value="user">Users</option><option value="settings">Settings</option><option value="login">Sign-ins</option><option value="breaker">System</option></select></div></header>
+        <div class="tblwrap"><table class="t" id="tb-audit"></table></div>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <header><div><h2>Storage</h2><p class="sub" id="st-sub"></p></div></header>
+          <div class="tblwrap"><table class="t" id="tb-storage"></table></div>
+        </div>
+        <div class="card">
+          <header><div><h2>What is being tested</h2><p class="sub">The releases and prompt versions an arena run records in its results.</p></div></header>
+          <div class="tblwrap"><table class="t" id="tb-versions"></table></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="modal" id="modal" hidden><div class="mcard" role="dialog" aria-modal="true"><header><h2 id="m-title"></h2></header><div class="body" id="m-body"></div><footer id="m-foot"></footer></div></div>
+<div class="tip" id="tip" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<div class="loadbar" id="loadbar" role="status" hidden>Loading…</div>
+
+<script src="config.js"></script>
+<script src="demo-data.js"></script>
+<script src="arena-api.js"></script>
+<script src="arena.js"></script>
+</body>
+</html>

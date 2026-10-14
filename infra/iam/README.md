@@ -139,3 +139,43 @@ the cohort starts, or verify each tester's address by hand first.
 
 Then redeploy with the sender wired in (see the deploy command in
 [`docs/tester-console.md`](../../docs/tester-console.md)).
+
+## 7. Training Arena — Lambda concurrency (account admin, Service Quotas)
+
+The account allows **10** concurrent Lambda executions in total, shared with live Rudi. The arena
+caps itself at 2 parallel cases until this is raised. `rudi-deployer` cannot call Service Quotas,
+so an account admin does it in the console: region **eu-central-1** → **Service Quotas** →
+**AWS services** → **AWS Lambda** → **Concurrent executions** → **Request increase at account
+level** → **1000**.
+
+## 8. Training Arena — role, pass-role and secrets
+
+See [`docs/training-arena.md`](../../docs/training-arena.md). The arena has its **own** role, so
+its code can never write the live data bucket or read live Rudi's keys.
+
+1. **Role `meetrudi-arena-runner`** — Console → IAM → Roles → **Create role** → **Custom trust
+   policy** → paste [`meetrudi-arena-runner.trust.json`](meetrudi-arena-runner.trust.json) →
+   Next → skip managed policies → name it exactly **`meetrudi-arena-runner`** → Create. Open it →
+   **Add permissions** → **Create inline policy** → JSON → paste
+   [`meetrudi-arena-runner.permissions.json`](meetrudi-arena-runner.permissions.json) → name
+   `meetrudi-arena-runner-inline` → Create.
+   Grants: its own bucket `meetrudi-arena-data-949753869755` (delete only on sessions, runtime,
+   users and checkpoints), the `meetrudi-arena-*` queues, invoking `meetrudi-engine-turn` and the
+   `meetrudi-arena-*` functions, and only the arena's secrets. **No access to the live data
+   bucket and none to Rudi's keys** — only `meetrudi-engine-turn` (under the existing
+   `meetrudi-lambda-runner`) reads the `meetrudi/arena/rudi-*` keys.
+2. **Pass-role** — Console → IAM → Users → `rudi-deployer` → `RudiDeployPolicy` → Edit → add the
+   statement in [`rudi-deployer.passrole-arena-add.json`](rudi-deployer.passrole-arena-add.json).
+3. **Secrets** (Secrets Manager, eu-central-1, *Other type of secret*, Plaintext):
+
+   | Name | Value | Needed for |
+   |---|---|---|
+   | `meetrudi/arena/bootstrap` | `{"username": "...", "password": "..."}` (see [example](meetrudi-arena-bootstrap.example.json)) | the first super-admin; sign-in answers 503 until it exists |
+   | `meetrudi/arena/rudi-groq` | `{"api_key": "gsk_..."}` from the arena's **own Groq organisation** | Rudi's turns in the arena (first entry) |
+   | `meetrudi/arena/rudi-ovh` | `{"api_key": "..."}` from the arena's **own OVH project** | Rudi's turns (fallback) |
+   | `meetrudi-groq-tester_and_judge` | already created | tester and judge, Groq free tier (first entry) |
+   | `meetrudi/arena/sim-ovh` | `{"api_key": "..."}` from a second arena OVH project | tester and judge fallback |
+
+   Separate keys only separate quota when they come from separate accounts: Groq limits per
+   **organisation**, OVH per **project**. `meetrudi-engine-turn` reads the two `rudi-*` keys
+   through the existing `meetrudi-lambda-runner` grant on `meetrudi*` — no change to that role.

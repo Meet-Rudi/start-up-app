@@ -1,0 +1,58 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:eu-central-1:949753869755:*"
+    },
+    {
+      "Sid": "ArenaBucketReadWrite",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+      "Resource": [
+        "arn:aws:s3:::meetrudi-arena-data-949753869755",
+        "arn:aws:s3:::meetrudi-arena-data-949753869755/*"
+      ]
+    },
+    {
+      "Sid": "ArenaBucketDeleteEphemeral",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": [
+        "arn:aws:s3:::meetrudi-arena-data-949753869755/sessions/*",
+        "arn:aws:s3:::meetrudi-arena-data-949753869755/runtime/*",
+        "arn:aws:s3:::meetrudi-arena-data-949753869755/users/*",
+        "arn:aws:s3:::meetrudi-arena-data-949753869755/batches/*/checkpoint.json"
+      ]
+    },
+    {
+      "Sid": "ArenaQueues",
+      "Effect": "Allow",
+      "Action": ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ChangeMessageVisibility"],
+      "Resource": "arn:aws:sqs:eu-central-1:949753869755:meetrudi-arena-*"
+    },
+    {
+      "Sid": "InvokeRudiEngineAndArena",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": [
+        "arn:aws:lambda:eu-central-1:949753869755:function:meetrudi-engine-turn",
+        "arn:aws:lambda:eu-central-1:949753869755:function:meetrudi-arena-*"
+      ]
+    },
+    {
+      "Sid": "ArenaSecretsOnly",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/arena/bootstrap-*",
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/arena/sim-*",
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/arena/eu-jev-*",
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/arena/mistral-*",
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi-groq-tester_and_judge-*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "account_limit": 10,
+  "live_reserve": 6,
+  "execs_per_case": 2,
+  "max_parallel": 2,
+  "per_batch_parallel": 2,
+  "launch_rate": 6,
+  "think_time": 2,
+  "max_turns_cap": 40,
+  "turn_timeout": 60,
+  "retries": 2,
+  "backoff": 4,
+  "daily_quota": 500,
+  "part_budget": 450000,
+  "breaker": true,
+  "breaker_min": 10,
+  "quiet_only": false,
+  "tester_temp": 0.7,
+  "tester_max_tokens": 400,
+  "state": "running"
+}

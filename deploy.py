@@ -9,6 +9,8 @@ Components:
     base      -> stack meetrudi-base    : shared S3 data bucket + meetrudi-lambda-runner role
     ask-ai    -> stack meetrudi-ask-ai  : meetrudi-ask-ai Lambda + Function URL
                                           (also seeds prompt/context/config files to S3)
+    training-arena -> stack meetrudi-training-arena : the arena's bucket, queues and five functions
+                                          (needs `whatsapp` deployed first, for meetrudi-engine-turn)
 
 Runs `sam build` (where needed) + `sam deploy` with every flag pre-filled. No manual steps.
 Deploy `base` once before `ask-ai`.
@@ -72,6 +74,24 @@ COMPONENTS = {
             "TesterSupportEmail": {"from_config": "tester_support_email"},
             "TesterWaNumber": {"from_config": "tester_wa_number"},
             "TesterWaJoinPhrase": {"from_config": "tester_wa_join_phrase"},
+            # The git commit, so the Training Arena can say which Rudi release answered.
+            "Release": {"from_git": True},
+        },
+    },
+    # The Training Arena (docs/training-arena.md). Its own stack, bucket and role. Rudi's replies
+    # come from meetrudi-engine-turn in the whatsapp stack, so deploy `whatsapp` first. Seeds only
+    # defaults/ and prompts/ into the ARENA bucket, so a super-admin's console edits survive.
+    "training-arena": {
+        "stack": "meetrudi-training-arena",
+        "template": "services/training-arena/template.yaml",
+        "build": True,
+        "prebuild": "services/training-arena/build_layer.py",   # PyYAML for Lambda's platform
+        "seed_dir": "services/training-arena/seed",
+        "seed_bucket_from": "meetrudi-training-arena",
+        "seed_bucket_output": "ArenaBucketName",
+        "params": {
+            "Release": {"from_git": True},
+            "PagesOrigin": {"from_config": "tester_console_origin"},
         },
     },
     # Parallel probe for the PRODUCTION WhatsApp sender. Its own stack on purpose: verifying the
@@ -196,6 +216,15 @@ def _build(comp):
     return os.path.join(build_dir, "template.yaml")
 
 
+def _git_release():
+    """Short commit of the working tree, with -dirty when it has uncommitted changes."""
+    head = (_capture(["git", "rev-parse", "--short", "HEAD"]).stdout or "").strip()
+    if not head:
+        return ""
+    dirty = (_capture(["git", "status", "--porcelain", "--untracked-files=no"]).stdout or "").strip()
+    return head + ("-dirty" if dirty else "")
+
+
 def _parameter_overrides(comp):
     """Resolve this component's CloudFormation parameters.
 
@@ -217,6 +246,11 @@ def _parameter_overrides(comp):
             if value in ("", "None"):
                 print("   (%s: %s has no %s output yet — using the template default)"
                       % (key, stack, output))
+                continue
+        elif source.get("from_git"):
+            value = _git_release()
+            if not value:
+                print("   (%s: no git commit found — using the template default)" % key)
                 continue
         else:
             value = str(cfg.get(source["from_config"], "")).strip()
@@ -264,7 +298,7 @@ def _deploy(comp, template_file):
 def _seed(comp):
     if "seed_dir" not in comp:
         return None
-    bucket = _stack_output(comp["seed_bucket_from"], "DataBucketName")
+    bucket = _stack_output(comp["seed_bucket_from"], comp.get("seed_bucket_output", "DataBucketName"))
     if not bucket:
         print("!! could not resolve data bucket from %s; is it deployed? Skipping seed."
               % comp["seed_bucket_from"])
@@ -361,6 +395,17 @@ def main():
         print(">> Reads the same prompts rudi-chat/whatsapp seed; deploy one of those first if")
         print("   prompts/rudi_guardrails.md is not in the bucket yet.")
         print(">> Calls land in s3://<data-bucket>/voice-bench/calls/<call-id>/ .")
+    elif name == "training-arena":
+        print("Arena API   :", _stack_output("meetrudi-training-arena", "ApiUrl"))
+        print("Arena bucket:", bucket or _stack_output("meetrudi-training-arena", "ArenaBucketName"))
+        print(">> Put the Arena API URL into site/training-arena/config.js (API_BASE), then push to main —")
+        print("   GitHub Pages publishes https://meet-rudi.github.io/start-up-app/training-arena/enter_arena.html")
+        print(">> Needs (once, console-only — see infra/iam/README.md §8):")
+        print("     role meetrudi-arena-runner + PassRole for rudi-deployer (deploy fails without them)")
+        print("     secret meetrudi/arena/bootstrap      {\"username\":\"...\",\"password\":\"...\"}  (sign-in 503s without it)")
+        print("     secrets meetrudi/arena/rudi-groq, meetrudi/arena/rudi-ovh   (Rudi's turns fail without them)")
+        print("     secret meetrudi/arena/sim-ovh      (tester/judge fallback after the Groq free tier)")
+        print(">> Lambda concurrency: the account allows 10 in total; request 1000 (docs/training-arena.md §7.3).")
     elif name == "registration":
         url = _stack_output("meetrudi-registration", "ConsentIntakeUrl")
         print("Consent intake URL:", url)
