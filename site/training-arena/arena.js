@@ -154,10 +154,22 @@
     }).join("");
   }
   var QUIET_NOTE = "It waits for quiet hours and starts at 21:30 (Europe/Brussels). “Start now” on its page lifts the wait.";
+  var FREE_NOTE = "Free slow mode: every model call waits for its free tier — about one Rudi reply a minute and roughly 40 a day. “Speed up” on its page lets paid models take over.";
+  // What free slow means for this batch: ~1 Rudi reply a minute, ~40 a day (Groq's free tier for Rudi).
+  function freeHint(b) {
+    var n = (b && b.validation && b.validation.rudi_replies) || 0;
+    if (!n) return "";
+    return ". This batch: about " + fmt(n) + " Rudi replies — at least " + (n < 60 ? n + " min" : Math.round(n / 6) / 10 + " h") +
+      (n > 40 ? ", over about " + Math.ceil(n / 40) + " days" : "");
+  }
+  var FREE_LABEL = "<b>Free slow mode</b> — pace every model call to stay within the free tiers: about one Rudi reply a minute, roughly 40 a day, one case at a time (chat channel)";
   // Start now / pause / resume / cancel, for whoever may use them (the API re-checks).
   function controls(b, cancelLabel) {
     var mine = b.by === sess.username || isSA, dis = mine ? "" : " disabled title='Only the submitter or a super-admin'", id = esc(b.id), out = "";
     if (LIVE && b.quiet_only && /^(launching|queued|running)$/.test(b.status)) out += '<button class="btn sm pink" data-act="start-now" data-id="' + id + '"' + dis + ' title="Launched for quiet hours only (21:30–06:30, Europe/Brussels)">Start now</button>';
+    if (LIVE && /^(launching|queued|running|paused)$/.test(b.status)) out += b.free_slow
+      ? '<button class="btn sm ghost" data-act="free-slow-off" data-id="' + id + '"' + dis + ' title="Leave free slow mode: paid models take over whenever a free tier is busy">Speed up</button>'
+      : '<button class="btn sm ghost" data-act="free-slow-on" data-id="' + id + '"' + dis + ' title="Pace the rest of this batch to the free tiers">Free slow</button>';
     if (/^(running|paused)$/.test(b.status)) out += '<button class="btn sm ghost" data-act="' + (b.status === "paused" ? "resume" : "pause") + '" data-id="' + id + '"' + dis + ">" + (b.status === "paused" ? "Resume" : "Pause") + "</button>";
     if (/^(queued|running|paused|draft|invalid|ready)$/.test(b.status)) out += '<button class="btn sm danger" data-act="cancel" data-id="' + id + '"' + dis + ">" + cancelLabel + "</button>";
     return out;
@@ -419,6 +431,13 @@
           audit("batch.cancel", id); toast("Batch cancelled"); route();
         } }]);
       return;
+    }
+    if (act === "free-slow-on" || act === "free-slow-off") {
+      var on = act === "free-slow-on";
+      return API.call("POST", "/batches/" + enc(id) + "/free_slow", { on: on }).then(function () {
+        toast(on ? "Free slow mode on for " + id : "Speeding up " + id, on ? FREE_NOTE : "Paid models take over when a free tier is busy. A case waiting for a free tier picks this up within 3 minutes (10 if it was waiting for the next day).");
+        route();
+      }, function (e) { fail(e, "Free slow mode was not changed"); });
     }
     if (act === "start-now") {
       return API.call("POST", "/batches/" + enc(id) + "/quiet", { quiet_only: false }).then(function () {
@@ -869,15 +888,15 @@
   }
   // Upload (or point at the inbox), create the batch, then wait for the API's own check.
   function validateLive() {
-    var f = sub.file, gen = sub.gen, name = $("bname").value.trim(), quiet = $("quiet").checked;
+    var f = sub.file, gen = sub.gen, name = $("bname").value.trim(), quiet = $("quiet").checked, freeSlow = $("freeslow").checked;
     if (!f.s3 && !f.blob) { toast("Choose the file again", "This browser could not keep it for the upload."); return; }
     sub.report = null; sub.batchId = null; sub.busy = f.s3 ? "Reading the file from S3…" : "Uploading…"; renderSubmit();
-    var created = f.s3 ? API.call("POST", "/batches", { s3_uri: f.s3, name: name, quiet_only: quiet })
+    var created = f.s3 ? API.call("POST", "/batches", { s3_uri: f.s3, name: name, quiet_only: quiet, free_slow: freeSlow })
       : API.call("POST", "/uploads", { filename: f.name, size: f.size }).then(function (u) {
         // A type-less copy, so the PUT carries no Content-Type header (the signed URL expects none).
         return fetch(u.url, { method: "PUT", body: f.blob.slice(0, f.blob.size) }).then(function (res) {
           if (!res.ok) { var e = new Error("upload"); e.detail = "The upload did not go through (HTTP " + res.status + "). Try again."; throw e; }
-          return API.call("POST", "/batches", { key: u.key, name: name, quiet_only: quiet });
+          return API.call("POST", "/batches", { key: u.key, name: name, quiet_only: quiet, free_slow: freeSlow });
         }, function () { var e = new Error("upload"); e.detail = "The upload did not go through. Check your connection and try again."; throw e; });
       });
     created.then(function (r) {
@@ -963,15 +982,15 @@
   $("synthetic").addEventListener("change", renderSubmit);
   function resetSubmit() {
     sub = { file: null, report: null, batchId: null, busy: "", gen: sub.gen + 1 };
-    $("bname").value = ""; $("synthetic").checked = false; $("quiet").checked = false; $("filepill").hidden = true; $("file").value = "";
+    $("bname").value = ""; $("synthetic").checked = false; $("quiet").checked = false; $("freeslow").checked = false; $("filepill").hidden = true; $("file").value = "";
   }
   $("launch").addEventListener("click", function () {
     if (LIVE) {
-      var bid = sub.batchId, quiet = $("quiet").checked;
+      var bid = sub.batchId, quiet = $("quiet").checked, freeSlow = $("freeslow").checked;
       $("launch").disabled = true;
-      API.call("POST", "/batches/" + enc(bid) + "/launch", { synthetic: true, quiet_only: quiet }).then(function () {
+      API.call("POST", "/batches/" + enc(bid) + "/launch", { synthetic: true, quiet_only: quiet, free_slow: freeSlow }).then(function () {
         resetSubmit();
-        toast("Batch " + bid + " launched", quiet ? QUIET_NOTE : "Cases start as slots free up.");
+        toast("Batch " + bid + " launched", quiet ? QUIET_NOTE : freeSlow ? FREE_NOTE : "Cases start as slots free up.");
         location.hash = "#batches/" + bid;
       }, function (e) { renderSubmit(); fail(e, "The batch was not launched"); });
       return;
@@ -1037,7 +1056,7 @@
     var stem = b.stem || b.id + (b.name ? "__" + b.name : ""), running = isActive(b), pending = PENDING.test(b.status), mine = b.by === sess.username || isSA;
     var dis = mine ? "" : " disabled title='Only the submitter or a super-admin'";
     $("bd-crumb").textContent = b.id;
-    $("bd-title").innerHTML = esc(b.name || "(unnamed batch)") + ' <span class="mono" style="font-size:.9rem;font-weight:700;color:var(--muted)">' + esc(b.id) + "</span> " + chip(b.status, STATUS_LABEL[b.status]);
+    $("bd-title").innerHTML = esc(b.name || "(unnamed batch)") + ' <span class="mono" style="font-size:.9rem;font-weight:700;color:var(--muted)">' + esc(b.id) + "</span> " + chip(b.status, STATUS_LABEL[b.status]) + (b.free_slow ? ' <span class="tag">free slow</span>' : "");
     $("bd-desc").textContent = b.desc || "";
     var bad = b.c.failed + b.c.violation + b.c.error + (LIVE ? b.c.over_budget : 0);
     $("bd-acts").innerHTML = running || pending
@@ -1055,7 +1074,8 @@
       ["Languages", esc(Object.keys(b.locales).filter(function (k) { return b.locales[k]; }).map(function (k) { return k + " " + b.locales[k]; }).join(" · ")) || "—"],
       ["Tags", b.tags.map(function (t) { return '<span class="tag">' + esc(t) + "</span>"; }).join(" ") || "—"],
       ["Rudi release", LIVE ? (b.rudi_release ? '<span class="mono">whatsapp@' + esc(b.rudi_release) + "</span> · chat channel" : "recorded when the first case runs") : '<span class="mono">whatsapp@0154d7e</span> · chat channel'],
-      ["Pace at launch", D.settings.max_parallel + " in parallel · " + D.settings.launch_rate + "/min · think " + D.settings.think_time + " s"]];
+      ["Pace at launch", D.settings.max_parallel + " in parallel · " + D.settings.launch_rate + "/min · think " + D.settings.think_time + " s"],
+      ["Pacing", b.free_slow ? "<b>Free slow</b> — every model call waits for its free tier; one case at a time, about one Rudi reply a minute" : "normal — paid models take over when a free tier is busy"]];
     var ran = casesOf(b).filter(function (c) { return c.cost > 0; }).length, avg = ran ? b.spent / ran : 0;   // cases that actually ran
     kv.push(["Spend", spendHtml(b) + '<div class="hint">' + rolesLine(b.roles) + "</div>"]);
     kv.push(["Per case", "average " + eur(avg, 4) + (running && ran ? " · projected batch total ≈ " + eur(avg * b.total) : "") +
@@ -1116,12 +1136,13 @@
     }
     var b = batchById(id);
     modal("Launch " + id + "?", '<label class="checkline"><input type="checkbox" id="lc-syn"> <span>I confirm this file contains <b>synthetic data only</b> — no real people, numbers or health records</span></label>' +
-      '<label class="checkline"><input type="checkbox" id="lc-quiet"' + (b && b.quiet_only ? " checked" : "") + "> <span>Run only during quiet hours (21:30–06:30, Europe/Brussels)</span></label>",
+      '<label class="checkline"><input type="checkbox" id="lc-quiet"' + (b && b.quiet_only ? " checked" : "") + "> <span>Run only during quiet hours (21:30–06:30, Europe/Brussels)</span></label>" +
+      '<label class="checkline"><input type="checkbox" id="lc-free"' + (b && b.free_slow ? " checked" : "") + "> <span>" + FREE_LABEL + freeHint(b) + "</span></label>",
       [{ label: "Not now" }, { label: "Launch batch", cls: "pink", on: function () {
         if (!$("lc-syn").checked) { toast("Tick the synthetic-data confirmation first."); return false; }
-        var quiet = $("lc-quiet").checked;
-        API.call("POST", path + "/launch", { synthetic: true, quiet_only: quiet }).then(function () {
-          toast("Batch " + id + " launched", quiet ? QUIET_NOTE : "Cases start as slots free up."); route();
+        var quiet = $("lc-quiet").checked, freeSlow = $("lc-free").checked;
+        API.call("POST", path + "/launch", { synthetic: true, quiet_only: quiet, free_slow: freeSlow }).then(function () {
+          toast("Batch " + id + " launched", quiet ? QUIET_NOTE : freeSlow ? FREE_NOTE : "Cases start as slots free up."); route();
         }, function (er) { fail(er, "The batch was not launched"); });
       } }]);
   });

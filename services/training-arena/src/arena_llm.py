@@ -141,11 +141,13 @@ class LimitTracker:
         return m, d
 
     def check(self, entry, tokens):
-        """(ok, reason, retry_at). `tokens` = prompt estimate + the reply ceiling."""
+        """(ok, reason, retry_at). `tokens` = prompt estimate + the reply ceiling. When several
+        windows are full, retry_at is the LAST of their resets — the moment the call would fit."""
         now = self.clock()
         state = self._load(entry)
+        fails = []
         if (state.get("blocked_until") or 0) > now:
-            return False, "cooling down after a 429", state["blocked_until"]
+            fails.append(("cooling down after a 429", state["blocked_until"]))
         m, d = self._windows(state, now)
         lim = entry.get("limits") or {}
         s = self.safety
@@ -156,13 +158,16 @@ class LimitTracker:
         for name, would, reset in checks:
             cap = lim.get(name)
             if cap and would > cap * s:
-                return False, "would pass its %s limit (%d of %d)" % (name, would, cap), reset
+                fails.append(("would pass its %s limit (%d of %d)" % (name, would, cap), reset))
         for name, w in (state.get("headers") or {}).items():
             if (w.get("reset_at") or 0) <= now:
                 continue
             need = tokens if name == "tokens" else 1
             if w["remaining"] < need or (name == "tokens" and need > w["remaining"] * s):
-                return False, "provider reports %s remaining %s" % (name, w["remaining"]), w["reset_at"]
+                fails.append(("provider reports %s remaining %s" % (name, w["remaining"]), w["reset_at"]))
+        if fails:
+            reason, at = max(fails, key=lambda f: f[1])
+            return False, reason, at
         return True, None, None
 
     def record(self, entry, tokens, headers=None):
@@ -173,7 +178,7 @@ class LimitTracker:
         m["tokens"] += int(tokens or 0)
         d["requests"] += 1
         d["tokens"] += int(tokens or 0)
-        state.update({"minute": m, "day": d, "updated": now})
+        state.update({"minute": m, "day": d, "updated": now, "strikes": 0})
         hw = header_windows(headers, now)
         if hw:
             state["headers"] = dict(state.get("headers") or {}, **hw)
@@ -189,6 +194,7 @@ class LimitTracker:
             resets = [w["reset_at"] - now for w in header_windows(headers, now).values() if w["remaining"] <= 0]
             wait = min(resets) if resets else 30.0
         state["blocked_until"] = now + max(1.0, wait)
+        state["strikes"] = int(state.get("strikes") or 0) + 1         # 429s in a row, for backing off
         hw = header_windows(headers, now)
         if hw:
             state["headers"] = dict(state.get("headers") or {}, **hw)
@@ -279,19 +285,30 @@ class Cascade:
         self.tracker, self.secrets = tracker, secrets
         self.transport = transport or HttpTransport()
         self.clock = clock
+        self.prefer_free = False           # free slow mode: a free entry at its limit is waited for
 
     def chat(self, messages, json_mode=True, max_tokens=500, temperature=None, timeout=DEFAULT_TIMEOUT, accept=None):
         """`accept(text)` returns None for a usable reply, or a short reason — naming the reply's
-        shape, never its content — and the call moves on to the next entry, as on an error."""
+        shape, never its content — and the call moves on to the next entry, as on an error.
+
+        With `prefer_free`, a free entry held back by its limits is not replaced by a paid one: the
+        call raises Busy for the moment it frees up. A free entry that fails for any other reason
+        (an error, an unusable reply) still hands over to the paid entries."""
         prompt = sum(len(m.get("content") or "") for m in messages)
         need = est_tokens(prompt) + int(max_tokens or 0)
-        attempts, skipped, retry_at, discarded = [], [], [], 0.0
+        attempts, skipped, retry_at, discarded, free_waiting = [], [], [], 0.0, []
         for e in self.entries:
+            free = arena_costs.is_free(e)
+            if self.prefer_free and free_waiting and not free:
+                skipped.append({"entry": e.get("name"), "reason": "free slow mode: waiting for the free tier"})
+                continue
             ok, reason, free_at = self.tracker.check(e, need)
             if not ok:
                 skipped.append({"entry": e.get("name"), "reason": reason})
                 if free_at:
                     retry_at.append(free_at)
+                    if free:
+                        free_waiting.append(free_at)
                 continue
             payload = {"model": e["model"], "messages": messages}
             if temperature is not None:
@@ -315,6 +332,8 @@ class Cascade:
                 state_until = self.tracker._load(e).get("blocked_until")
                 if state_until:
                     retry_at.append(state_until)
+                    if free:
+                        free_waiting.append(state_until)
                 continue
             except LLMError as err:
                 attempts.append({"entry": e.get("name"), "outcome": "error", "detail": str(err)[:160]})
@@ -337,6 +356,8 @@ class Cascade:
                 continue
             return Result(text, e, tin, tout, estimated, arena_costs.call_cost(e, tin, tout) + discarded,
                           attempts, skipped, int((self.clock() - started) * 1000))
+        if self.prefer_free and free_waiting:
+            raise Busy(min(free_waiting), attempts, skipped)
         # Only limits (and entries whose key is not configured yet) stood in the way: that is a
         # matter of waiting for a window, not a failure. A missing key on its own is a failure.
         if not any(a["outcome"] == "error" for a in attempts) and (retry_at or not attempts):

@@ -313,6 +313,96 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(r["counts"]["retries"], 2)
 
 
+def free_rudi(h, free_slow=True):
+    """Rudi's Groq entry on the free tier (8K tokens a minute), and the batch in free slow mode."""
+    cas = fakes.cascades()
+    cas["rudi"][0].update({"in": 0.0, "out": 0.0, "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}})
+    h.store.put_cascades(cas)
+    h.store.put_manifest({"id": BID, "total": 1, "status": "running", "by": "anke", "free_slow": free_slow})
+
+
+def run_to_end(h, limit=10):
+    """Run, and after every park let the clock jump to the moment the case asked to come back."""
+    out = None
+    for _ in range(limit):
+        out = h.run()
+        if out != "parked":
+            return out
+        h.clock.t += h.requeued[-1]["delay_s"]
+    return out
+
+
+class FreeSlowTests(unittest.TestCase):
+    def test_rudi_is_paced_to_his_free_minute_by_parking_not_sleeping(self):
+        h = Harness(SCRIPTED)
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")                     # a 3rd reply would pass 85% of 8K this minute
+        self.assertEqual(h.store.checkpoint(BID, 1)["turn"], 2)
+        self.assertTrue(0 < h.requeued[0]["delay_s"] <= 60)
+        self.assertEqual(h.slept, [])                           # nothing waited inside the Lambda
+        self.assertEqual(run_to_end(h), "finished")
+        r = h.record["result"]
+        self.assertEqual((r["outcome"], r["counts"]["user_turns"]), ("completed", 4))
+        self.assertEqual(r["cost"]["by_role"]["rudi"], 0.0)
+        self.assertGreaterEqual(r["pacing"]["parked"], 1)
+        turns = [c for c in h.engine.calls if c.get("op") == "turn"]
+        self.assertTrue(all([e["name"] for e in c["cascade"]] == ["groq-gpt-oss-120b"] for c in turns))   # free entry only
+
+    def test_a_429_on_rudis_free_tier_parks_the_turn_and_undoes_it(self):
+        h = Harness(SCRIPTED, engine=FakeEngine(replies=["Hello!", "!rate_limited"]))
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")
+        cp = h.store.checkpoint(BID, 1)
+        self.assertEqual((cp["turn"], cp["errors"]), (1, []))  # turn 2 undone — pacing, not an error
+        self.assertEqual(sum(1 for e in cp["transcript"] if e["from"] == "user"), 1)
+        self.assertEqual(h.requeued[0]["delay_s"], runner.RATE_LIMIT_PARK_S)
+        self.assertEqual(h.store.runtime("breaker", {}), {})     # a paced 429 does not trip the breaker
+        self.assertEqual(run_to_end(h), "finished")
+        self.assertEqual(h.record["result"]["counts"]["user_turns"], 4)
+
+    def test_repeated_429s_back_off(self):
+        h = Harness(SCRIPTED, engine=FakeEngine(replies=["Hello!", "!rate_limited", "!rate_limited"]))
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")
+        h.clock.t += h.requeued[-1]["delay_s"]
+        self.assertEqual(h.run(), "parked")
+        self.assertEqual([m["delay_s"] for m in h.requeued], [30, 60])
+        self.assertEqual(run_to_end(h), "finished")
+
+    def test_groq_saying_the_day_is_used_up_parks_until_the_daily_reset(self):
+        day = {"ok": False, "error": "rate_limited", "detail": "HTTP 429: Rate limit reached on tokens per day (TPD): Limit 200000"}
+        h = Harness(SCRIPTED, engine=FakeEngine(replies=["Hello!", day]))
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")
+        self.assertEqual(h.requeued[0]["delay_s"], runner.PARK_LONG_S)   # long hops, the lease stays alive
+        state = h.store.b.get_json(arena_llm.LimitTracker.key(fakes.cascades()["rudi"][0]))
+        self.assertGreater(state["blocked_until"] - h.clock.t, 15 * 60)  # the dispatcher now holds the batch
+
+    def test_switching_free_slow_off_mid_run_lets_paid_entries_take_over(self):
+        h = Harness(SCRIPTED)
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")
+        free_rudi(h, free_slow=False)
+        self.assertEqual(h.run(), "finished")                   # no waiting for the next minute
+        last = [c for c in h.engine.calls if c.get("op") == "turn"][-1]
+        self.assertEqual(len(last["cascade"]), 2)               # the whole cascade again
+
+    def test_the_judge_waits_for_its_free_tier_and_rudis_reply_is_kept(self):
+        t = FakeTransport([("429", {"retry-after": "40"}), judged(success_when=False, abort_when=False),
+                           said("still here"), judged(success_when=True, abort_when=False)])
+        h = Harness(INTENT, transport=t)
+        free_rudi(h)
+        self.assertEqual(h.run(), "parked")
+        self.assertEqual(len(t.sent), 1)                        # the paid OVH judge was not asked
+        cp = h.store.checkpoint(BID, 1)
+        self.assertEqual(cp["pending_judge"]["turn"], 1)       # Rudi's reply is in, judging comes back later
+        self.assertEqual(sum(1 for e in cp["transcript"] if e["from"] == "rudi"), 2)
+        self.assertTrue(35 <= h.requeued[0]["delay_s"] <= 41)
+        self.assertEqual(run_to_end(h), "finished")
+        self.assertEqual(h.record["result"]["outcome"], "success")
+        self.assertEqual(len([c for c in h.engine.calls if c.get("op") == "turn"]), 2)   # no Rudi turn repeated
+
+
 class ControlTests(unittest.TestCase):
     def test_near_the_timeout_the_case_is_requeued(self):
         h = Harness(SCRIPTED, remaining=60_000)

@@ -11,6 +11,13 @@ and the case state is checkpointed to S3 after every step. So:
     re-runs only the step that was in flight;
   - with under 90 s of its 15 minutes left, the runner re-queues the case and exits.
 
+FREE SLOW MODE (a batch flag, switchable while the batch runs; chat channel): every model call
+waits for its free tier instead of falling over to a paid entry because of a limit. Waiting is
+never done asleep in the Lambda — that would cost what it saves — the case is PARKED: checkpointed,
+put back on the queue with a delay, and the Lambda exits. Rudi's turns go to his free entries only
+and are paced by the shared LimitTracker; a 429 parks the turn and undoes it. A free entry that
+fails for another reason (an error, a refusal) still hands over to a paid one.
+
 Rudi's replies come from meetrudi-engine-turn (the deployed Rudi engine) on the arena's own Rudi
 cascade. The tester and judge run on the arena's own cascades (arena_llm, preventive failover).
 
@@ -22,7 +29,10 @@ Logs: IDs, step names, timings and costs. Never message text (CLAUDE.md §5).
 """
 
 import os
+import re
+import copy
 import json
+import math
 import time
 import datetime
 
@@ -43,12 +53,24 @@ MIN_REMAINING_MS = 90_000
 RUDI_PROMPT_TOKENS = 3500          # Rudi's system prompt, before history (estimate for budget checks)
 BUSY_WAIT_MAX_S = 70               # a free tier's per-minute window: wait it out within the step
 BREAKER_STREAK = 3
+PARK_MIN_S = 3                     # free slow: shorter waits are slept, longer ones parked
+PARK_MAX_S = 180                   # one park at most; also how soon "speed up" reaches a parked case
+PARK_LONG_S = 600                  # ... when waiting for tomorrow's allowance (under the 20 min lease)
+RATE_LIMIT_PARK_S = 30             # free slow: after Rudi's free tier answered 429
 
 TERMINAL_ERRORS = ("engine_error", "tester_error", "judge_error", "timeout", "runner_lost")
 
 
 class EngineTimeout(Exception):
     pass
+
+
+class Park(Exception):
+    """Free slow mode: come back at `until` instead of waiting in the Lambda."""
+
+    def __init__(self, until, why):
+        super().__init__(why)
+        self.until, self.why = until, why
 
 
 class StepFailed(Exception):
@@ -84,6 +106,8 @@ class CaseRun:
         self.d, self.msg = deps, msg
         self.bid, self.seq, self.attempt = msg["batch"], int(msg["seq"]), int(msg.get("attempt") or 1)
         self.store = deps.store
+        self.tracker = getattr(deps, "tracker", None) or arena_llm.LimitTracker(deps.store.b, clock=deps.clock)
+        self.m_now = {}
 
     # ------------------------------------------------------------------ entry
     def run(self):
@@ -100,6 +124,7 @@ class CaseRun:
         self.cp = st.checkpoint(self.bid, self.seq) or self._new_checkpoint()
         self.spend = arena_costs.Spend(self.cp["spend"])
         self._build_clients()
+        self.m_now = self.manifest or {}
         while self.cp["stop"] is None:
             if self.d.remaining_ms() < MIN_REMAINING_MS:
                 self._save()
@@ -107,13 +132,32 @@ class CaseRun:
                 log("case.continue_later", batch=self.bid, seq=self.seq, turn=self.cp["turn"])
                 return "requeued"
             self._heartbeat()
+            self.m_now = st.manifest(self.bid) or {}                  # cancel and free slow, as of now
             if self._cancelled():
                 self._stop("cancelled")
                 break
-            self._step()
+            self.tester.prefer_free = self.judge.prefer_free = self._free_slow()
+            try:
+                self._step()
+            except Park as p:
+                return self._park(p)
             self._save()
-        self._finish()
+        try:
+            self._finish()
+        except Park as p:
+            return self._park(p)
         return "finished"
+
+    def _park(self, p):
+        wait = p.until - self.d.clock()
+        delay = max(1, min(PARK_LONG_S if wait > 15 * 60 else PARK_MAX_S, int(math.ceil(wait))))
+        pacing = self.cp.setdefault("pacing", {"parked": 0, "waited_s": 0})
+        pacing["parked"] += 1
+        pacing["waited_s"] += delay
+        self._save()
+        self.d.requeue({"batch": self.bid, "seq": self.seq, "attempt": self.attempt, "continue": True, "delay_s": delay})
+        log("case.parked", batch=self.bid, seq=self.seq, turn=self.cp["turn"], wait_s=delay, why=p.why)
+        return "parked"
 
     # ------------------------------------------------------------------ setup
     def _new_checkpoint(self):
@@ -135,7 +179,7 @@ class CaseRun:
     def _build_clients(self):
         cas = self.cp["cascades"]
         self.tester = self.d.cascade_for("tester", cas.get("tester"))
-        judge = self.d.cascade_for("judge", cas.get("judge"))
+        self.judge = judge = self.d.cascade_for("judge", cas.get("judge"))
         prompts_ok = True
         try:
             judge_prompt = self.store.prompt("arena_judge_prompt.md")
@@ -157,8 +201,12 @@ class CaseRun:
             self.store.put_lease(lease)
 
     def _cancelled(self):
-        m = self.store.manifest(self.bid) or {}
-        return m.get("status") == "cancelled" or self.store.engine_settings().get("state") == "killed"
+        return self.m_now.get("status") == "cancelled" or self.store.engine_settings().get("state") == "killed"
+
+    def _free_slow(self):
+        """Free slow mode, read from the batch at every step so it can be switched mid-run. So far
+        only the chat channel exists, and the mode applies to it."""
+        return bool(self.m_now.get("free_slow")) and (self.spec.get("channel") or "chat") == "chat"
 
     def _stop(self, reason, at_turn=None):
         if self.cp["stop"] is None:
@@ -208,6 +256,8 @@ class CaseRun:
         cp = self.cp
         if not cp["opened"]:
             return self._open()
+        if cp.get("pending_judge"):
+            return self._judge_step()
         if cp["pending_user"] is None:
             return self._next_user()
         return self._rudi_turn()
@@ -271,12 +321,35 @@ class CaseRun:
             meta["failover"] = passed
         cp["pending_user"] = {"text": msg["text"], "meta": meta}
 
+    def _rudi_need(self):
+        """Tokens Rudi's next call will take: his last call's, grown a little, or an estimate."""
+        last = next((e["meta"]["tokens"] for e in reversed(self.cp["transcript"])
+                     if e.get("from") == "rudi" and (e.get("meta") or {}).get("tokens")), None)
+        if last:
+            return int((last["in"] + last["out"]) * 1.05) + est_tokens(len(self.cp["pending_user"]["text"]))
+        return RUDI_PROMPT_TOKENS + est_tokens(self._history_chars() + len(self.cp["pending_user"]["text"])) + 400
+
+    def _free_rudi(self):
+        """Free slow: Rudi's free entries, once one of them has room for this turn — or Park."""
+        free = [e for e in arena_costs.enabled(self.cp["cascades"].get("rudi")) if arena_costs.is_free(e)]
+        if not free:
+            return []                                    # no free entry to wait for: Rudi runs as usual
+        need, waits = self._rudi_need(), []
+        for e in free:
+            ok, _reason, at = self.tracker.check(e, need)
+            if ok:
+                return free
+            waits.append(at or self.d.clock() + RATE_LIMIT_PARK_S)
+        raise Park(min(waits), "Rudi's free tier is at its limit")
+
     def _rudi_turn(self):
         cp, spec = self.cp, self.spec
         pend = cp["pending_user"]
         infra_turn = cp["infra"]["per_turn_eur"]
         if not self._affordable("rudi", RUDI_PROMPT_TOKENS + est_tokens(self._history_chars() + len(pend["text"])), 400, infra_turn):
             return self._stop("case_budget")
+        free_rudi = self._free_rudi() if self._free_slow() else []
+        snap = copy.deepcopy(cp) if free_rudi else None          # a parked turn is undone and re-run later
         if cp["turn"] > 0 and float(cp["settings"].get("think_time") or 0) > 0:
             self.d.sleep(float(cp["settings"]["think_time"]))
         if pend.get("gap_s"):
@@ -293,15 +366,19 @@ class CaseRun:
             cp["attempts"] += 1
         payload = {"op": "turn", "channel": "chat", "state": cp["rudi_state"], "vault": cp["vault"], "text": pend["text"],
                    "locale": spec["locale"], "personality": (spec.get("rudi") or {}).get("personality") or "",
-                   "now": sim, "cascade": _rudi_engine_cascade(cp["cascades"].get("rudi")),
+                   "now": sim, "cascade": _rudi_engine_cascade(free_rudi or cp["cascades"].get("rudi")),
                    "trace": {"case": cp["case_id"], "turn": turn}}
         started = self.d.clock()
         try:
-            out = self._engine(payload, retries=cp["settings"]["retries"])
+            out = self._engine(payload, retries=cp["settings"]["retries"], free_entries=free_rudi)
         except StepFailed as f:
             user_entry["meta"]["unanswered"] = True
             cp["pending_user"] = None
             return self._stop(f.code, turn)
+        except Park:
+            cp.clear()
+            cp.update(snap)
+            raise
         latency = int((self.d.clock() - started) * 1000)
         self.spend.add("infra", infra_turn)
         self._spent_on("AWS (estimate)", infra_turn)
@@ -312,6 +389,8 @@ class CaseRun:
         if usage.get("estimated") or not (tin or tout):
             tin, tout = RUDI_PROMPT_TOKENS + est_tokens(self._history_chars()), est_tokens(out.get("reply") or "")
         cost = arena_costs.call_cost(entry_model, tin, tout) if entry_model else 0.0
+        if entry_model and entry_model.get("limits"):
+            self.tracker.record(entry_model, tin + tout)          # the free window Rudi's turns share
         self.spend.add("rudi", cost)
         self._spent_on(usage.get("model") or info.get("model") or "unknown", cost)
         cp["tokens"][0] += tin
@@ -350,8 +429,15 @@ class CaseRun:
         cp["final_state"] = {k: cp["rudi_state"].get(k) for k in ("phase", "goal", "goal_domain", "commitment", "check_in_at")
                              if cp["rudi_state"].get(k) is not None}
         cp["pending_user"] = None
-        self._judge_turn(turn, pend, rudi_entry, after)
-        self._check_stops(turn, after)
+        # Judging is its own step, so waiting for the judge's free tier never costs Rudi's reply.
+        cp["pending_judge"] = {"turn": turn, "idx": len(cp["transcript"]) - 1, "phase": after,
+                               "pend": {k: pend.get(k) for k in ("expect_phase", "expect")}}
+
+    def _judge_step(self):
+        pj = self.cp["pending_judge"]
+        self._judge_turn(pj["turn"], pj["pend"], self.cp["transcript"][pj["idx"]], pj["phase"])
+        self.cp["pending_judge"] = None
+        self._check_stops(pj["turn"], pj["phase"])
 
     # ------------------------------------------------------------------ judging
     def _check(self, cid, **fields):
@@ -443,15 +529,22 @@ class CaseRun:
     # ------------------------------------------------------------------ calls with retries
     def _call_waiting(self, fn):
         """One call; if every entry is merely at its limit and one frees up soon, wait for it —
-        that is pacing, not an error."""
+        that is pacing, not an error. In free slow mode a longer wait parks the case."""
         try:
             return fn()
         except arena_llm.Busy as b:
             wait = b.retry_at - self.d.clock()
+            if self._free_slow() and wait > PARK_MIN_S:
+                raise Park(b.retry_at, "a free tier is at its limit")
             if wait > BUSY_WAIT_MAX_S:
                 raise
             self.d.sleep(max(0.0, wait) + 0.5)
+        try:
             return fn()
+        except arena_llm.Busy as b:
+            if self._free_slow():
+                raise Park(max(b.retry_at, self.d.clock() + PARK_MIN_S), "a free tier is at its limit")
+            raise
 
     def _with_retries(self, code, fn):
         """Retry a tester / judge step that failed mid-flight, with backoff. The cascade has
@@ -462,6 +555,8 @@ class CaseRun:
         for attempt in range(retries + 1):
             try:
                 return self._call_waiting(fn)
+            except Park:
+                raise
             except arena_tester.TesterError as te:
                 if te.result is not None:
                     self.spend.add("tester", te.result.cost)        # an unusable answer is still paid for
@@ -479,7 +574,9 @@ class CaseRun:
                 self.d.sleep(delay)
         raise StepFailed(code, str(last))
 
-    def _engine(self, payload, retries):
+    def _engine(self, payload, retries, free_entries=()):
+        """`free_entries`: free slow mode, Rudi on his free entries only — a 429 parks the turn
+        (no breaker: in this mode a 429 is pacing, not trouble)."""
         backoff = float(self.cp["settings"].get("backoff") or 4)
         timeout = int(self.spec["limits"].get("turn_timeout_s") or self.cp["settings"].get("turn_timeout") or 60)
         for attempt in range(int(retries) + 1):
@@ -491,6 +588,11 @@ class CaseRun:
                 self.cp["rl_streak"] = 0
                 return out
             code = out.get("error") or "engine_failed"
+            if code == "rate_limited" and free_entries:
+                wait = self._free_429_wait(free_entries, out.get("detail") or "")
+                for e in free_entries:
+                    self.tracker.block(e, {"retry-after": str(int(wait))})
+                raise Park(self.d.clock() + wait, "Rudi's free tier answered 429")
             if code == "rate_limited":
                 self.cp["rl_streak"] += 1
                 if self.cp["settings"].get("breaker") and self.cp["rl_streak"] >= BREAKER_STREAK:
@@ -506,6 +608,18 @@ class CaseRun:
             self._save()
             self.d.sleep(delay)
         raise StepFailed("engine_error", "unreachable")
+
+    def _free_429_wait(self, entries, detail):
+        """How long to park after Rudi's free tier said 429 — the arena cannot see Groq's headers
+        through the engine: until the daily reset when Groq says the day is used up, what Groq
+        says otherwise, and at least 30 s doubling with every 429 in a row (up to 10 min)."""
+        now = self.d.clock()
+        if re.search(r"per day|\((?:tpd|rpd)\)", detail, re.I):
+            return arena_llm._next_utc_midnight(now) - now + 60
+        said = re.search(r"try again in ((?:[0-9.]+(?:ms|h|m|s))+)", detail)
+        strikes = max(int(self.tracker._load(e).get("strikes") or 0) for e in entries)
+        return max(arena_llm.parse_duration(said.group(1)) or 0 if said else 0,
+                   min(PARK_LONG_S, RATE_LIMIT_PARK_S * 2 ** strikes))
 
     # ------------------------------------------------------------------ the end
     def _finish(self):
@@ -624,6 +738,8 @@ class CaseRun:
                   "timing": {"started_at": cp["started_at"], "finished_at": finished, "duration_s": dur,
                              "rudi_latency_ms": {"p50": _median(lat), "max": max(lat) if lat else None}},
                   "final_state": cp["final_state"], "errors": cp["errors"]}
+        if cp.get("pacing"):
+            result["pacing"] = {"mode": "free slow", "parked": cp["pacing"]["parked"], "waited_s": cp["pacing"]["waited_s"]}
         row = {"seq": self.seq, "id": cp["case_id"], "key": spec["key"], "title": spec.get("title") or "", "mode": spec["mode"],
                "loc": spec["locale"], "persona": persona.get("display_name") or "", "outcome": outcome, "stop": reason,
                "turns": user_turns, "dur": dur, "errs": len(cp["errors"]), "cost": total, "cap": self._cap(), "roles": spend,
@@ -671,14 +787,15 @@ def _lambda_deps(context):
                          MessageDeduplicationId=key)
 
     def requeue(msg):
-        sqs.send_message(QueueUrl=CASES_QUEUE_URL, MessageBody=json.dumps(msg))
+        sqs.send_message(QueueUrl=CASES_QUEUE_URL, MessageBody=json.dumps(msg),
+                         DelaySeconds=max(0, min(900, int(msg.get("delay_s") or 0))))
 
     def cascade_for(role, entries):
         return arena_llm.Cascade(role, entries, tracker, secrets)
 
     deps = Deps(store, engine, notify, requeue, cascade_for,
                 remaining_ms=(context.get_remaining_time_in_millis if context else (lambda: 900_000)))
-    deps.secrets = secrets
+    deps.secrets, deps.tracker = secrets, tracker
     return deps
 
 

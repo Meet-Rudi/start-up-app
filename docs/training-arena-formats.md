@@ -271,7 +271,7 @@ a thousand parts.)
 | Block | Contents |
 |---|---|
 | `case` | `id`, `key`, `title`, `mode`, `channel`, `locale` (requested and detected), `persona`, `rudi` (engine, personality), `tags`. |
-| `result` | `outcome`, `stop_reason`, a one-line `verdict`, `checks` (each criterion with `kind`, `result`, `at_turn`, `why`, the `evaluator` that judged it, a `note` when it was escalated or fell back, and the `cost_eur` of judging it), `counts`, `cost` (`eur` = everything incl. AWS overhead, `cap_eur`, `by_role` rudi / tester / judge / infra, `tokens` in / out), `timing`, `final_state` (Rudi's phase, goal, commitment, check-in), `errors`. |
+| `result` | `outcome`, `stop_reason`, a one-line `verdict`, `checks` (each criterion with `kind`, `result`, `at_turn`, `why`, the `evaluator` that judged it, a `note` when it was escalated or fell back, and the `cost_eur` of judging it), `counts`, `cost` (`eur` = everything incl. AWS overhead, `cap_eur`, `by_role` rudi / tester / judge / infra, `tokens` in / out), `timing`, `final_state` (Rudi's phase, goal, commitment, check-in), `errors`, and for a case run in free slow mode `pacing` (`mode`, how often it `parked`, `waited_s` in total). |
 | `transcript` | Every message in order (§4.3). |
 
 **`outcome`** — what the case means:

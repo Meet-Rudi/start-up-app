@@ -16,16 +16,17 @@
     {
       "name": "groq-gpt-oss-120b",
       "model": "openai/gpt-oss-120b",
-      "provider": "Groq · arena Rudi organisation",
+      "provider": "Groq · arena Rudi organisation (free tier)",
       "kind": "groq",
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "key": "meetrudi/arena/rudi-groq",
       "on": true,
-      "in": 0.13,
-      "out": 0.52,
-      "basis": "list",
+      "in": 0.0,
+      "out": 0.0,
+      "basis": "free tier",
       "checked": "2026-10-14",
-      "note": "Groq list price USD 0.15 / 0.60, converted at an assumed 0.86. Set both to 0 if this organisation stays on the free tier."
+      "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+      "note": "Free tier: about one Rudi reply a minute (≈4.6K tokens each) and ≈40 a day. Free slow mode waits for it; otherwise a 429 falls over to OVH. On a paid plan: in 0.13 / out 0.52 (USD 0.15 / 0.60 at 0.86) and drop the limits."
     },
     {
       "name": "ovh-gpt-oss-120b",

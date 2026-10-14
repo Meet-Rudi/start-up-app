@@ -377,6 +377,37 @@ overhead.
 Settings are read at every tick, so a change applies from the next case released. A batch records
 the settings, budgets and cascades it launched under.
 
+### 7.1a Free slow mode (per batch, chat channel)
+
+In the arena a reply's speed does not matter, so a batch can trade time for money. With **free slow
+mode** on, every model call waits for its free tier instead of handing over to a paid entry because
+of a limit. Switch it on in the launch dialog (or the New batch form), and on or off on the batch's
+page while it runs — **Speed up** lets paid entries take over again, e.g. to finish a batch that was
+meant to run free. `POST /batches/{id}/free_slow {on}`; the batch view carries `free_slow`.
+
+| Role | Free slow behaviour |
+|---|---|
+| Rudi | Only his free entries are sent to `meetrudi-engine-turn`. Before each turn the runner asks the shared LimitTracker whether the free window has room for it (last reply's tokens + 5%); if not, the case waits. A 429 anyway parks the turn and **undoes it** (transcript, turn counter, errors), so it re-runs cleanly; it does not count toward the breaker. |
+| Tester, judge | Their cascades `prefer_free`: a free entry held back by its limits is waited for, the paid entries are skipped. A free entry that **fails** — an error, a refusal, an unusable reply — still hands over to a paid one: free slow avoids paying for capacity, not for quality. |
+| Judging | Its own step after Rudi's turn, so waiting for the judge never costs Rudi's reply. |
+
+**Waiting is parking, never sleeping.** A Lambda asleep for a minute costs about what the OVH reply
+it avoids would (≈ €0.0005), so a case that has to wait more than 3 s is checkpointed, put back on
+the cases queue with an SQS delay (at most 3 min; 10 min when waiting for the next day, which keeps
+the 20-minute lease alive) and the Lambda exits. The result records `pacing: {parked, waited_s}`.
+
+**One case at a time.** A single case already asks for more than Rudi's free minute holds (≈ one
+4.6K-token reply a minute on Groq's free tier), so the dispatcher releases one case of a free slow
+batch at a time instead of filling slots with parked cases. When a free entry the batch needs has
+used up its **day** (≈ 40 Rudi replies; the arena counts its own use, which is all the use on its own
+accounts), the dispatcher holds the batch — "free slow: today's free allowance is used up — continues
+≈ 02:00" — and releases it when the allowance is back. The case already running parks until then.
+
+What it buys (today's crisis mix, §6.5): about €0.0049 → €0.0014 per case, the rest being the AWS
+overhead estimate and tester turns the free model refused. What it costs: a 10-case batch takes
+≈ 45 minutes instead of ≈ 5, and roughly 10 cases fit in a day. Only the chat channel exists so far;
+the mode applies to it.
+
 ### 7.2 Why the dispatcher is its own function
 
 All pacing and budget checks live in one place, run **one tick at a time** (the FIFO queue has a

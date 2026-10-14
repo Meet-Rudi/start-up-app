@@ -79,7 +79,7 @@ class Ingest:
         st.put_validation(m["id"], report)
         b = report["budget"]
         m.update({"status": "ready" if report["ok"] else "invalid", "total": report["cases"],
-                  "validation": {k: report[k] for k in ("ok", "errors", "warnings", "cases", "cost_eur", "duration_s")},
+                  "validation": {k: report[k] for k in ("ok", "errors", "warnings", "cases", "cost_eur", "duration_s", "rudi_replies")},
                   "modes": report["by_mode"], "locales": report["by_locale"], "cap": b["batch"], "caseCap": b["case"],
                   "budget_src": "%s / %s" % (b["batch_src"], b["case_src"]),
                   "c": {k: 0 for k in ("success", "failed", "violation", "error", "completed", "cancelled", "over_budget", "running")}})

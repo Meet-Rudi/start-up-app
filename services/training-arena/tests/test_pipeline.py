@@ -284,6 +284,40 @@ class DispatchTests(unittest.TestCase):
         finally:
             disp_mod.in_quiet_hours, api_mod.in_quiet_hours = saved
 
+    def _free_slow_batch(self, day_spent=0):
+        w = World(settings={"account_limit": 1000, "max_parallel": 4, "per_batch_parallel": 4, "launch_rate": 60})
+        cas = fakes.cascades()
+        cas["rudi"][0].update({"in": 0.0, "out": 0.0, "limits": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}})
+        w.store.put_cascades(cas)
+        if day_spent:
+            arena_llm.LimitTracker(w.store.b, clock=w.clock).record(cas["rudi"][0], day_spent)
+        tok = w.login()
+        bid = w.submit(tok, cases_yaml(4))
+        code, body = w.call("POST", "/batches/%s/launch" % bid, {"synthetic": True, "free_slow": True}, tok)
+        self.assertEqual(code, 200, body)
+        w.drain_invocations()
+        return w, tok, bid
+
+    def test_free_slow_runs_one_case_at_a_time(self):
+        w, tok, bid = self._free_slow_batch()
+        self.assertEqual(w.tick(), 1)                                   # per_batch_parallel 4, yet one case
+        view = w.call("GET", "/batches/" + bid, token=tok)[1]["batch"]
+        self.assertTrue(view["free_slow"])
+        self.assertTrue(view["eta"].startswith("free slow"))
+        self.assertEqual(w.run_cases(), 1)
+        self.assertEqual(w.tick(), 1)                                   # the next one once it finished
+
+    def test_free_slow_holds_when_the_free_day_is_used_up_and_speed_up_releases(self):
+        w, tok, bid = self._free_slow_batch(day_spent=168000)           # 168K of 85% × 200K
+        self.assertEqual(w.tick(), 0)
+        self.assertIn("today's free allowance is used up", w.store.manifest(bid)["hold"])
+        code, _ = w.call("POST", "/batches/%s/free_slow" % bid, {"on": False}, tok)
+        self.assertEqual(code, 200)
+        self.assertEqual(w.tick(), 4)                                   # normal speed: paid models may take over
+        m = w.store.manifest(bid)
+        self.assertFalse(m["free_slow"])
+        self.assertNotIn("hold", m)
+
     def test_lost_runner_is_requeued_once_then_errors(self):
         w, tok, bid = self._launched(1)
         w.tick()

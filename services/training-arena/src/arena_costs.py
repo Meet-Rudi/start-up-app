@@ -35,6 +35,11 @@ def enabled(entries):
     return [e for e in entries or [] if e.get("on", True)]
 
 
+def is_free(entry):
+    """A free-tier entry: nothing to pay per token (free slow mode waits for these)."""
+    return float(entry.get("in") or 0) == 0 and float(entry.get("out") or 0) == 0
+
+
 def expected_cost(entries, tokens_in, tokens_out):
     """What the next call may cost: priced at the dearest enabled entry, because a failover can
     land anywhere in the cascade. Used for budget checks, so it errs on the high side."""

@@ -45,7 +45,7 @@ answers 403 `must_change_password`.
 { id, name, by, status, submitted, started, finished, total,
   c: {success, failed, violation, error, completed, cancelled, over_budget, running, queued},
   eta, parts, modes: {mode: n}, locales: {loc: n}, tags, desc, spent, cap, caseCap,
-  roles: {rudi, tester, judge, infra}, files: [output file names], hold, quiet_only, stem,
+  roles: {rudi, tester, judge, infra}, files: [output file names], hold, quiet_only, free_slow, stem,
   input_file, validation: {ok, errors, warnings, cases, cost_eur, duration_s}, rudi_release, snapshots }
 ```
 
@@ -72,6 +72,10 @@ Other actions (submitter or super-admin): `POST /batches/{id}/validate`, `/pause
 `/cancel`, `/rerun {only: "not_ok" | "all"}` → `{batch}` (a new batch), `/snapshot` (partial
 results of a running batch), `/quiet {quiet_only}` — hold a batch for quiet hours (21:30–06:30,
 Europe/Brussels) or, with `false`, let a held one start now. A held batch's `eta` says so.
+`/free_slow {on}` — free slow mode: every model call waits for its free tier (one case at a time,
+about one Rudi reply a minute); `false` speeds the batch up again. Also accepted as `free_slow` in
+`POST /batches` and `/launch`; the batch view carries `free_slow`, and its `eta` starts with
+"free slow — " (or is the hold "free slow: today's free allowance is used up — …").
 
 `GET /batches` → `{batches: [batch view …]}` (most recent first).
 

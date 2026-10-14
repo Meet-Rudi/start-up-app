@@ -133,6 +133,20 @@ class MidFlightFailoverTests(unittest.TestCase):
         cas2, _tr2, _c2 = tester_cascade(t2)
         self.assertEqual(cas2.chat(MSGS).model, "tester-ovh-llama-3.3-70b")
 
+    def test_free_slow_waits_for_the_free_entry_but_still_falls_back_on_a_failure(self):
+        t = FakeTransport([("429", {"retry-after": "20"}), chat({"message": "b"})])
+        cas, _tr, clock = tester_cascade(t)
+        cas.prefer_free = True
+        with self.assertRaises(arena_llm.Busy) as ctx:                  # limited, not failed: wait, don't pay
+            cas.chat(MSGS)
+        self.assertAlmostEqual(ctx.exception.retry_at, clock.t + 20, delta=1)
+        self.assertEqual(len(t.sent), 1)                                # OVH never asked
+        self.assertIn("free slow", ctx.exception.skipped[-1]["reason"])
+        t2 = FakeTransport([arena_llm.LLMError("HTTP 500"), chat({"message": "b"})])
+        cas2, _tr2, _c2 = tester_cascade(t2)
+        cas2.prefer_free = True
+        self.assertEqual(cas2.chat(MSGS).model, "tester-ovh-llama-3.3-70b")   # a failure still hands over
+
     def test_unusable_reply_moves_on_and_its_cost_is_kept(self):
         import arena_tester
         self.assertIsNone(arena_tester.unusable('{"message": "hoi"}'))

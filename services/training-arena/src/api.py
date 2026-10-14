@@ -12,10 +12,11 @@ Routes (session token in X-Arena-Token):
     GET  /me                                        POST /account/password {current, new}
     GET  /dashboard?days=30
     POST /uploads {filename, size}                  → signed PUT url into inbox/<user>/
-    POST /batches {key | s3_uri, name, quiet_only}  → draft batch, validation started
+    POST /batches {key | s3_uri, name, quiet_only, free_slow}  → draft batch, validation started
     GET  /batches                                   GET /batches/{id}
     POST /batches/{id}/{validate,launch,pause,resume,cancel,rerun,snapshot}
     POST /batches/{id}/quiet {quiet_only}           → hold for / release from quiet hours
+    POST /batches/{id}/free_slow {on}               → pace to the free tiers / back to normal speed
     GET  /batches/{id}/cases?offset=&limit=         GET /batches/{id}/files/{name}
     GET  /cases/{case_id}                           GET /cases/{case_id}/download
     --- super-admin ---
@@ -178,17 +179,18 @@ class Api:
             return ""
         if m.get("hold"):
             return "held — " + m["hold"]
+        slow = "free slow — " if m.get("free_slow") else ""
         if not in_quiet_hours():
             if m.get("quiet_only"):
-                return "waits for quiet hours — starts at 21:30 (Europe/Brussels)"
+                return slow + "waits for quiet hours — starts at 21:30 (Europe/Brussels)"
             if self.store.engine_settings().get("quiet_only"):
-                return "waits for quiet hours (arena setting) — starts at 21:30 (Europe/Brussels)"
+                return slow + "waits for quiet hours (arena setting) — starts at 21:30 (Europe/Brussels)"
         started = parse_iso(m.get("started_at"))
         if not started or not done:
-            return "starts when a slot frees" if m.get("status") == "queued" else "after the first cases finish"
+            return slow + ("starts when a slot frees" if m.get("status") == "queued" else "after the first cases finish")
         per_case = (now_utc() - started).total_seconds() / done
         finish = now_utc() + datetime.timedelta(seconds=per_case * remaining)
-        return "≈ " + finish.astimezone(TZ).strftime("%H:%M" if finish.date() == now_utc().date() else "%d %b %H:%M")
+        return slow + "≈ " + finish.astimezone(TZ).strftime("%H:%M" if finish.date() == now_utc().date() else "%d %b %H:%M")
 
     def _batch_view(self, m):
         c = dict({k: 0 for k in ("success", "failed", "violation", "error", "completed", "cancelled", "over_budget",
@@ -200,7 +202,7 @@ class Api:
                 "locales": m.get("locales") or {}, "tags": m.get("tags") or [], "desc": m.get("desc") or "",
                 "spent": float(m.get("spent") or 0), "cap": float(m.get("cap") or 0), "caseCap": float(m.get("caseCap") or 0),
                 "roles": m.get("roles") or {}, "files": m.get("files") or [], "hold": m.get("hold") or "",
-                "quiet_only": bool(m.get("quiet_only")), "stem": m.get("stem"), "input_file": m.get("input_file"),
+                "quiet_only": bool(m.get("quiet_only")), "free_slow": bool(m.get("free_slow")), "stem": m.get("stem"), "input_file": m.get("input_file"),
                 "validation": m.get("validation") or {}, "rudi_release": (m.get("engine") or {}).get("rudi_release") or "",
                 "snapshots": m.get("snapshots") or []}
 
@@ -301,6 +303,7 @@ class Api:
         self.s3.copy_object(Bucket=ARENA_BUCKET, Key=dest, CopySource={"Bucket": ARENA_BUCKET, "Key": key})
         m = {"id": bid, "name": name, "name_from_console": bool(name), "stem": stem, "by": self.user["u"], "status": "draft",
              "submitted_at": iso(), "input_file": stored, "input_key": dest, "source": key, "quiet_only": bool(body.get("quiet_only")),
+             "free_slow": bool(body.get("free_slow")),
              "desc": "", "tags": [], "c": {}, "total": 0, "only_keys": only_keys, "rerun_of": rerun_of}
         self.store.put_manifest(m)
         self.user["batches"] = int(self.user.get("batches") or 0) + 1
@@ -324,6 +327,7 @@ class Api:
             if m["status"] != "ready":
                 raise Http(409, "not_ready", "Only a batch that passed validation can be launched.")
             m["quiet_only"] = bool(body.get("quiet_only", m.get("quiet_only")))
+            m["free_slow"] = bool(body.get("free_slow", m.get("free_slow")))
             m["launched_by"] = u
             self.store.put_manifest(m)
             self.invoke(INGEST_FUNCTION, {"batch": m["id"], "mode": "launch"})
@@ -350,6 +354,18 @@ class Api:
                 self.send_dispatch({"type": "control", "action": "quiet", "quiet_only": quiet, "batch": m["id"], "by": u})
             self.store.audit(u, "batch.quiet", m["id"], "quiet hours only" if quiet else "start now")
             return {"ok": True}
+        if action == "free_slow":
+            self._owner_or_sa(m)
+            if m["status"] in ("assembling", "completed", "completed_with_errors", "budget_exhausted", "cancelled"):
+                raise Http(409, "conflict", "This batch has finished.")
+            on = bool(body.get("on"))
+            if m["status"] in ("draft", "invalid", "ready"):
+                m["free_slow"] = on
+                self.store.put_manifest(m)                       # never launched: the API still owns it
+            else:
+                self.send_dispatch({"type": "control", "action": "free_slow", "on": on, "batch": m["id"], "by": u})
+            self.store.audit(u, "batch.free_slow", m["id"], "on — paced to the free tiers" if on else "off — normal speed")
+            return {"ok": True}
         if action == "rerun":
             self._owner_or_sa(m)
             only = None
@@ -358,7 +374,8 @@ class Api:
                         if r.get("outcome") in ("failed", "violation", "error", "over_budget")]
                 if not only:
                     raise Http(409, "nothing_to_rerun", "No case of this batch ended badly.")
-            new = self._create({"name": (m.get("name") or "rerun")[:34] + "-rerun", "quiet_only": m.get("quiet_only")},
+            new = self._create({"name": (m.get("name") or "rerun")[:34] + "-rerun", "quiet_only": m.get("quiet_only"),
+                                "free_slow": m.get("free_slow")},
                                only_keys=only, rerun_of=m["id"], source_key=m["input_key"])
             return {"batch": self._batch_view(new)}
         if action == "snapshot":

@@ -23,8 +23,11 @@ import os
 import json
 import time
 
+import datetime
+
 import arena_costs
-from arena_common import iso, log, local_day, in_quiet_hours, case_id
+import arena_llm
+from arena_common import iso, log, local_day, in_quiet_hours, case_id, TZ
 from arena_store import ArenaStore, BLOCK
 
 ARENA_BUCKET = os.environ.get("ARENA_BUCKET", "")
@@ -36,6 +39,8 @@ LAT_BUCKETS = [250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 75
 NO_VERDICT = ("completed", "cancelled", "over_budget")
 NOT_OK = ("failed", "violation", "error")
 FINAL = ("completed", "completed_with_errors", "budget_exhausted", "cancelled")
+FREE_NEED = {"rudi": 5000, "tester": 1500, "judge": 1200}   # tokens one call takes (free slow day check)
+DAILY_WAIT_S = 15 * 60             # a free entry out for longer than this has used up its day
 
 
 def lat_bucket(ms):
@@ -54,6 +59,26 @@ def empty_day(day):
 class Dispatcher:
     def __init__(self, store, send_case, invoke_assembler, clock=time.time):
         self.store, self.send_case, self.invoke_assembler, self.clock = store, send_case, invoke_assembler, clock
+        self.tracker = arena_llm.LimitTracker(store.b, clock=clock)
+
+    def free_back_at(self, m):
+        """Free slow: when one of the batch's roles has no free entry left for today, the moment
+        one is back (None while the free tiers still have room). Scripted-only batches need Rudi only."""
+        cas = m.get("cascades") or self.store.cascades()
+        roles = ["rudi"] + (["tester", "judge"] if any(n for k, n in (m.get("modes") or {}).items() if k != "scripted") else [])
+        back = None
+        for role in roles:
+            free = [e for e in arena_costs.enabled(cas.get(role)) if arena_costs.is_free(e)]
+            ats = []
+            for e in free:
+                ok, _reason, at = self.tracker.check(e, FREE_NEED[role])
+                if ok:
+                    break
+                ats.append(at or self.now)
+            else:
+                if ats and min(ats) - self.now > DAILY_WAIT_S:
+                    back = max(back or 0, min(ats))
+        return back
 
     # ------------------------------------------------------------------ one tick
     def process(self, messages):
@@ -240,6 +265,10 @@ class Dispatcher:
             m["status"], m["final_status"] = "cancelled", "cancelled"
         elif action == "quiet":
             m["quiet_only"] = bool(msg.get("quiet_only"))
+        elif action == "free_slow":
+            m["free_slow"] = bool(msg.get("on"))
+            if not m["free_slow"] and str(m.get("hold") or "").startswith("free slow"):
+                m.pop("hold", None)
         self._touch(m)
         log("dispatch.control", batch=m["id"], action=action)
 
@@ -333,8 +362,18 @@ class Dispatcher:
                     continue
                 if (s.get("quiet_only") or m.get("quiet_only")) and not in_quiet_hours():
                     continue
-                if per_batch.get(bid, 0) >= int(s["per_batch_parallel"]):
+                # Free slow: one case at a time — one case already uses Rudi's whole free minute.
+                if per_batch.get(bid, 0) >= (1 if m.get("free_slow") else int(s["per_batch_parallel"])):
                     continue
+                if m.get("free_slow"):
+                    back = self.free_back_at(m)
+                    if back:
+                        at = datetime.datetime.fromtimestamp(back, TZ).strftime("%H:%M" if back - self.now < 86400 else "%d %b %H:%M")
+                        hold = "free slow: today's free allowance is used up — continues ≈ %s (Europe/Brussels)" % at
+                        if m.get("hold") != hold:
+                            m["hold"] = hold
+                            self._touch(m)
+                        continue
                 seq = int(m["cursor"]) + 1
                 row = self.row(bid, seq) or {}
                 cap = float(row.get("cap") or m.get("caseCap") or b["case_default"])
