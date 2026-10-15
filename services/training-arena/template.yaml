@@ -140,6 +140,12 @@ Resources:
       LogGroupName: /aws/lambda/meetrudi-arena-assembler
       RetentionInDays: 30
 
+  ExtractorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-arena-extractor
+      RetentionInDays: 30
+
   ApiFunction:
     Type: AWS::Serverless::Function
     DependsOn: ApiLogGroup
@@ -258,6 +264,24 @@ Resources:
           ARENA_BUCKET: !Ref ArenaBucket
           DISPATCH_QUEUE_URL: !Ref DispatchQueue
           ASSEMBLER_FUNCTION: meetrudi-arena-assembler
+          RELEASE: !Ref Release
+
+  ExtractorFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ExtractorLogGroup
+    Properties:
+      FunctionName: meetrudi-arena-extractor
+      Description: Training Arena — improvement analyses of results logs (application errors, weak points, feature requests).
+      Handler: extractor.handler
+      CodeUri: src/
+      Layers: [!Ref ArenaDepsLayer]
+      Timeout: 600
+      MemorySize: 1024
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-arena-runner"
+      Environment:
+        Variables:
+          ARENA_BUCKET: !Ref ArenaBucket
+          ANALYSIS_CEILING_EUR: "0.25"
           RELEASE: !Ref Release
 
 Outputs:

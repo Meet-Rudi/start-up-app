@@ -4,6 +4,10 @@ Describe a skill in the console's **Generator** pane (super-admins only); Claude
 computer** plans and writes a batch file the arena can run straight away, checked with the arena's
 own validator. It runs on your **Claude subscription** — no API key, nothing in AWS.
 
+The console's **Improvements** pane (every user) uses it too: when it runs, Claude Code reads a
+results log and writes the improvement report — see *It also reads runs* below. Without it, that
+pane falls back to the arena's own model in AWS.
+
 ## Start it — from the console, no typing
 
 **Once per computer:** in File Explorer, open this folder (`services\training-arena\generator`) and
@@ -55,15 +59,30 @@ until Ctrl+C; enter the code under *Started it some other way?* in the connectio
 Code: `gen_core.py` (the pipeline, pure; Claude is injected), `generator.py` (the local server and
 Claude Code), `personas.yaml` (the persona library). Tests: `../tests/test_generator.py`.
 
+## It also reads runs — the Improvements pane
+
+`POST /analyze {text, analysis_id, source: {name, batch_id}, model: sonnet|opus}` starts a job (poll
+`GET /jobs/{id}` as for generation). It runs the arena's own extractor core,
+`../src/arena_improve.py` — the same code `meetrudi-arena-extractor` runs in AWS — with Claude Code
+as the model, and returns `{html, markdown, file, model, json}`. The console stores the JSON through
+the arena API (`POST /analyses/{id}/result`), which renders the stored HTML and Markdown itself.
+
+Sent to Claude: the results log (synthetic conversations, judge verdicts, recorded errors), cut to
+about 110,000 characters with failing cases first, and the skills catalogue
+(`../seed/skills/rudi-skills.yaml`). E-mail addresses, phone numbers and IBANs are masked before
+sending. Never Rudi's prompts or any key. Project decision 22 extends exception 21 to this.
+Tests: `../tests/test_improve.py`.
+
 ## Safety and data
 
 - **Your subscription, never an API key.** Claude Code runs as `claude -p` with no tools, no MCP
   servers and no project settings, in an empty temporary folder. `ANTHROPIC_API_KEY` and the other
   API / cloud-provider variables are removed from its environment.
-- **Synthetic only.** Sent to Claude: your description (refused if it holds a real-looking phone
-  number, e-mail address or ID number), the format rules, the persona sheet. Never Rudi's prompts,
-  transcripts, results or keys. This is the approved Prime Directive 3 exception
-  (project.md, decision 21).
+- **Synthetic only.** Sent to Claude for generation: your description (refused if it holds a
+  real-looking phone number, e-mail address or ID number), the format rules, the persona sheet.
+  For an improvement report: an arena results log (synthetic) with identifiers masked, and the
+  skills catalogue. Never Rudi's prompts or keys. This is the approved Prime Directive 3 exception
+  (project.md, decisions 21 and 22).
 - **Only you can drive it.** It listens on `127.0.0.1` only, answers only the arena console's origin
   and localhost, refuses other Host headers, and needs the token that pairing returns; ten wrong
   codes lock pairing until it restarts.

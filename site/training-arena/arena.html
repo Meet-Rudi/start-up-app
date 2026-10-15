@@ -31,6 +31,7 @@
       <a class="nav" href="#submit" data-pane="submit"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg><span class="t">New batch</span></a>
       <a class="nav" href="#batches" data-pane="batches"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="t">Batches &amp; results</span><span class="badge" id="nav-running" title="Batches running or queued">2</span></a>
       <a class="nav" href="#case" data-pane="case"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="t">Case viewer</span></a>
+      <a class="nav" href="#improve" data-pane="improve"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z"/></svg><span class="t">Improvements</span></a>
     </div>
     <div class="navgroup">
       <span class="lbl">Reference</span>
@@ -520,6 +521,31 @@ defaults:
       </div>
     </section>
 
+    <!-- ============================== IMPROVEMENTS ============================== -->
+    <section id="p-improve" class="pane" hidden>
+      <div class="pane-head">
+        <div><h1>Improvements</h1>
+          <p>Pick a run; a model reads it against Rudi's skills catalogue and lists the application errors, Rudi's weak points, and feature requests a coding agent can implement. The report is saved next to the run.</p></div>
+        <span class="sp"></span>
+        <div class="row" style="flex-wrap:nowrap"><button type="button" class="gen-pill" id="imp-conn"></button></div>
+      </div>
+      <div class="gen-wizard">
+        <div class="stack" style="gap:.6rem">
+          <ol class="gen-stepper" id="imp-stepper" aria-label="Progress"></ol>
+          <div class="gen-track" aria-hidden="true"><span id="imp-track"></span></div>
+        </div>
+        <div class="gen-deck">
+          <div class="gen-pastwrap" id="imp-past"></div>
+          <section class="gen-front" id="imp-front" aria-live="polite"></section>
+          <div class="gen-edges" id="imp-edges" aria-hidden="true"></div>
+        </div>
+        <div class="card">
+          <header><div><h2>Earlier analyses</h2><p class="sub">Every report is stored in the arena's bucket under analyses/, named after the results it read.</p></div></header>
+          <div id="imp-list"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============================== AUDIT & STORAGE (super-admin) ============================== -->
     <section id="p-generator" class="pane" hidden>
       <div class="pane-head">
@@ -573,6 +599,7 @@ defaults:
 <script src="arena-api.js"></script>
 <script src="arena-gen.js"></script>
 <script src="arena-generator.js"></script>
+<script src="arena-improve.js"></script>
 <script src="arena.js"></script>
 </body>
 </html>

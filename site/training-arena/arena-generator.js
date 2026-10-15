@@ -78,33 +78,18 @@
   // Install-Generator.cmd), and the one-time code in the link pairs this tab with it. If the
   // generator already runs, the new start hands the code over to it. Another web site could open
   // the same link, but the generator refuses every request that is not from the arena console.
-  function nonce() {
-    var b = new Uint8Array(18);
-    (window.crypto || window.msCrypto).getRandomValues(b);
-    return btoa(String.fromCharCode.apply(null, b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  }
   function startGenerator() {
     if (G.starting) return;
-    var code = nonce(), t0 = Date.now();
     G.starting = true; G.startFailed = false; renderPill(); if ($("modal") && !$("modal").hidden) $("modal").hidden = true;
     if (G.step === 2 && visible()) paint2();
-    var a = document.createElement("a");
-    a.href = "meetrudi-generator://start?pair=" + code;
-    document.body.appendChild(a); a.click(); a.remove();
     C.toast("Starting the generator…", "If your browser asks to open Python, allow it (tick Always allow).");
-    (function poll() {
-      GEN.health().then(function (h) {
-        if (h.service !== "meetrudi-arena-generator") throw new Error("foreign");
-        return GEN.pair(code).then(function () {
-          G.starting = false; G.conn = "ready"; G.info = h; G.claude = h.claude_ok; G.claudeError = h.claude_error;
-          C.toast("The generator is running.", "Connected to this tab. It stops by itself after 4 idle hours.");
-          checkConn();
-        });
-      }).catch(function () {
-        if (Date.now() - t0 < 30000) return setTimeout(poll, 1000);
-        G.starting = false; G.startFailed = true; checkConn().then(openConn);
-      });
-    })();
+    GEN.start(30000).then(function (h) {
+      G.starting = false; G.conn = "ready"; G.info = h; G.claude = h.claude_ok; G.claudeError = h.claude_error;
+      C.toast("The generator is running.", "Connected to this tab. It stops by itself after 4 idle hours.");
+      checkConn();
+    }, function () {
+      G.starting = false; G.startFailed = true; checkConn().then(openConn);
+    });
   }
   function stopGenerator() {
     GEN.call("POST", "/shutdown").then(function () {

@@ -64,8 +64,45 @@
     };
   }
 
+  // The start link: Windows starts the generator without a window (registered once by
+  // Install-Generator.cmd) and the link's one-time code pairs this tab with it. If one already runs,
+  // the new start hands the code over to it. Another web site could open the same link, but the
+  // generator refuses every request that is not from the arena console. Resolves with /health once
+  // paired; rejects with code "not_started" after `waitMs`.
+  function nonce() {
+    var b = new Uint8Array(18);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    return btoa(String.fromCharCode.apply(null, b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function start(waitMs) {
+    var code = nonce(), t0 = Date.now(), a = document.createElement("a");
+    a.href = "meetrudi-generator://start?pair=" + code;
+    document.body.appendChild(a); a.click(); a.remove();
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        call("GET", "/health").then(function (h) {
+          if (h.service !== "meetrudi-arena-generator") throw err("foreign", "");
+          return call("POST", "/pair", { code: code }).then(function (r) { setToken(r.token); resolve(h); });
+        }).catch(function () {
+          if (Date.now() - t0 < (waitMs || 30000)) return setTimeout(poll, 1000);
+          reject(err("not_started", "The generator did not answer within " + Math.round((waitMs || 30000) / 1000) + " seconds."));
+        });
+      })();
+    });
+  }
+  // Where the local generator stands for this tab: offline · foreign · unpaired · ready (+ /health).
+  function status() {
+    return call("GET", "/health").then(function (h) {
+      if (h.service !== "meetrudi-arena-generator") return { state: "foreign", health: h };
+      if (!h.paired) setToken("");
+      return { state: h.paired ? "ready" : "unpaired", health: h };
+    }, function () { return { state: "offline", health: null }; });
+  }
+
   window.ArenaGen = {
     base: base,
+    start: start,
+    status: status,
     setBase: setBase,
     paired: function () { return !!token(); },
     health: function () { return call("GET", "/health"); },

@@ -554,3 +554,23 @@ def local_identifiers(text):
         if n:
             found[label] = n
     return found
+
+
+_NOT_A_PHONE = re.compile(r"\d{4}-\d{2}-\d{2}|\d+\.\d+$")       # a date, or a decimal number
+
+
+def mask_identifiers(text):
+    """The same patterns, masked in place → (text, {kind: count}). For text that leaves for a
+    processor without a DPA (the Improvement Extractor on a user's own Claude)."""
+    found = {}
+
+    def sub(label):
+        def f(m):
+            if label == "phone-number" and _NOT_A_PHONE.match(m.group(0)):
+                return m.group(0)
+            found[label] = found.get(label, 0) + 1
+            return "<%s removed>" % label
+        return f
+    for label, rx in sorted(_LOCAL_PATTERNS, key=lambda p: p[0] == "phone-number"):    # an IBAN before its digits look like a phone
+        text = rx.sub(sub(label), text or "")
+    return text, found

@@ -438,3 +438,28 @@ button.chip{cursor:pointer;font-family:inherit}
   .gen-big,.gen-form2,.gen-tiles{grid-template-columns:1fr} .gen-front{padding:1.1rem 1rem 1rem}
 }
 .gen-help{margin:.3rem 0 0 1.1rem;padding:0;font-size:.84rem;color:var(--ink2);display:flex;flex-direction:column;gap:.3rem}
+
+/* Improvements pane (arena-improve.js): the Generator's wizard, wider on the report step, whose three
+   boxes sit side by side — application errors, Rudi's weak points, feature requests. */
+.gen-tile:disabled{opacity:.55;cursor:not-allowed}
+.field .lab{font-size:.84rem;font-weight:700}
+#p-improve .gen-front>.seg,#p-improve .field>.seg{align-self:flex-start}
+.gen-tile.off{border-style:dashed}.gen-tile.off b{color:var(--ink2)}
+.imp-act{color:var(--accent);font-weight:700}
+#p-improve .gen-wizard{transition:max-width .25s ease}
+#p-improve .gen-wizard.wide{max-width:88rem}
+.imp-boxes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;align-items:start}
+.imp-box{background:var(--sunk);border-radius:.6rem;padding:.8rem;display:flex;flex-direction:column;gap:.6rem;min-width:0}
+.imp-box>h3{display:flex;align-items:center;gap:.5rem;font-size:.92rem}
+.imp-n{font-size:.72rem;font-weight:800;background:var(--card);border:1px solid var(--border);border-radius:99px;padding:0 .5rem;color:var(--ink2)}
+.imp-card{background:var(--card);border:1px solid var(--hair);border-left:4px solid var(--navy);border-radius:.45rem;padding:.6rem .75rem;display:flex;flex-direction:column;gap:.35rem;font-size:.84rem;color:var(--ink2);overflow-wrap:anywhere}
+.imp-card>b{color:var(--ink);font-size:.88rem}
+.imp-card.high{border-left-color:var(--err)} .imp-card.medium{border-left-color:var(--warn)} .imp-card.low{border-left-color:var(--secondary)}
+.imp-chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.imp-chip{font-size:.7rem;font-weight:800;border-radius:99px;padding:.05rem .5rem;background:var(--navy-soft);color:var(--navy)}
+.imp-chip.high,.imp-chip.P1{background:var(--err-soft);color:var(--err)}
+.imp-chip.medium,.imp-chip.P2{background:var(--warn-soft);color:var(--warn)}
+.imp-chip.skill{background:var(--accent-soft);color:#a3168a;font-family:ui-monospace,Consolas,"Courier New",monospace}
+.imp-q{margin:0;border-left:2px solid var(--border);padding:.1rem 0 .1rem .55rem;color:var(--ink2);font-style:italic}
+.imp-ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.15rem}
+@media (max-width:64rem){.imp-boxes{grid-template-columns:1fr}}

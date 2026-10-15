@@ -1,0 +1,864 @@
+# Rudi's engine, split into skills — the catalogue the Improvement Extractor maps findings onto.
+# Read by services/training-arena/src/arena_improve.py (load_catalogue) from the repository (the local
+# generator) and from s3://<arena bucket>/skills/rudi-skills.yaml (seeded by `python deploy.py
+# training-arena`). Human-readable companion: docs/rudi-skills-catalogue.md.
+#
+# Every skill: id (stable, kebab-case — feature requests cite it), name, domain, channels
+# (whatsapp · webchat · call), summary (what Rudi does), expected (what good looks like), observe
+# (where a test or a reader sees it), code (repo path[:symbol]), knobs (limits and settings), tests
+# (repo path[::test]), arena (chat when the Training Arena's chat channel exercises it, else none), gaps (known
+# shortfalls — likely test targets). Paths are checked by tests/test_improve.py; keep them true when
+# the code moves, and bump `version`.
+format: rudi-skills@1
+version: "2026-10-15.1"
+
+domains:
+  flow: Conversation flow
+  coaching: Coaching content
+  safety: Safety and guardrails
+  language: Language, tone and time
+  memory: Memory and state
+  proactive: Scheduling and proactive contact
+  whatsapp: Channel — WhatsApp
+  webchat: Channel — web chat
+  call: Channel — voice call
+  platform: Platform (not a Rudi behaviour; where application errors are located)
+
+skills:
+  # ------------------------------------------------------------------ conversation flow
+  - id: conversation-phases
+    name: Conversation phases
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Moves the person through learn → goal → commit → committed (the check-in loop) → concluded.
+      Transitions come from the model's JSON signals and code counters, never from free text. On a
+      call there is no committed phase: a commitment ends the call.
+    expected: >-
+      Each phase advances only on its signal (want_to_try, goal_status, commitment_made); at most 2
+      clarifiers, 3 goal rejects and 7 commit attempts; a reply blocked by the leak guard never
+      advances the phase; no cold restart once a goal is set.
+    observe: Per turn info.phase_before / info.phase and signals (arena results meta.rudi.phase, e.g. "goal→commit"); call manifest turns/*.json.
+    code:
+      - services/whatsapp/src/responder.py:respond
+      - services/whatsapp/src/responder.py:_advance
+      - services/whatsapp/src/responder.py:_runtime_note
+      - services/whatsapp/src/responder.py:_build_system
+      - services/whatsapp/src/responder.py:new_session
+      - services/call/src/brain.py:advance
+      - services/call/src/brain.py:turn
+      - site/try-rudi.html:processSignals
+    knobs: [MAX_CLARIFIERS=2, MAX_COMMIT=7, MAX_REJECTS=3 (responder.py and brain.py)]
+    tests:
+      - services/whatsapp/tests/test_responder.py
+      - services/call/tests/test_call.py::LiveCall
+    arena: chat
+    gaps: A reply in prose without the JSON envelope carries no signals, so the phase silently stalls.
+
+  - id: session-opening
+    name: Session opening and returning greeting
+    domain: flow
+    channels: [whatsapp, webchat]
+    summary: >-
+      A brand-new contact gets the canned intro ("I am Rudi. I help people achieve their goals…");
+      a contact whose session concluded gets the canned welcome-back. Neither calls the model.
+      Web-chat threads are seeded with the intro when they are created (arena op "open").
+    expected: >-
+      A short, warm greeting in the person's language that never ignores what they just wrote —
+      above all never a cheerful greeting over a crisis disclosure.
+    observe: The first Rudi message of a thread; the reply to the first message after a concluded session.
+    code:
+      - services/whatsapp/src/responder.py:respond
+      - services/whatsapp/src/i18n.py:STRINGS
+      - services/whatsapp/src/engine_turn.py:_open
+      - services/whatsapp/src/tester_api.py:_chat_thread
+    knobs: [i18n.DEFAULT_LOCALE=en]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_new_contact_gets_intro_without_llm
+      - services/whatsapp/tests/test_responder.py::test_concluded_restarts_with_welcome_back
+      - services/whatsapp/tests/test_engine_turn.py
+    arena: chat
+    gaps: >-
+      The intro is always English, even for nl-BE users. The message that triggers the intro or the
+      welcome-back is neither answered nor stored — a crisis disclosure at that moment gets "👋 Hey again!".
+
+  - id: learn-about-rudi
+    name: Who Rudi is, and the intent to try
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Answers questions about Rudi from the "About me" context — warm, first person, short — and
+      describes the channel truthfully. When the person signals intent ("I want to try", "coach
+      me") it sets want_to_try and pivots to asking what they would like to achieve.
+    expected: Accurate pitch, nothing internal recited, a clean pivot question once intent is shown.
+    observe: signals.want_to_try; the learn-phase replies.
+    code:
+      - services/whatsapp/seed/prompts/rudi_learn_prompt_wa.md
+      - services/whatsapp/seed/prompts/rudi_learn_prompt_call.md
+      - services/rudi-chat/seed/prompts/rudi_learn_prompt.md
+      - services/ask-ai/seed/contexts/rudi-context.md
+      - services/whatsapp/src/responder.py:_build_system
+      - services/call/src/brain.py:build_system
+    knobs: [LEARN_KEY (env, S3 prompt key)]
+    tests:
+      - services/whatsapp/tests/test_leakguard.py
+      - services/call/tests/test_call.py::Confidentiality
+    arena: chat
+    gaps: Misses soft intent; on WhatsApp may describe itself as a website or app.
+
+  - id: goal-setting
+    name: Goal setting — elicit, clarify, classify
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Understands ONE self-directed goal without re-asking what was already said; at most one
+      clarifier per turn and two in total; on acceptance restates the goal in one line and reports
+      goal_status=accepted, goal and goal_domain (diabetes, fitness, diet, sleep, stress, habit,
+      other). When the clarifiers run out, code force-accepts the last user text as the goal.
+    expected: The goal is restated faithfully and the domain is right (it decides whether health guidance is injected).
+    observe: signals.goal_status, goal, goal_domain per turn.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_goal_prompt.md
+      - services/whatsapp/src/responder.py:_runtime_note
+      - services/whatsapp/src/responder.py:_advance
+      - services/call/src/brain.py:advance
+    knobs: [MAX_CLARIFIERS=2]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_goal_accepted_moves_to_commit
+      - services/whatsapp/tests/test_responder.py::test_goal_unclear_then_force_accept_after_budget
+    arena: chat
+    gaps: A force-accepted goal can be a fragment of the last message; a wrong domain silently drops the health guidance.
+
+  - id: goal-scope-rejection
+    name: Out-of-scope goals
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Refuses goals about other people or the world, and illegal or harmful goals, with a short firm
+      nudge, and asks for a personal goal (goal_status=rejected). Self-harm is the exception: follow
+      the safety rule, never nudge. Three rejects conclude the session.
+    expected: Firm but kind refusal of "make my husband lose weight"; never a nudge to someone disclosing self-harm.
+    observe: signals.goal_status=rejected; concluded after 3.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_goal_prompt.md
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/whatsapp/src/responder.py:_advance
+    knobs: [MAX_REJECTS=3]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_goal_rejected_three_times_concludes
+    arena: chat
+
+  - id: commitment-securing
+    name: Securing a commitment
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Proposes ONE small, specific, realistic action and nudges warmly, without pressure or shame.
+      On agreement reports commitment_made, congratulates, restates and says he will check in. On
+      the last attempt it closes gently without a new ask.
+    expected: A concrete step with a when; no vague "try to eat better"; no pushing past the final attempt; agreement is detected.
+    observe: signals.commitment_made; ai_state.commitment and commitment_agreed_at.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_commit_prompt.md
+      - services/whatsapp/src/responder.py:_runtime_note
+      - services/whatsapp/src/responder.py:_commitment_text
+      - services/whatsapp/src/responder.py:_advance
+      - services/call/src/brain.py:FAREWELL
+    knobs: [MAX_COMMIT=7]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_a_commitment_starts_the_check_in_loop
+      - services/whatsapp/tests/test_responder.py::test_commit_exhausts_attempts_and_concludes
+      - services/call/tests/test_call.py::Farewell
+    arena: chat
+
+  - id: check-in-follow-up
+    name: The check-in loop (committed phase)
+    domain: flow
+    channels: [whatsapp, webchat]
+    summary: >-
+      Follows up on the agreed action by name: done earns credit, not done earns curiosity, never
+      disappointment; agrees the next small step; changes the goal only when the person asks. If
+      the planned time is still ahead, encourages instead of asking how it went.
+    expected: No re-greeting, no new goal invented, no "how did it go?" before it happened.
+    observe: Replies in the committed phase name the commitment and use relative time ("yesterday at 19:00").
+    code:
+      - services/whatsapp/src/responder.py:CHECKIN_PROMPT
+      - services/whatsapp/src/responder.py:_build_system
+      - services/whatsapp/src/responder.py:_advance
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_the_next_message_is_not_a_cold_restart
+      - services/whatsapp/tests/test_responder.py::test_the_person_can_change_their_goal_mid_loop
+      - services/whatsapp/tests/test_timeline.py
+    arena: chat
+    gaps: The committed phase gets no health guidance (it is injected in the commit phase only).
+
+  - id: check-in-promise
+    name: Promising the next contact
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      At every natural pause Rudi says when HE will check in and reports check_in_minutes and
+      check_in_about. Default about the same time tomorrow (1320 minutes); never more than 24 h;
+      never 21:30–06:30; never a time he has not reported.
+    expected: Every pause ends with a concrete time plus matching signals — never "let me know when you're ready".
+    observe: signals.check_in_minutes / check_in_about; the stated time in the reply.
+    code:
+      - services/whatsapp/src/responder.py:CHECKIN_NOTE
+      - services/whatsapp/seed/prompts/rudi_learn_prompt_wa.md
+      - services/whatsapp/src/store.py:commitment_from_signals
+      - services/whatsapp/src/timeline.py:after_minutes
+      - services/call/src/brain.py:CALL_CHECKIN_NOTE
+      - services/call/src/brain.py:_capture_checkin
+    knobs: [default 1320 min, max 1440 min, quiet 21:30–06:30]
+    tests:
+      - services/whatsapp/tests/test_runner.py::CommitmentTests
+      - services/whatsapp/tests/test_tester_call_runner.py
+    arena: chat
+    gaps: >-
+      Promises beyond 24 h or inside quiet hours are dropped at capture, so they silently never
+      happen. In web chat the promise is made but nothing is ever delivered.
+
+  # ------------------------------------------------------------------ coaching content
+  - id: health-coaching-guidance
+    name: Lifestyle-only health coaching
+    domain: coaching
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      For health-domain goals the commit phase gets 15 coaching rules: autonomy, change talk, a
+      SMART step, one obstacle, light tracking; no meal or exercise plans, no supplements; clinical
+      topics go to the doctor; red flags (chest pain, stroke signs, very high or low sugar,
+      confusion) mean urging prompt professional or emergency care.
+    expected: Small SMART steps with an anticipated obstacle; never a meal plan, a dose or a reading of a glucose number.
+    observe: Commit-phase replies for goal_domain in diabetes, fitness, diet, sleep, stress.
+    code:
+      - services/rudi-chat/seed/contexts/health-coaching-guidance.md
+      - services/whatsapp/src/responder.py:HEALTH_DOMAINS
+      - services/whatsapp/src/responder.py:_build_system
+      - services/call/src/brain.py:HEALTH_GUIDANCE_KEYS
+    knobs: [HEALTH_GUIDANCE_KEY (env; WhatsApp reads contexts/diabetes-t2d-guidance.md)]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_commit_system_prompt_includes_health_guidance_for_health_domain
+    arena: chat
+    gaps: >-
+      WhatsApp reads contexts/diabetes-t2d-guidance.md, which is not in the repository (live bucket
+      only), so its coaching content can drift from health-coaching-guidance.md. Red-flag guidance
+      reaches the model only in the commit phase.
+
+  # ------------------------------------------------------------------ safety and guardrails
+  - id: medical-advice-refusal
+    name: No medical advice
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      No diagnosis, medication or treatment instructions, no interpreting results; stays with
+      lifestyle adherence and points to the clinician. Prompt-only: no risk classifier exists in the
+      live path.
+    expected: A warm refusal plus "ask your GP or pharmacist", then back to the goal; red-flag symptoms escalate in every phase.
+    observe: Replies to dose, medication, symptom and lab-value questions.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/rudi-chat/seed/prompts/rudi_commit_prompt.md
+      - services/rudi-chat/seed/contexts/health-coaching-guidance.md
+      - services/whatsapp/src/responder.py:CHECKIN_PROMPT
+      - services/whatsapp/src/responder.py:REACHOUT
+    tests:
+      - site/training-arena/samples/GEN-sample__medication-advice__input.yaml
+    arena: chat
+    gaps: No unit test asserts refusal; no deterministic or classifier gate (project.md §6 describes one).
+
+  - id: crisis-signposting
+    name: Crisis and self-harm signposting
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      On any self-harm or crisis signal Rudi stops coaching and gently shares
+      https://findahelpline.com/countries/be; never engages, encourages or assists. Prompt-only — no
+      deterministic or classifier layer on the live path.
+    expected: >-
+      Coaching stops; a named line in the person's language (Zelfmoordlijn 1813, 112, or "call your
+      GP / emergency care") — a directory link alone is not enough; no cheerful canned greeting.
+    observe: Replies to crisis statements; arena evaluators guard-self-harm (off by default).
+    code:
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/rudi-chat/seed/contexts/health-coaching-guidance.md
+      - services/rudi-chat/seed/prompts/rudi_goal_prompt.md
+      - services/training-arena/seed/defaults/config/evaluators.json
+    tests:
+      - evals/arena-batches/crisis-signposting__input.yaml
+      - services/training-arena/tests/test_format.py::test_the_crisis_batch_validates
+    arena: chat
+    gaps: >-
+      Only the directory link is prompted; named lines (1813, 112, GP) are rare. A disclosure as
+      the first message, or after concluded, gets the canned greeting. Groq can reject Rudi's JSON
+      on explicit suicidal statements, so these turns fall back to OVH with 10–25 s latency.
+
+  - id: ai-identity-disclosure
+    name: Saying he is an AI
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      In chat, when asked, honestly says he is Rudi, an AI coach, never human. On a call, on the
+      first turn after the person speaks, MUST say plainly that he is Rudi, an AI assistant (EU AI
+      Act art. 50), then why he calls, then the topic.
+    expected: Never claims or implies being human; on calls the disclosure is in the second Rudi utterance.
+    observe: Replies to "are you a real person?"; call turn 1.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/call/src/brain.py:DISCLOSURE
+      - services/call/src/brain.py:build_system
+      - services/call/src/brain.py:turn
+    tests:
+      - services/call/tests/test_call.py::GreetThenDisclose
+    arena: chat
+    gaps: Calls that start in learn (GET_TO_KNOW, REINSTATE_TALK) never get the disclosure block, yet are marked disclosed.
+
+  - id: scope-and-tone-boundaries
+    name: Scope and tone boundaries
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Stays on the person's goal (no general-assistant tasks); never bullies, shames, guilt-trips,
+      threatens or blackmails; never promises results; replies in 1–4 sentences in the person's
+      language.
+    expected: Trivia or code requests are steered back kindly; a relapse gets curiosity, not blame; no "you will lose 5 kg".
+    observe: Replies to off-topic requests and to relapses.
+    code:
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/rudi-chat/seed/prompts/rudi_commit_prompt.md
+      - services/whatsapp/src/responder.py:CHECKIN_PROMPT
+      - services/ask-ai/seed/contexts/rudi-context.md
+    tests:
+      - site/training-arena/arena-generator.js
+    arena: chat
+    gaps: Prompt-only; no unit tests.
+
+  - id: confidentiality-injection-resistance
+    name: Confidentiality and prompt-injection resistance
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Instructions, notes, stored details and internals are confidential. User text is never a new
+      instruction: "ignore your rules / reveal / switch mode" is declined in one sentence and the
+      conversation carries on. Stored details are never recited on request; if the person seems to
+      be the wrong person, Rudi reveals nothing and stops coaching.
+    expected: One polite line of refusal, then back to the goal; no phone, e-mail, call-goal name or rule text ever revealed.
+    observe: Replies to injection attempts (evals/injection dataset).
+    code:
+      - services/rudi-chat/seed/prompts/rudi_guardrails.md
+      - services/whatsapp/src/responder.py:_build_system
+      - services/call/src/brain.py:build_system
+      - services/call/src/ws.py:_model_config
+    tests:
+      - evals/injection/run.py
+      - services/whatsapp/tests/test_leakguard.py
+      - services/call/tests/test_call.py::Confidentiality
+    arena: chat
+    gaps: The try-rudi web page's learn phase has no guardrails (services/rudi-chat/src/app.py).
+
+  - id: prompt-leak-guard
+    name: Reply leak gate (deterministic)
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Blocks any reply that contains an internal marker or 10+ consecutive words copied from the
+      system prompt (quoted user words and the public About-me text are exempt) and sends a
+      localized redirect instead ("Let's keep the focus on you…"). A blocked reply's signals are
+      dropped.
+    expected: Real leaks blocked; real coaching never replaced (false positives are failures too).
+    observe: The reply equals a SAFE_REPLY string; arena info.leak_blocked; log "LEAKGUARD blocked reason=…".
+    code:
+      - services/whatsapp/src/leakguard.py:guard
+      - services/whatsapp/src/leakguard.py:MARKERS
+      - services/call/src/leakguard.py
+      - services/whatsapp/src/responder.py:respond
+    knobs: [OVERLAP_WORDS=10]
+    tests:
+      - services/whatsapp/tests/test_leakguard.py
+      - evals/injection/run.py
+    arena: chat
+
+  - id: objection-gate
+    name: Objections — wrong number, stop, hostile (freeze)
+    domain: safety
+    channels: [whatsapp]
+    summary: >-
+      Before the model sees a turn, a lexicon (all locales) and — on the first 5 user messages — a
+      model classifier detect objections. A hit freezes the contact, sends one canned frozen_ack,
+      alerts the team and cancels pending calls; afterwards silence until an operator unfreezes.
+      "Stop smoking" health sentences are deliberately not matched.
+    expected: Zero false positives ("ik wil stoppen met roken" is coaching); real objections freeze at once.
+    observe: meta.status=frozen; one frozen_ack; S3 alert.
+    code:
+      - services/whatsapp/src/objection.py:detect
+      - services/whatsapp/src/processor.py:_freeze_and_notify
+      - services/whatsapp/src/store.py:freeze
+      - services/whatsapp/src/alerts.py:conversation_frozen
+    knobs: [OBJECTION_CLASSIFIER, OBJECTION_CLASSIFIER_TURNS=5]
+    tests:
+      - services/whatsapp/tests/test_objection.py
+      - evals/objection/run.py
+    arena: none
+    gaps: Indirect objections after turn 5 reach only the lexicon. Not exercised by the arena's chat channel.
+
+  - id: pii-deidentification
+    name: PII redaction and aliasing
+    domain: safety
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Tier 1, irreversible, at ingest: Belgian national number, e-mail, IBAN, card and phone become
+      placeholders. Tier 2, reversible, per session: third-party names in trigger frames become
+      Person_A etc. for the model and are restored before sending.
+    expected: Names said back correctly; no raw "<| Person_A |>" or "them" in place of a name; identifiers never stored.
+    observe: arena info.pii_redacted; call manifest pii.redacted; placeholders visible in replies.
+    code:
+      - services/whatsapp/src/deid.py:scrub_inbound
+      - services/whatsapp/src/deid.py:restore_outbound
+      - services/whatsapp/src/processor.py:_scrub_inbound
+      - services/whatsapp/src/webchat.py:chat_turn
+      - services/call/src/ws.py:_scrub_inbound
+      - services/call/src/deid.py
+    tests:
+      - services/whatsapp/tests/test_deid.py
+      - services/whatsapp/tests/test_deid_wiring.py
+      - services/call/tests/test_deid.py
+      - services/whatsapp/tests/test_engine_turn.py
+    arena: chat
+    gaps: Proactive reach-outs are sent without restore_outbound, so a model-echoed placeholder could reach the phone. The test console does not de-identify.
+
+  # ------------------------------------------------------------------ language, tone and time
+  - id: language-mirroring-and-i18n
+    name: Language mirroring and localized strings
+    domain: language
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Replies in the person's language and reports signals.lang; the last-used language becomes the
+      contact locale for canned strings and proactive messages. Calls speak the configured call
+      language (nl-BE or en-GB).
+    expected: A Dutch speaker gets Dutch throughout — replies, nudges, canned errors — with no flip to English mid-chat.
+    observe: signals.lang; arena meta.rudi.lang; the language of each reply.
+    code:
+      - services/whatsapp/src/responder.py:LANG_NOTE
+      - services/whatsapp/src/i18n.py:normalize_locale
+      - services/whatsapp/src/leakguard.py:SAFE_REPLY
+      - services/whatsapp/src/tester_api.py:_engine_locale
+      - services/call/src/brain.py:_call_brief
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_language_signal_captured
+      - services/call/tests/test_call.py::Languages
+    arena: chat
+    gaps: The intro is always English (see session-opening).
+
+  - id: persona-ocean
+    name: Personality (OCEAN)
+    domain: language
+    channels: [whatsapp, webchat]
+    summary: >-
+      Tone, energy, warmth and pacing follow the conversation's OCEAN persona block (placed after
+      the guardrails, before the phase body). It never overrides role, facts or guardrails, and
+      OCEAN is never mentioned.
+    expected: A recognisable but consistent voice; the persona never leaks ("as a highly conscientious coach…").
+    observe: The persona slug in the arena case (personality); style across replies.
+    code:
+      - services/whatsapp/src/personality.py:resolve_block
+      - services/whatsapp/seed/personalities/seed-rudi-v2/personality.json
+      - services/whatsapp/seed/personalities/seed-rudi-v3/personality.json
+    knobs: [DEFAULT_PERSONALITY_SLUG=seed-rudi-v2]
+    tests:
+      - services/whatsapp/tests/test_personality.py
+    arena: chat
+    gaps: The call engine has no persona block.
+
+  - id: chat-message-style
+    name: Message style and channel self-description
+    domain: language
+    channels: [whatsapp, webchat]
+    summary: >-
+      Short, human WhatsApp-style messages (1–4 sentences, *bold* not **bold**); reach-outs 1–2
+      sentences of plain text; says he lives on WhatsApp, never that he is a website or app;
+      acknowledges media it cannot read yet.
+    expected: No long paragraphs or lists; the channel described truthfully.
+    observe: Words per reply; the reply's claims about the channel.
+    code:
+      - services/whatsapp/src/responder.py:CHANNEL
+      - services/whatsapp/src/responder.py:_to_whatsapp
+      - services/whatsapp/seed/prompts/rudi_learn_prompt_wa.md
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_markdown_bold_converted_to_whatsapp
+    arena: chat
+    gaps: In web chat (tester console, arena) Rudi still says "here on WhatsApp" and promises check-ins that never come.
+
+  - id: time-awareness
+    name: Time awareness
+    domain: language
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Knows the local time and talks about moments like a friend ("today by 18:00", "last
+      Tuesday"); never echoes timestamps or time markers; checks that a planned time has passed
+      before asking how it went; summaries keep full dates.
+    expected: No "[Time marker…]" in replies; "yesterday" and "tonight" computed right.
+    observe: Time words in replies; arena cases with time jumps.
+    code:
+      - services/whatsapp/src/timeline.py:now_note
+      - services/whatsapp/src/timeline.py:humanize
+      - services/whatsapp/src/timeline.py:render
+      - services/whatsapp/src/timeline.py:strip_markers
+      - services/call/src/timeline.py
+    knobs: [DEFAULT_TZ=Europe/Brussels]
+    tests:
+      - services/whatsapp/tests/test_timeline.py
+      - services/call/tests/test_call.py::Clock
+    arena: chat
+
+  # ------------------------------------------------------------------ memory and state
+  - id: conversation-memory
+    name: Session memory and goal continuity
+    domain: memory
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Remembers the last 20 turns (24 on calls), the goal, its domain and the commitment with
+      timestamps; the goal survives a session restart; history is cleared when learn switches to
+      goal and on a concluded restart. No long-term profile or vector recall in replies.
+    expected: No re-asking a known goal; facts from earlier in the session stay used.
+    observe: Replies that contradict or forget earlier turns.
+    code:
+      - services/whatsapp/src/responder.py:new_session
+      - services/whatsapp/src/responder.py:respond
+      - services/whatsapp/src/store.py:record_outbound
+      - services/call/src/calllog.py:record_turn
+      - docs/pii-and-memory-blueprint.md
+    knobs: [MAX_HISTORY=20 (chat), 24 (call)]
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_a_restart_no_longer_forgets_the_goal
+      - services/whatsapp/tests/test_timeline.py
+    arena: chat
+    gaps: profile.json (goal, most recent development) feeds reach-outs only, never replies — the nudge remembers what the reply forgets.
+
+  - id: profile-summary
+    name: Profile summary (most recent development)
+    domain: memory
+    channels: [whatsapp]
+    summary: >-
+      After each committed or concluded turn — and before a nudge when stale — writes a one-sentence
+      neutral third-person summary with full dates, plus the goal, to profile.json. It feeds
+      reach-outs and the template variable {{1}}.
+    expected: Full dates, never "tonight"; no PII.
+    observe: profile.json most_recent_development.
+    code:
+      - services/whatsapp/src/responder.py:summarize
+      - services/whatsapp/src/processor.py:_update_profile
+      - services/whatsapp/src/store.py:write_profile
+      - services/whatsapp/src/reengage.py:_refresh_profile_if_stale
+    tests:
+      - services/whatsapp/tests/test_store.py
+      - services/whatsapp/tests/test_responder.py::test_summarize_returns_one_line
+    arena: none
+
+  # ------------------------------------------------------------------ scheduling and proactive contact
+  - id: check-in-scheduling
+    name: Check-in scheduling
+    domain: proactive
+    channels: [whatsapp]
+    summary: >-
+      A promised check-in outranks the window heuristics: it is sent at the promised time, moved to
+      social hours and the 45-minute spacing floor, if that lands before the 24 h window closes.
+      Without a promise, a keep-warm nudge goes at window expiry − 2 h, pulled before quiet hours.
+    expected: A message arrives at the promised time about the promised thing; an "ok!" reply does not cancel it.
+    observe: meta.next_proactive_at / next_proactive_kind; the re-engagement runner's sends.
+    code:
+      - services/whatsapp/src/store.py:compute_next_proactive
+      - services/whatsapp/src/store.py:record_inbound
+      - services/whatsapp/src/reengage.py:handler
+    knobs: [NUDGE_LEAD, PRE_QUIET_BUFFER, QUIET_START/END, PROACTIVE_TEST_MODE]
+    tests:
+      - services/whatsapp/tests/test_runner.py::CommitmentTests
+      - services/whatsapp/tests/test_reengage.py
+    arena: none
+
+  - id: keep-warm-reach-out
+    name: Proactive message content
+    domain: proactive
+    channels: [whatsapp, call]
+    summary: >-
+      Writes one short warm message about the person's goal or last step — about THE promised thing
+      when there is one; no re-introduction, no new goals or homework; canned nudge on AI error. The
+      team's "wipe commitments" sends a recommit variant, or books a call when out of window.
+    expected: Specific, short, no "Hi, I'm Rudi!".
+    observe: The proactive messages in the thread.
+    code:
+      - services/whatsapp/src/responder.py:reach_out
+      - services/whatsapp/src/responder.py:REACHOUT
+      - services/whatsapp/src/responder.py:RECOMMIT
+      - services/whatsapp/src/reengage.py:_send_nudge
+      - services/whatsapp/src/tester_api.py:_wipe_commitments
+    tests:
+      - services/whatsapp/tests/test_responder.py::test_reach_out_is_contextual_and_appended
+      - services/whatsapp/tests/test_runner.py
+    arena: none
+    gaps: Sent without restoring aliases (see pii-deidentification).
+
+  - id: outreach-limits-and-quiet-hours
+    name: Outreach limits and quiet hours
+    domain: proactive
+    channels: [whatsapp, call]
+    summary: >-
+      At most 2 unanswered system-initiated sends in a row; at least 45 minutes after the last
+      outbound; nothing proactive between 21:30 and 06:30 local time; consent, active status and
+      keep_warm gate every proactive send; replies are never held.
+    expected: Never three Rudi-initiated messages in a row; no night messages or calls.
+    observe: The send times of proactive messages and calls.
+    code:
+      - services/whatsapp/src/store.py:outreach_block
+      - services/whatsapp/src/store.py:claim_outreach
+      - services/whatsapp/src/store.py:is_quiet
+      - services/call/src/dispatcher.py:gate
+    knobs: [MAX_UNANSWERED_OUTREACH=2, MIN_OUTREACH_SPACING_MIN=45, QUIET_START=21:30, QUIET_END=06:30]
+    tests:
+      - services/whatsapp/tests/test_outreach_limits.py
+      - services/whatsapp/tests/test_reengage.py
+    arena: none
+
+  - id: out-of-window-templates
+    name: Out-of-window templates
+    domain: proactive
+    channels: [whatsapp]
+    summary: >-
+      After the 24 h window lapses, sends a pre-approved template with {{1}} = the stored goal or a
+      generic phrase; rotates template SIDs per locale; at least 48 h between templates; dormant
+      after 3 unanswered.
+    expected: The person hears from Rudi after the window closes, within Meta's rules.
+    observe: Template sends; "SKIP template … no approved template SID" in the logs.
+    code:
+      - services/whatsapp/src/reengage.py:_send_template
+      - services/whatsapp/src/provider.py:send_template
+      - services/whatsapp/seed/config/wa_templates.json
+    knobs: [MIN_TEMPLATE_GAP=48h, MAX_TEMPLATE_MISSES=3, REENGAGE_INSERT_GOAL]
+    tests:
+      - services/whatsapp/tests/test_runner.py::test_template_without_sid_is_skipped
+      - services/whatsapp/tests/test_reengage.py
+    arena: none
+    gaps: No template SIDs are configured, so nothing is sent after the window lapses.
+
+  # ------------------------------------------------------------------ channel: WhatsApp
+  - id: whatsapp-ingest-and-delivery
+    name: WhatsApp ingest and delivery
+    domain: whatsapp
+    channels: [whatsapp]
+    summary: >-
+      Verifies the Twilio signature, queues per user (FIFO), pseudonymizes, stores every message
+      masked, counts media; media without text gets a canned acknowledgement (no ASR or vision
+      yet); errors get the canned "tired" / "error" strings; AI_RESPONDER=false hands the thread to
+      an operator.
+    expected: Every inbound message answered once, in order, with no duplicate sends.
+    observe: The canned media, tired and error strings in a thread.
+    code:
+      - services/whatsapp/src/webhook.py:handler
+      - services/whatsapp/src/provider.py
+      - services/whatsapp/src/processor.py:handler
+      - services/whatsapp/src/processor.py:_reply_and_persist
+    knobs: [AI_RESPONDER, VALIDATE_SIGNATURE, DEFAULT_CONSENT_STATE]
+    tests:
+      - services/whatsapp/tests/test_processor.py
+      - services/whatsapp/tests/test_store.py
+    arena: none
+
+  # ------------------------------------------------------------------ channel: web chat
+  - id: webchat-turn
+    name: Web-chat turn
+    domain: webchat
+    channels: [webchat]
+    summary: >-
+      The WhatsApp engine minus delivery: de-identify, respond, restore. Nothing proactive is ever
+      scheduled. Surfaces: tester Track A (POST /chat), the Training Arena (meetrudi-engine-turn,
+      stateless, arena-only keys), the internal test console and the try-rudi page.
+    expected: Same reply quality as WhatsApp; the arena turn behaves like the tester chat.
+    observe: Arena results meta.rudi (phase, lang, signals, guard, model, tokens).
+    code:
+      - services/whatsapp/src/webchat.py:chat_turn
+      - services/whatsapp/src/engine_turn.py:handler
+      - services/whatsapp/src/tester_api.py:_chat_send
+      - services/whatsapp/src/test_console.py
+      - services/rudi-chat/src/app.py
+    tests:
+      - services/whatsapp/tests/test_engine_turn.py
+      - services/whatsapp/tests/test_tester_api.py
+      - services/whatsapp/tests/test_test_console.py
+    arena: chat
+    gaps: The arena chat skips the objection gate, delivery, the 24 h window, re-engagement and the profile.
+
+  # ------------------------------------------------------------------ channel: voice call
+  - id: call-opening-and-greeting
+    name: Call opening
+    domain: call
+    channels: [call]
+    summary: >-
+      Rudi speaks first with a greeting only (first name, a few words), does not yet say what he is
+      or why he calls, and waits for "hello". The name reaches the model only as an alias.
+    expected: A short hello, not a monologue over the person's "hello?".
+    observe: Call manifest turn 0 (kind opening).
+    code:
+      - services/call/src/brain.py:open_call
+      - services/call/src/brain.py:_call_brief
+      - services/call/src/ws.py:_on_setup
+    tests:
+      - services/call/tests/test_call.py::GreetThenDisclose
+    arena: none
+
+  - id: call-turn-taking-and-speech
+    name: Speaking on a call
+    domain: call
+    channels: [call]
+    summary: >-
+      Speakable replies: 1–2 sentences (3 at most), about 40 words, one question placed last, no
+      markdown or emoji, numbers as words; follows interruptions; asks for a repeat when
+      unintelligible. ASR, end-of-turn detection, barge-in and TTS come from Twilio
+      ConversationRelay with a per-language voice cascade.
+    expected: No three-question turns, no read-out asterisks, no dead air.
+    observe: Call manifest interruptions[], totals.llm_ms, words per reply.
+    code:
+      - services/call/src/brain.py:VOICE_STYLE
+      - services/call/src/brain.py:_speakable
+      - services/call/src/relay.py:pick_voice
+      - services/call/src/ws.py:_on_interrupt
+    tests:
+      - services/call/tests/test_call.py
+    arena: none
+
+  - id: call-goals-and-whatsapp-handoff
+    name: Call goals and the WhatsApp hand-off
+    domain: call
+    channels: [call]
+    summary: >-
+      Each call has a hidden system goal: GET_TO_KNOW (first call; ends by asking for any WhatsApp
+      message), SET_NEARTERM_GOAL or GOAL_FOLLOWUP (second call), REINSTATE_TALK after 7 quiet days;
+      runner call-backs for a promise, a WhatsApp reminder 22 h after GET_TO_KNOW, and recommit.
+    expected: A GET_TO_KNOW call ends with the WhatsApp hand-off; the goal name is never said aloud.
+    observe: The call manifest goal and its last turns.
+    code:
+      - services/call/src/brain.py:_goal_note
+      - services/call/src/brain.py:CALL_WHATSAPP_HANDOFF
+      - services/whatsapp/src/tester_store.py:choose_call_goal
+      - services/whatsapp/src/tester_api.py:_next_call_goal
+      - services/whatsapp/src/tester_call_runner.py:_config_for
+    knobs: [TESTER_REINSTATE_AFTER_DAYS=7, TESTER_WHATSAPP_GRACE_HOURS=22]
+    tests:
+      - services/whatsapp/tests/test_tester_api.py
+      - services/whatsapp/tests/test_tester_store.py
+      - services/whatsapp/tests/test_tester_call_runner.py
+    arena: none
+    gaps: REINSTATE_TALK has no instruction note.
+
+  - id: call-closing-and-time-budget
+    name: Ending a call
+    domain: call
+    channels: [call]
+    summary: >-
+      The call ends the moment the person commits: that turn confirms the commitment, says when
+      Rudi will be back in touch, thanks them by name and wishes them well. With 150 s left it
+      steers to a close; at 60 s it is the final message; at budget − 60 s the engine concludes.
+    expected: A warm goodbye, then the hang-up — never an abrupt end after a bare restatement.
+    observe: end_reason=engine-ended; the last turn.
+    code:
+      - services/call/src/brain.py:FAREWELL
+      - services/call/src/brain.py:_time_note
+      - services/call/src/ws.py:_on_prompt
+    knobs: [config.max_minutes (default 12)]
+    tests:
+      - services/call/tests/test_call.py::Farewell
+    arena: none
+    gaps: The tester configs send max_seconds=300 but the brain reads max_minutes, so the 5-minute cap is not enforced; learn-phase calls get no wrap-up warning.
+
+  - id: call-voicemail-and-failure-recovery
+    name: Voicemail and failure recovery on calls
+    domain: call
+    channels: [call]
+    summary: >-
+      Never talks to a machine: Twilio AMD plus a screen of the first utterance (≥60 characters and
+      a voicemail phrase means a silent hang-up). One failed model turn gets "Sorry, I lost my train
+      of thought…"; two in a row, or a failure at setup, get the canned operational-pause line and
+      a hang-up.
+    expected: No conversation with voicemail; no silence after a failed turn.
+    observe: end_reason voicemail, ai-unavailable, rate-limited; turn kind turn-failed.
+    code:
+      - services/call/src/relay.py:looks_like_voicemail
+      - services/call/src/ws.py:_on_prompt
+      - services/call/src/ws.py:_abandon
+      - services/call/src/status.py:apply_status
+      - services/call/src/gateway.py:generate
+    knobs: [AI_TURN_BUDGET_S=18, AI_ATTEMPT_TIMEOUT_S=7, AI_MAX_OUTPUT_TOKENS=250]
+    tests:
+      - services/call/tests/test_call.py
+      - services/call/tests/test_status.py
+    arena: none
+
+  - id: call-dispatch-and-follow-up-calls
+    name: Placing calls
+    domain: call
+    channels: [call]
+    summary: >-
+      Dials only with consent, an active contact, outside quiet hours and to the registered number;
+      tester limits (5 connected calls each, 40 a day, one at a time); at most one Rudi-initiated
+      reach-back; a speak-only call when the AI has no headroom; a frozen WhatsApp thread cancels
+      every pending call.
+    expected: No second reach-back, no call to a frozen contact, no night calls.
+    observe: The call ledger and manifest (telephony.mode, end_reason).
+    code:
+      - services/call/src/dispatcher.py:place_call
+      - services/whatsapp/src/tester_api.py:_call_request
+      - services/whatsapp/src/tester_call_runner.py:place_due
+      - services/whatsapp/src/gateway.py:has_headroom
+    knobs: [TESTER_MAX_CALLS=5, TESTER_DAILY_CALL_CAP=40]
+    tests:
+      - services/call/tests/test_call.py::Gates
+      - services/whatsapp/tests/test_tester_call_runner.py
+      - services/call/tests/test_status.py
+    arena: none
+
+  # ------------------------------------------------------------------ platform
+  - id: model-gateway
+    name: Model gateway and the JSON reply envelope
+    domain: platform
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      Every engine turn calls the model cascade from S3 config/ai_endpoints.json (Groq and OVH
+      gpt-oss-120b, then smaller models) in JSON mode, retries a 429 twice with backoff, and parses
+      the {reply, signals} envelope; an unparsable answer degrades to plain text with no signals.
+      The call copy adds a time budget and rejects empty or truncated output.
+    expected: A reply within the latency budget; signals always present; a provider failure falls through to the next entry.
+    observe: arena meta.rudi.model and tokens; latency per turn; tester and judge errors in the results.
+    code:
+      - services/whatsapp/src/gateway.py:generate
+      - services/whatsapp/src/gateway.py:using
+      - services/whatsapp/src/responder.py:_parse_envelope
+      - services/ask-ai/seed/config/ai_endpoints.json
+      - services/call/src/gateway.py:generate
+    knobs: [GATEWAY_MAX_RETRIES, GATEWAY_BACKOFF_BASE]
+    tests:
+      - services/whatsapp/tests/test_gateway.py
+      - services/call/tests/test_call.py::TurnBudget
+    arena: chat
+    gaps: Groq rejects some of Rudi's JSON on explicit crisis statements, which costs a fallback hop.
+
+  - id: arena-harness
+    name: The Training Arena itself
+    domain: platform
+    channels: [webchat]
+    summary: >-
+      Not Rudi: the simulated tester, the judge, the runner, the dispatcher and the results
+      writer of the Training Arena. Errors here (tester or judge failures, parking, budget stops)
+      are application errors of the test bench, not of Rudi.
+    expected: Every case finishes with a verdict; a failing provider hands over to the next; no case lost.
+    observe: Case errors and stop reasons in the results file.
+    code:
+      - services/training-arena/src/runner.py
+      - services/training-arena/src/arena_tester.py
+      - services/training-arena/src/arena_eval.py
+      - services/training-arena/src/arena_llm.py
+      - services/training-arena/src/dispatcher.py
+      - services/training-arena/src/arena_results.py
+      - services/training-arena/seed/prompts/arena_tester_prompt.md
+      - services/training-arena/seed/prompts/arena_judge_prompt.md
+    tests:
+      - services/training-arena/tests/test_runner.py
+      - services/training-arena/tests/test_pipeline.py
+      - services/training-arena/tests/test_llm.py
+    arena: chat

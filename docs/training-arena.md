@@ -574,6 +574,11 @@ prompts/arena_tester_prompt.md · arena_judge_prompt.md
 runtime/leases/… · runtime/dispatcher.json in-flight accounting and reservations (2 days)
 stats/daily/<yyyy-mm-dd>.json              dashboard aggregates: outcomes, latency histogram, spend
 audit/<yyyy>/<mm>/<dd>/…                   who did what
+skills/rudi-skills.yaml                    the skills catalogue (seeded)
+analyses/records/<IM-id>.json              an improvement analysis: who, source, status, cost
+analyses/<batch-id | uploads>/<stem>__improvements__<IM-id>.html · .md · .json
+analyses/sources/<username>/<ts>/<file>    results files uploaded for an analysis
+stats/analyses/<yyyy-mm>.json              what the arena's extractor spent this month
 ```
 
 Nothing of the arena is ever written to `meetrudi-ai-data-…`, and no live conversation is ever
@@ -639,6 +644,48 @@ viewer show cost by role, per case and per message.
 
 ---
 
+## 13a. Improvements — from a run to feature requests
+
+The console's **Improvements** pane (every user) turns a results log into improvement work. Pick a
+run the arena stored (final results, or the latest partial-results snapshot of a running batch) or
+upload one from your computer; a model reads it with **Rudi's skills catalogue** and returns three
+lists:
+
+1. **Application errors** — failures of the platform, the engine, the providers or the arena
+   (timeouts, rate limits, rejected JSON, crashes). Every error group the runner recorded is listed
+   even if the model leaves it out (marked *as recorded*).
+2. **Rudi's weak points** — what the transcripts and the judge's reasons show, each tied to one
+   catalogue skill and quoted from the run.
+3. **Feature requests** — one per change, written for a coding agent: problem, change, acceptance
+   criteria, code pointers and an arena test case, tied to a skill and ranked P1–P3.
+
+**The skills catalogue** — [rudi-skills-catalogue.md](rudi-skills-catalogue.md), data in
+`services/training-arena/seed/skills/rudi-skills.yaml` (seeded to `skills/rudi-skills.yaml`) —
+splits Rudi's engine (WhatsApp, web chat, call) into 37 skills with their code, expected behaviour,
+tests and known gaps. Feature requests cite its ids; an unknown id is kept as `unmapped:<id>` and
+noted. `tests/test_improve.py` checks that every code and test pointer in it still exists.
+
+**Who reads the run:**
+
+- **Your Claude** — when the local generator runs on your computer (the pane starts it with the
+  same start link as the Generator), Claude Code reads the run on your Claude subscription: no API
+  cost, nothing in AWS but the stored result. Identifiers (e-mail, phone, IBAN) are masked first —
+  project decision 22.
+- **The arena's model** — otherwise `meetrudi-arena-extractor` reads it in AWS on the judge
+  cascade — in practice its paid EU entry, OVH, as a run's prompt is larger than Groq's free minute
+  allows (about €0.002–0.01 a run) —
+  refused before any call above `ANALYSIS_CEILING_EUR` (€0.25) or beyond the month budget, and
+  counted in `stats/analyses/<yyyy-mm>.json`.
+
+Both run the same code, `src/arena_improve.py`: read and check the results; group the recorded
+errors; a digest of at most 110,000 characters with failing cases first and the rest summarised;
+one model call in JSON mode; the answer checked against the catalogue and the run's case ids. The
+report is stored next to its run as `analyses/<batch id | uploads>/<results stem>__improvements__<IM-id>.html`
+(+ `.md`, `.json`); the API renders the stored HTML itself, from the JSON, for either engine.
+Routes: [API.md](../services/training-arena/API.md) — *Improvement analyses*.
+
+---
+
 ## 14. IAM and deployment
 
 Exact steps: [infra/iam/README.md](../infra/iam/README.md) §7 (Lambda quota) and §8 (role,
@@ -664,7 +711,7 @@ python deploy.py training-arena
 
 `whatsapp` adds `meetrudi-engine-turn` and redeploys the live WhatsApp functions with the shared
 `webchat.chat_turn` (behaviour unchanged; 435 tests). `training-arena` builds the PyYAML layer,
-creates the bucket, queues and five functions, seeds `defaults/` and `prompts/` into the arena
+creates the bucket, queues and six functions, seeds `defaults/`, `prompts/` and `skills/` into the arena
 bucket, and prints the API URL. Put that URL into `site/training-arena/config.js` as `API_BASE`
 and push `site/**` to `main`; GitHub Pages then serves
 `https://meet-rudi.github.io/start-up-app/training-arena/enter_arena.html`.
@@ -692,10 +739,10 @@ It is a parser, not a service — no data leaves the account, no DPA implication
   change without this suite — the same rule §8 of CLAUDE.md applies to guardrails.
 - **Smoke:** the 7-case sample batch, run end to end after every deploy.
 
-As built: `python -m unittest discover -s services/training-arena/tests -v` (79 tests: formats,
+As built: `python -m unittest discover -s services/training-arena/tests -v` (128 tests: formats,
 results and planning, model client and preventive failover, evaluators incl. System One and
-escalation, the case runner, dispatcher, ingest, assembler, API, and the whole pipeline end to end
-in memory) and `python -m unittest discover -s services/whatsapp/tests -v` (435 tests, incl.
+escalation, the case runner, dispatcher, ingest, assembler, API, launch estimate, generator,
+improvement extractor and skills catalogue, and the whole pipeline end to end in memory) and `python -m unittest discover -s services/whatsapp/tests -v` (435 tests, incl.
 `test_engine_turn.py`). The judge calibration set is still to be written.
 
 ---
@@ -715,6 +762,7 @@ in memory) and `python -m unittest discover -s services/whatsapp/tests -v` (435 
 | A8 | Console wired to the API; dashboard stats and cost section | ✅ built; live mode tested against a fake API |
 | A9 | Free slow mode; launch estimate (duration, cost, end time per mode) | ✅ deployed 2026-10-14 |
 | A10 | **Generator** (super-admins): a skill in plain words → a checked batch file, written by Claude Code on the super-admin's own computer and subscription — [generator/README.md](../services/training-arena/generator/README.md) | ✅ built 2026-10-15; real end-to-end run in the console (3 cases, 40 s, 0 errors). Started and stopped from the console (start link, one-time setup by double-click) — no command line |
+| A11 | **Improvements** (every user): a results log → application errors, Rudi's weak points and feature requests mapped to the **skills catalogue** (37 skills); on the user's own Claude or the arena's model, stored next to the run | ✅ built 2026-10-15; console flow tested against the real API code in memory |
 
 Proven in AWS on 2026-10-14: the crisis batch end to end (`TA-20261014-KXSA`, 4 cases, €0.0136,
 4 min) — real Groq and OVH calls, Rudi failing over Groq → OVH, the free-tier pacing waiting

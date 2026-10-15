@@ -68,7 +68,8 @@ STRIP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", 
              "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_BEDROCK_BASE_URL",
              "ANTHROPIC_VERTEX_PROJECT_ID", "ANTHROPIC_VERTEX_BASE_URL", "AWS_BEARER_TOKEN_BEDROCK")
 NO_TOOLS = "Bash Edit Write Read Glob Grep WebFetch WebSearch NotebookEdit Task TodoWrite SlashCommand BashOutput KillShell"
-MAX_BODY = 2 * 1024 * 1024
+MAX_BODY = 16 * 1024 * 1024          # a results part can be a few megabytes
+ANALYSIS_ID_RE = re.compile(r"^IM-\d{8}-[0-9A-Z]{4}$")
 PORT = 47815                         # unusual on purpose: 8765 and friends are often taken by other local tools
 MAX_PAIR_TRIES = 10
 SCHEME = "meetrudi-generator"        # the start link: meetrudi-generator://start?pair=<one-time code>
@@ -433,7 +434,7 @@ class App:
         if path == "/recheck" and method == "POST":
             self.check_claude()
             return 200, {"claude_ok": self.claude_ok, "claude_error": self.claude_error}
-        if path in ("/plan", "/redo", "/write") and not self.claude_ok:
+        if path in ("/plan", "/redo", "/write", "/analyze") and not self.claude_ok:
             return 409, {"error": "claude_unavailable", "detail": self.claude_error or
                          "The generator is still checking that Claude Code answers; try again in a few seconds."}
         if path == "/personas" and method == "GET":
@@ -456,6 +457,33 @@ class App:
                 out["history_id"] = self.history.add(spec, out)
                 return out
             return 202, {"job": self.jobs.start("write", work)}
+        if path == "/analyze" and method == "POST":
+            # The Improvement Extractor on this computer: the same code as the arena's extractor,
+            # with Claude Code instead of the arena's model. The console stores the report in S3.
+            import arena_improve
+            text, aid = str(body.get("text") or ""), str(body.get("analysis_id") or "")
+            if not text.strip():
+                return 400, {"error": "bad_request", "detail": "No results file was sent."}
+            if not ANALYSIS_ID_RE.match(aid):
+                return 400, {"error": "bad_request", "detail": "Start the analysis in the console first."}
+            src = body.get("source") or {}
+            source = {"name": os.path.basename(str(src.get("name") or "results.yaml"))[:160], "batch_id": src.get("batch_id"), "key": src.get("key")}
+            model = str(body.get("model") or "sonnet").lower()
+            model = model if model in gen_core.MODELS else "sonnet"
+            label = "Claude %s (your subscription, on your computer)" % model.capitalize()
+
+            def analyse(p, c):
+                out = arena_improve.analyze(text, source, lambda prompt: self.claude.ask(prompt, model)[0], label, aid, progress=p,
+                                            mask_ids=True)
+                return {"html": out["html"], "markdown": out["markdown"], "file": out["file"], "model": model,
+                        "json": {"format": arena_improve.REPORT_FORMAT, "meta": out["meta"], "report": out["report"], "cases": out["cases"]}}
+
+            def work(p, c):
+                try:
+                    return analyse(p, c)
+                except arena_improve.ImproveError as e:
+                    raise gen_core.GenError(str(e))
+            return 202, {"job": self.jobs.start("analyze", work)}
         m = re.match(r"^/jobs/([0-9a-f]{12})(/cancel)?$", path)
         if m:
             view = self.jobs.cancel(m.group(1)) if m.group(2) and method == "POST" else self.jobs.view(m.group(1))

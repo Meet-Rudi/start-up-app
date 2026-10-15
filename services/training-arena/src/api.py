@@ -33,6 +33,7 @@ import base64
 import datetime
 
 import arena_estimate
+import arena_improve
 import arena_llm
 from arena_auth import Auth, AuthError
 from arena_common import (iso, log, display, local_day, new_batch_id, slug, file_stem, split_case_id,
@@ -42,6 +43,9 @@ from arena_store import ArenaStore, ENGINE_DEFAULTS
 ARENA_BUCKET = os.environ.get("ARENA_BUCKET", "")
 DISPATCH_QUEUE_URL = os.environ.get("DISPATCH_QUEUE_URL", "")
 INGEST_FUNCTION = os.environ.get("INGEST_FUNCTION", "meetrudi-arena-ingest")
+EXTRACTOR_FUNCTION = os.environ.get("EXTRACTOR_FUNCTION", "meetrudi-arena-extractor")
+ANALYSIS_ID_RE = re.compile(r"^IM-\d{8}-[0-9A-Z]{4}$")
+MAX_REPORT_BYTES = 4 * 1024 * 1024
 ASSEMBLER_FUNCTION = os.environ.get("ASSEMBLER_FUNCTION", "meetrudi-arena-assembler")
 ENGINE_FUNCTION = os.environ.get("ENGINE_FUNCTION", "meetrudi-engine-turn")
 RELEASE = os.environ.get("RELEASE", "unknown")
@@ -162,6 +166,8 @@ class Api:
                 bid, seq = split_case_id(parts[1])
                 self._batch(bid)
                 return resp(200, {"url": self._presign_get(self.store.result_yaml_key(bid, seq), "%s.yaml" % parts[1])})
+        if parts and parts[0] == "analyses":
+            return self._analyses(method, parts[1:], q, body)
         if parts and parts[0] == "admin":
             self._sa()
             return self._admin(method, parts[1:], q, body)
@@ -408,6 +414,122 @@ class Api:
         if name not in files:
             raise Http(404, "not_found", "No such file.")
         return self._presign_get("batches/%s/output/%s" % (m["id"], name), name)
+
+    # ------------------------------------------------------------------ improvement analyses
+    # Every signed-in user may analyse any results log: it is read-only and synthetic. A report is
+    # made in AWS by meetrudi-arena-extractor ("arena"), or by Claude Code on the user's own
+    # computer ("local", stored here when it is done). Layout: analyses/records/<id>.json, and the
+    # report next to its source: analyses/<batch id | uploads>/<results stem>__improvements__<id>.html.
+    def _analyses(self, method, parts, q, body):
+        u = self.user["u"]
+        if not parts and method == "GET":
+            recs = []
+            for k in sorted(self.store.b.list_keys("analyses/records/"), reverse=True)[:300]:
+                r = self.store.b.get_json(k)
+                if r and (not q.get("batch") or r.get("batch_id") == q.get("batch")):
+                    recs.append(self._analysis_view(r))
+            recs.sort(key=lambda r: r["created_at"] or "", reverse=True)
+            return resp(200, {"analyses": recs[:100]})
+        if parts == ["uploads"] and method == "POST":
+            name = os.path.basename(str(body.get("filename") or ""))
+            if not name.lower().endswith((".yaml", ".yml")):
+                raise Http(400, "bad_type", "Choose a results file (.yaml).")
+            key = "analyses/sources/%s/%s/%s" % (u, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S"), name)
+            url = self.s3.generate_presigned_url("put_object", Params={"Bucket": ARENA_BUCKET, "Key": key}, ExpiresIn=URL_TTL)
+            return resp(200, {"url": url, "key": key})
+        if not parts and method == "POST":
+            engine = "local" if body.get("engine") == "local" else "arena"
+            source = self._analysis_source(body.get("source") or {}, engine)
+            aid = "IM-" + new_batch_id()[3:]
+            while self.store.b.get_json("analyses/records/%s.json" % aid):
+                aid = "IM-" + new_batch_id()[3:]
+            rec = {"id": aid, "by": u, "engine": engine, "status": "queued" if engine == "arena" else "running",
+                   "created_at": iso(), "source": source, "batch_id": source.get("batch_id"), "steps": []}
+            self.store.b.put_json("analyses/records/%s.json" % aid, rec)
+            self.store.audit(u, "analysis.start", aid, "%s · %s" % (engine, source.get("name")))
+            if engine == "arena":
+                self.invoke(EXTRACTOR_FUNCTION, {"analysis": aid})
+            return resp(201, {"analysis": self._analysis_view(rec)})
+        if not parts or not ANALYSIS_ID_RE.match(parts[0]):
+            raise Http(404, "not_found", "No such analysis.")
+        rec = self.store.b.get_json("analyses/records/%s.json" % parts[0])
+        if not rec:
+            raise Http(404, "not_found", "No such analysis.")
+        if len(parts) == 1 and method == "GET":
+            return resp(200, {"analysis": self._analysis_view(rec)})
+        if parts[1:] == ["result"] and method == "POST":
+            return resp(200, {"analysis": self._analysis_view(self._store_local(rec, body))})
+        if parts[1:] == ["download"] and method == "GET":
+            if rec.get("status") != "done" or not rec.get("report_key"):
+                raise Http(409, "not_ready", "The report is not ready.")
+            ext = {"html": ".html", "md": ".md", "json": ".json"}.get(q.get("as") or "html", ".html")
+            key = rec["report_key"][:-len(".html")] + ext
+            return resp(200, {"url": self._presign_get(key, key.rsplit("/", 1)[-1])})
+        raise Http(404, "not_found", "No such route.")
+
+    def _analysis_source(self, src, engine):
+        """What a new analysis reads: results files of a batch, a file uploaded for it, or (local
+        engine) a file the browser already holds — then only its name is recorded."""
+        if src.get("batch"):
+            m = self._batch(src["batch"])
+            files = [f for f in (src.get("files") or []) if isinstance(f, str)]
+            have = set(m.get("files") or []) | {f for s in m.get("snapshots") or [] for f in s.get("files") or []}
+            files = [f for f in files if f in have and ("__results__" in f or "__partial-results-" in f)]
+            if not files:
+                raise Http(400, "bad_source", "Choose one or more results files of that batch.")
+            return {"name": files[0] if len(files) == 1 else re.sub(r"__p\d+of\d+", "", files[0]), "batch_id": m["id"],
+                    "keys": ["batches/%s/output/%s" % (m["id"], f) for f in files], "files": files}
+        key = str(src.get("key") or "")
+        if key:
+            if not key.startswith("analyses/sources/%s/" % self.user["u"]) or ".." in key:
+                raise Http(400, "bad_source", "Upload the file first.")
+            return {"name": key.rsplit("/", 1)[-1], "keys": [key]}
+        if engine == "local" and src.get("name"):
+            return {"name": os.path.basename(str(src["name"]))[:160], "keys": [], "local_file": True}
+        raise Http(400, "bad_source", "Choose a results file.")
+
+    def _store_local(self, rec, body):
+        """The local engine's report, made on the user's computer: stored next to its source."""
+        if rec.get("engine") != "local" or rec.get("by") != self.user["u"]:
+            raise Http(403, "forbidden", "Only the person who ran this analysis can store its result.")
+        if rec.get("status") == "done":
+            raise Http(409, "conflict", "This analysis is already stored.")
+        if body.get("error"):
+            rec.update(status="failed", error=str(body["error"])[:400], finished_at=iso())
+        else:
+            data = body.get("json") if isinstance(body.get("json"), dict) else {}
+            meta, rep = data.get("meta") or {}, data.get("report") or {}
+            batch_id = meta.get("batch_id") if BATCH_ID_RE.match(str(meta.get("batch_id") or "")) else None
+            name = str(meta.get("report") or "")
+            if not re.match(r"^[A-Za-z0-9._-]+__improvements__%s\.html$" % re.escape(rec["id"]), name):
+                raise Http(400, "bad_report", "The report's name does not match this analysis.")
+            # The page and the Markdown are rendered here from the JSON, never stored as sent: a report
+            # anyone downloads is the arena's own, escaped HTML.
+            try:
+                html_ = arena_improve.render_html(rep, meta, data.get("cases") or [])
+                md = arena_improve.markdown(rep, meta)
+            except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+                raise Http(400, "bad_report", "That is not a report this arena made.")
+            if len(html_.encode("utf-8")) > MAX_REPORT_BYTES:
+                raise Http(400, "bad_report", "The report is too large.")
+            base = ("analyses/%s/" % (batch_id or "uploads")) + name[:-len(".html")]
+            self.store.b.put_text(base + ".html", html_, "text/html; charset=utf-8")
+            self.store.b.put_text(base + ".md", md, "text/markdown; charset=utf-8")
+            self.store.b.put_json(base + ".json", data)
+            rec.update(status="done", finished_at=iso(), batch_id=batch_id, report_key=base + ".html", file=name,
+                       model=str(body.get("model") or "")[:80], engine_label=str(meta.get("engine") or "")[:120], cost_eur=0.0,
+                       counts={"errors": len(rep.get("app_errors") or []), "weaknesses": len(rep.get("deficiencies") or []),
+                               "requests": len(rep.get("feature_requests") or [])})
+        self.store.b.put_json("analyses/records/%s.json" % rec["id"], rec)
+        self.store.audit(self.user["u"], "analysis." + rec["status"], rec["id"], rec.get("file") or rec.get("error") or "")
+        return rec
+
+    @staticmethod
+    def _analysis_view(r):
+        out = {k: r.get(k) for k in ("id", "by", "engine", "status", "batch_id", "file", "report_key", "model", "engine_label",
+                                     "cost_eur", "counts", "steps", "error")}
+        out.update(created_at=r.get("created_at"), created=display(r.get("created_at")), source=(r.get("source") or {}).get("name"))
+        return out
 
     def _presign_get(self, key, filename):
         return self.s3.generate_presigned_url("get_object", ExpiresIn=URL_TTL, Params={

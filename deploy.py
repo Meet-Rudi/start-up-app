@@ -9,7 +9,7 @@ Components:
     base      -> stack meetrudi-base    : shared S3 data bucket + meetrudi-lambda-runner role
     ask-ai    -> stack meetrudi-ask-ai  : meetrudi-ask-ai Lambda + Function URL
                                           (also seeds prompt/context/config files to S3)
-    training-arena -> stack meetrudi-training-arena : the arena's bucket, queues and five functions
+    training-arena -> stack meetrudi-training-arena : the arena's bucket, queues and six functions
                                           (needs `whatsapp` deployed first, for meetrudi-engine-turn)
 
 Runs `sam build` (where needed) + `sam deploy` with every flag pre-filled. No manual steps.

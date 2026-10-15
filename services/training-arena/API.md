@@ -112,6 +112,37 @@ and `running` for cases not finished yet.
 
 `GET /cases/{case_id}/download` → `{url}` (the case's YAML document).
 
+## Improvement analyses (every signed-in user)
+
+A results log → three lists (application errors, Rudi's weak points, feature requests mapped to the
+skills catalogue `skills/rudi-skills.yaml`), stored as HTML, Markdown and JSON next to the run.
+Made in AWS by `meetrudi-arena-extractor` (`engine: "arena"`), or by Claude Code on the user's own
+computer through the local generator (`engine: "local"`; the console posts the result back).
+
+| Route | Body | Response |
+|---|---|---|
+| `GET /analyses?batch=` | — | `{analyses: [analysis …]}` — newest first, at most 100 |
+| `POST /analyses/uploads` | `{filename, size}` | `{url, key}` — a 15-minute signed PUT into `analyses/sources/<user>/<ts>/<name>`; 400 `bad_type` unless `.yaml` / `.yml` |
+| `POST /analyses` | `{engine: "arena"\|"local", source}` | 201 `{analysis}` — `arena`: status `queued`, the extractor is invoked; `local`: status `running` |
+| `GET /analyses/{id}` | — | `{analysis}` (poll this while it runs) |
+| `POST /analyses/{id}/result` | `{json: {format, meta, report, cases}, model}` or `{error}` | `{analysis}` — local engine only, by the user who started it; the API renders the stored HTML and Markdown from the JSON. 400 `bad_report`, 403, 409 when already stored |
+| `GET /analyses/{id}/download?as=html\|md\|json` | — | `{url}` — 409 `not_ready` until done |
+
+`source` is one of: `{batch, files: [results file …]}` (final results or a partial-results
+snapshot of that batch), `{key}` (an upload of yours), or — local engine only — `{name}` (a file the
+browser read itself; only its name is recorded).
+
+```
+analysis = { id: "IM-yyyymmdd-XXXX", by, engine, status: queued|running|done|failed, batch_id,
+             source, created, created_at, file, report_key, model, engine_label, cost_eur,
+             counts: {errors, weaknesses, requests}, steps: [{text, state, t}], error }
+```
+
+Stored as `analyses/<batch id | uploads>/<results stem>__improvements__<id>.{html,md,json}`; the
+record is `analyses/records/<id>.json`. An arena analysis is refused before any model call when its
+estimate exceeds `ANALYSIS_CEILING_EUR` (0.25) or the month budget; its cost counts toward the month
+in `stats/analyses/<yyyy-mm>.json`.
+
 ## Super-admin
 
 | Route | Body | Response |
