@@ -714,7 +714,7 @@ in memory) and `python -m unittest discover -s services/whatsapp/tests -v` (435 
 | A7 | Assembler: plan, stream, index CSV, snapshots, downloads | ✅ built, tested |
 | A8 | Console wired to the API; dashboard stats and cost section | ✅ built; live mode tested against a fake API |
 | A9 | Free slow mode; launch estimate (duration, cost, end time per mode) | ✅ deployed 2026-10-14 |
-| A10 | **Generator** (super-admins): a skill in plain words → a checked batch file, written by Claude Code on the super-admin's own computer and subscription — [generator/README.md](../services/training-arena/generator/README.md) | ✅ built 2026-10-15; real end-to-end run in the console (3 cases, 40 s, 0 errors) |
+| A10 | **Generator** (super-admins): a skill in plain words → a checked batch file, written by Claude Code on the super-admin's own computer and subscription — [generator/README.md](../services/training-arena/generator/README.md) | ✅ built 2026-10-15; real end-to-end run in the console (3 cases, 40 s, 0 errors). Started and stopped from the console (start link, one-time setup by double-click) — no command line |
 
 Proven in AWS on 2026-10-14: the crisis batch end to end (`TA-20261014-KXSA`, 4 cases, €0.0136,
 4 min) — real Groq and OVH calls, Rudi failing over Groq → OVH, the free-tier pacing waiting

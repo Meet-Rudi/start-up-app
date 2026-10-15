@@ -165,6 +165,7 @@ class ServerTests(unittest.TestCase):
             def kill(self):
                 pass
         self.app = generator.App(C(), generator.PORT, generator.ORIGINS, os.path.join(self.tmp, "repo"), os.path.join(self.tmp, "home"))
+        self.app.claude_ok = True
 
     def test_pairing_is_required_and_wrong_codes_lock_it(self):
         self.assertEqual(self.app.route("GET", "/history", {}, None)[0], 401)
@@ -206,6 +207,43 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((hist[0]["file"], hist[0]["saved"]), ("dose-check__input.yaml", "repo folder"))
         with self.assertRaises(gen_core.GenError):
             generator.safe_name("../notes.txt")
+
+    def test_the_start_link_code_pairs_once_and_only_a_plain_token_is_read(self):
+        nonce = "Ab3_dEf-9876543210xyz"
+        self.assertEqual(generator.launch_nonce("meetrudi-generator://start?pair=" + nonce), nonce)
+        for bad in ("meetrudi-generator://start?pair=short", "meetrudi-generator://start?pair=a%20b&x=1" + "c" * 20,
+                    "https://evil.example/?pair=" + nonce, "meetrudi-generator://start", None):
+            self.assertIsNone(generator.launch_nonce(bad))
+        app = generator.App(self.app.claude, generator.PORT, generator.ORIGINS, os.path.join(self.tmp, "r2"), os.path.join(self.tmp, "h2"), launch_code=nonce)
+        self.assertEqual(app.route("POST", "/pair", {"code": nonce}, None)[0], 200)
+        self.assertEqual(app.route("POST", "/pair", {"code": nonce}, None)[0], 401)        # once
+        self.assertTrue(app.route("GET", "/health", {}, None)[1]["launched"])
+
+    def test_a_second_start_hands_its_code_to_the_running_generator(self):
+        nonce = "secondStartCode1234567"
+        generator.Pending(os.path.join(self.tmp, "home")).add(nonce)
+        self.assertEqual(self.app.route("POST", "/pair", {"code": nonce}, None)[0], 200)
+        self.assertEqual(self.app.route("POST", "/pair", {"code": nonce}, None)[0], 401)
+
+    def test_stop_from_the_console_and_claude_must_answer_before_generating(self):
+        tok = self.app.route("POST", "/pair", {"code": self.app.code}, None)[1]["token"]
+        stopped = []
+        self.app.stop = lambda: stopped.append(True)
+        self.assertEqual(self.app.route("POST", "/shutdown", {}, None)[0], 401)
+        self.assertEqual(self.app.route("POST", "/shutdown", {}, tok)[0], 200)
+        import time
+        time.sleep(0.5)
+        self.assertEqual(stopped, [True])
+        self.app.claude_ok, self.app.claude_error = False, "Claude Code did not answer on this computer."
+        status, out = self.app.route("POST", "/plan", {"spec": {"skill": SKILL}}, tok)
+        self.assertEqual((status, out["error"]), (409, "claude_unavailable"))
+
+    def test_the_start_link_runs_python_without_a_window(self):
+        cmd = generator.link_command()
+        self.assertTrue(cmd.endswith('--launched "%1"'))
+        self.assertIn("generator.py", cmd)
+        if os.name == "nt":
+            self.assertIn("pythonw", cmd.lower())
 
     def test_api_key_variables_never_reach_claude_code(self):
         os.environ["ANTHROPIC_API_KEY"] = "sk-test-not-real"

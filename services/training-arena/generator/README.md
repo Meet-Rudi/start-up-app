@@ -4,28 +4,39 @@ Describe a skill in the console's **Generator** pane (super-admins only); Claude
 computer** plans and writes a batch file the arena can run straight away, checked with the arena's
 own validator. It runs on your **Claude subscription** — no API key, nothing in AWS.
 
-## Start it
+## Start it — from the console, no typing
 
-Once per session, in Windows `cmd`, from the repository folder:
+**Once per computer:** in File Explorer, open this folder (`services\training-arena\generator`) and
+double-click **Install-Generator.cmd**. It registers the console's start link for your Windows user
+(no administrator rights) and installs PyYAML if it is missing. *Uninstall-Generator.cmd* removes it.
 
-```cmd
-python services\training-arena\generator\generator.py
-```
+**Every time:** in the console, **Generator → Start the generator**. The first time, the browser asks
+whether the arena site may open it — tick **Always allow**. Windows starts the generator without a
+window and the console connects to it on its own (the start link carries a one-time pairing code).
+**Stop the generator** is in the connection window (the pill at the top right); it also stops by
+itself after 4 hours without a request. If Claude Code does not answer, the console says so.
 
-It checks that Claude Code answers on your subscription, then prints a **pairing code**. In the
-console: **Generator → the connection pill → enter the code**. If the browser asks whether the arena
-site may reach devices on your network, allow it — the generator listens on this computer only.
+Needs: Claude Code installed and signed in with your Claude plan, and Python 3.10+.
 
-Needs: Claude Code installed and signed in with your Claude plan (`claude`, then `/login`), Python
-3.10+ with PyYAML (`pip install pyyaml`).
+How it works: `Install-Generator.cmd` writes `HKCU\Software\Classes\meetrudi-generator` with
+`pythonw.exe generator.py --launched "%1"`. The console opens
+`meetrudi-generator://start?pair=<one-time code>`; the generator takes only that code from the link
+and pairs the tab that presents it, once. If a generator already runs, the second start hands its
+code over (`pending-pairs.json`, valid two minutes) and exits. Another web site could open the same
+link, but every request it makes is refused by origin. The log is
+`%USERPROFILE%\.meetrudi\arena-generator\generator.log`.
+
+**By hand** (on another OS, or for debugging): `python generator.py` prints a pairing code and runs
+until Ctrl+C; enter the code under *Started it some other way?* in the connection window.
 
 | Option | Default | |
 |---|---|---|
 | `--port` | 47815 | If you change it, enter `http://127.0.0.1:<port>` as the address in the connection window. |
 | `--repo-folder` | `evals\arena-batches\generated` | Where "Save into the repo folder" writes. |
-| `--home` | `%USERPROFILE%\.meetrudi\arena-generator` | History: every finished file, reopenable from the console. |
+| `--home` | `%USERPROFILE%\.meetrudi\arena-generator` | History and log. |
 | `--origin` | — | Another console address allowed to use it (the Pages site and localhost always are). |
-| `--skip-check` | off | Skip the sign-in check at start. |
+| `--idle-minutes` | 240 when started from the console, else never | Stop after this long without a request. |
+| `--skip-check` | off | Skip the check that Claude Code answers. |
 
 ## What it does
 

@@ -25,7 +25,7 @@
   var G = { conn: "unknown", info: null, step: 1, reached: 1,
             skill: "", n: 10, mix: 40, hybrid: false, en: true, nl: true, personas: "library", tone: "mixed", mt: 6, ma: 3,
             w: { "switch": false, offtopic: false, crisis: false }, bname: "", btags: "", bb: 1.0, cb: 0.05, model: "sonnet", review: true,
-            moreOpen: false, plan: "none", file: "none", job: null, runner: null, redoing: -1, rows: null, personas: {}, notes: [],
+            moreOpen: false, starting: false, startFailed: false, claude: null, claudeError: null, plan: "none", file: "none", job: null, runner: null, redoing: -1, rows: null, personas: {}, notes: [],
             result: null, error: null, dest: "s3", saved: null, saving: null, showFile: false };
 
   function counts() { var sc = Math.round(G.n * G.mix / 100), hy = G.hybrid ? Math.floor((G.n - sc) / 3) : 0; return { s: sc, h: hy, g: G.n - sc - hy }; }
@@ -45,59 +45,122 @@
   }
 
   // ------------------------------------------------------------------ the local generator
+  // G.conn: unknown · offline (nothing answers) · foreign (another program answers there) ·
+  // unpaired (the generator runs, this tab is not paired) · ready. G.claude: null while the
+  // generator still checks Claude Code, then true / false (G.claudeError says why).
   function checkConn() {
-    G.conn = G.conn === "ready" ? "ready" : "unknown"; renderPill();
+    if (G.conn !== "ready") G.conn = "unknown";
+    renderPill();
     return GEN.health().then(function (h) {
-      G.info = h;
+      if (h.service !== "meetrudi-arena-generator") { G.conn = "foreign"; return; }
+      G.info = h; G.claude = h.claude_ok; G.claudeError = h.claude_error;
       if (!h.paired) GEN.forget();
       G.conn = h.paired ? "ready" : "unpaired";
-    }, function () { G.conn = "offline"; }).then(function () { renderPill(); if (G.step === 2 && visible()) paint2(); });
+    }, function () { G.conn = "offline"; }).then(function () {
+      renderPill();
+      if (G.step === 2 && visible()) paint2();
+      if (G.conn === "ready" && G.claude === null) setTimeout(checkConn, 2000);    // still checking Claude Code
+    });
   }
+  function ready() { return G.conn === "ready" && G.claude === true; }
   function renderPill() {
     var p = $("gen-conn");
     if (!p) return;
-    var t = { unknown: ["", "Checking the local generator…"], offline: ["off", "Local generator not running"],
-              unpaired: ["warn", "Local generator: pair it"], ready: ["", "Local generator connected"] }[G.conn];
+    var t = G.starting ? ["warn", "Starting the generator…"]
+      : G.conn === "ready" && G.claude === false ? ["off", "Claude Code is not answering"]
+      : G.conn === "ready" && G.claude === null ? ["warn", "Checking Claude Code…"]
+      : { unknown: ["", "Checking the local generator…"], offline: ["off", "Generator not running"], foreign: ["off", "Generator not running"],
+          unpaired: ["warn", "Generator running — connect"], ready: ["", "Local generator connected"] }[G.conn];
     p.innerHTML = '<span class="gen-dot ' + t[0] + '"></span>' + esc(t[1]);
   }
-  var START_CMD = "python services\\training-arena\\generator\\generator.py";
+
+  // The start link: Windows starts the generator without a window (registered once by
+  // Install-Generator.cmd), and the one-time code in the link pairs this tab with it. If the
+  // generator already runs, the new start hands the code over to it. Another web site could open
+  // the same link, but the generator refuses every request that is not from the arena console.
+  function nonce() {
+    var b = new Uint8Array(18);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    return btoa(String.fromCharCode.apply(null, b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function startGenerator() {
+    if (G.starting) return;
+    var code = nonce(), t0 = Date.now();
+    G.starting = true; G.startFailed = false; renderPill(); if ($("modal") && !$("modal").hidden) $("modal").hidden = true;
+    if (G.step === 2 && visible()) paint2();
+    var a = document.createElement("a");
+    a.href = "meetrudi-generator://start?pair=" + code;
+    document.body.appendChild(a); a.click(); a.remove();
+    C.toast("Starting the generator…", "If your browser asks to open Python, allow it (tick Always allow).");
+    (function poll() {
+      GEN.health().then(function (h) {
+        if (h.service !== "meetrudi-arena-generator") throw new Error("foreign");
+        return GEN.pair(code).then(function () {
+          G.starting = false; G.conn = "ready"; G.info = h; G.claude = h.claude_ok; G.claudeError = h.claude_error;
+          C.toast("The generator is running.", "Connected to this tab. It stops by itself after 4 idle hours.");
+          checkConn();
+        });
+      }).catch(function () {
+        if (Date.now() - t0 < 30000) return setTimeout(poll, 1000);
+        G.starting = false; G.startFailed = true; checkConn().then(openConn);
+      });
+    })();
+  }
+  function stopGenerator() {
+    GEN.call("POST", "/shutdown").then(function () {
+      GEN.forget(); G.conn = "offline"; renderPill(); if (G.step === 2 && visible()) paint2();
+      C.toast("The generator stopped.");
+    }, function (e) { C.fail(e, "The generator did not stop"); });
+  }
+
   function openConn() {
     var c = G.conn, info = G.info || {}, claude = info.claude || {};
-    var body = (c === "ready"
-      ? '<div class="kv"><span class="k">Claude Code</span><span>' + esc(claude.version || "?") + " · your Claude subscription</span>" +
+    var body, title, buttons;
+    var help = '<p class="d">The <b>Start</b> button opens the generator on this computer through a link Windows knows. ' +
+      "If nothing happens:</p><ul class=\"gen-help\">" +
+      "<li>Did your browser ask whether this site may open Python? Allow it, and tick <b>Always allow</b>.</li>" +
+      "<li>First time on this computer? In File Explorer, open the repository folder " +
+      "<span class=\"mono\">services\\training-arena\\generator</span> and double-click <b>Install-Generator.cmd</b> once.</li>" +
+      "<li>Claude Code must be installed and signed in with your Claude subscription.</li></ul>";
+    if (c === "ready" && G.claude === false) {
+      title = "Claude Code is not answering";
+      body = '<div class="banner bad">' + esc(G.claudeError || "Claude Code did not answer.") + "</div>";
+      buttons = [{ label: "Stop the generator", on: stopGenerator }, { label: "Check again", cls: "pink", on: function () {
+        GEN.call("POST", "/recheck").then(function (r) { G.claude = r.claude_ok; G.claudeError = r.claude_error; renderPill(); if (G.step === 2 && visible()) paint2(); $("modal").hidden = true; if (!r.claude_ok) openConn(); else C.toast("Claude Code answers."); },
+          function (e) { C.fail(e, "Could not check"); });
+        return false;
+      } }];
+    } else if (c === "ready") {
+      title = "Local generator connected";
+      body = '<div class="kv"><span class="k">Claude Code</span><span>' + esc(claude.version || "?") + " · your Claude subscription" + (G.claude === null ? " (checking…)" : "") + "</span>" +
         '<span class="k">API key</span><span>' + (claude.api_key_removed && claude.api_key_removed.length ? "removed from its environment: " + esc(claude.api_key_removed.join(", ")) : "none set — nothing to remove") + "</span>" +
-        '<span class="k">Address</span><span class="mono">' + esc(GEN.base()) + '</span><span class="k">Repo folder</span><span class="mono">' + esc(info.repo_folder || "") + "</span></div>"
-      : c === "unpaired"
-        ? '<p class="d">The generator is running. Enter the six-character pairing code it printed in its window.</p><div class="row"><input type="text" id="gen-pair" maxlength="6" placeholder="Pairing code" style="max-width:9rem;text-transform:uppercase" aria-label="Pairing code"></div>'
-        : '<p class="d">Start it on this computer — Windows <code>cmd</code>, from the repository folder:</p><div class="gen-path">' + esc(START_CMD) + "</div>" +
-          '<p class="d">It checks that Claude Code is signed in with your subscription, then prints a pairing code. Needs Python with PyYAML. If your browser asks whether this site may reach devices on your network, allow it — the generator only listens on this computer.</p>' +
-          '<div class="row"><label class="hint" for="gen-base">Address</label><input type="text" id="gen-base" class="mono" style="max-width:16rem" value="' + esc(GEN.base()) + '"><span class="hint">Change it only if you started the generator with <code>--port</code>.</span></div>') +
-      '<div class="gen-sect">How it works</div><ol class="gen-flow">' +
-      "<li><span>This page sends your description to the local generator at <code>" + esc(GEN.base()) + "</code>, paired by a one-time code so no other web page can use it.</span></li>" +
-      "<li><span>It runs <code>claude -p</code> — Claude Code with your Claude subscription, no tools. API-key settings are removed from its environment, so no API credit can be used.</span></li>" +
-      "<li><span>Claude drafts a plan, then writes the cases five at a time, to the arena's format and persona sheet.</span></li>" +
-      "<li><span>The arena's own validator (the code that runs in AWS) checks the file; problems go back to Claude, twice at most.</span></li>" +
-      "<li><span>You save it to the arena inbox through the arena API, or on this computer.</span></li></ol>" +
-      '<div class="gen-sect">What leaves this computer</div><div class="kv"><span class="k">Sent to Claude</span><span>Your description, the format rules and the persona sheet.</span><span class="k">Never sent</span><span>Rudi\'s prompts, transcripts, results, keys, anyone\'s real data.</span><span class="k">Under</span><span>Your Claude plan\'s terms and usage limits (Anthropic, US). A 10-case file is a handful of requests.</span></div>';
-    var title = c === "ready" ? "Local generator connected" : c === "unpaired" ? "Pair the local generator" : "Local generator not running";
-    var buttons = c === "ready"
-      ? [{ label: "Disconnect", on: function () { GEN.forget(); G.conn = "unpaired"; renderPill(); if (G.step === 2) paint2(); } }, { label: "Close", cls: "" }]
-      : c === "unpaired"
-        ? [{ label: "Not now" }, { label: "Connect", cls: "pink", on: function () {
-            var code = String(($("gen-pair") || {}).value || "").trim();
-            if (code.length !== 6) { C.toast("Enter the six-character code the generator printed."); return false; }
-            GEN.pair(code).then(function () { $("modal").hidden = true; G.conn = "ready"; checkConn(); C.toast("Connected to the local generator."); },
-              function (e) { C.fail(e, "Not connected"); });
-            return false;
-          } }]
-        : [{ label: "Close" }, { label: "Check again", cls: "", on: function () {
-            if ($("gen-base") && !GEN.setBase($("gen-base").value)) { C.toast("Use an address on this computer, like http://127.0.0.1:47815."); return false; }
-            checkConn().then(function () { if (G.conn !== "offline") openConn(); else C.toast("Still not running", "Start it with: " + START_CMD); }); return false; } }];
-    C.modal(title, body, buttons);
-    if ($("gen-pair")) $("gen-pair").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); $("m-foot").lastChild.click(); } });
+        '<span class="k">Started</span><span>' + (info.launched ? "from this console, without a window — it stops after 4 idle hours" : "by hand") + "</span>" +
+        '<span class="k">Address</span><span class="mono">' + esc(GEN.base()) + '</span><span class="k">Repo folder</span><span class="mono">' + esc(info.repo_folder || "") + "</span></div>";
+      buttons = [{ label: "Stop the generator", on: stopGenerator }, { label: "Close", cls: "" }];
+    } else {
+      title = c === "unpaired" ? "Connect to the generator" : "Start the local generator";
+      body = (G.startFailed ? '<div class="banner warn">The generator did not answer within 30 seconds.</div>' : "") +
+        (c === "unpaired" ? '<p class="d">The generator is running on this computer but not connected to this tab. <b>Connect</b> pairs them.</p>' : "") +
+        (c === "foreign" ? '<div class="banner warn">Another program answers at ' + esc(GEN.base()) + ". Stop that program, or start the generator on another port and change the address below.</div>" : "") +
+        help +
+        '<details class="gen-more" style="margin-top:.6rem"><summary>Started it some other way?</summary><div class="gen-form2">' +
+        '<div class="field"><label for="gen-pair">Pairing code it printed</label><input type="text" id="gen-pair" maxlength="6" style="text-transform:uppercase"></div>' +
+        '<div class="field"><label for="gen-base">Address</label><input type="text" id="gen-base" class="mono" value="' + esc(GEN.base()) + '"></div>' +
+        '<div class="row wide"><button type="button" class="btn ghost sm" id="gen-manual">Use the code / address</button></div></div></details>';
+      buttons = [{ label: "Close" }, { label: c === "unpaired" ? "Connect" : "Start the generator", cls: "pink", on: function () { startGenerator(); } }];
+    }
+    var titleTxt = title;
+    C.modal(titleTxt, body + '<div class="gen-sect">What leaves this computer</div><div class="kv"><span class="k">Sent to Claude</span><span>Your description, the format rules and the persona sheet.</span><span class="k">Never sent</span><span>Rudi\'s prompts, transcripts, results, keys, anyone\'s real data.</span><span class="k">Under</span><span>Your Claude plan\'s terms and usage limits (Anthropic, US). No API key is used.</span></div>', buttons);
+    if ($("gen-manual")) $("gen-manual").addEventListener("click", function () {
+      if (!GEN.setBase($("gen-base").value)) { C.toast("Use an address on this computer, like http://127.0.0.1:47815."); return; }
+      var code = String($("gen-pair").value || "").trim();
+      if (!code) { checkConn().then(function () { $("modal").hidden = true; openConn(); }); return; }
+      GEN.pair(code).then(function () { $("modal").hidden = true; G.conn = "ready"; checkConn(); C.toast("Connected to the local generator."); },
+        function (e) { C.fail(e, "Not connected"); });
+    });
   }
   function openHistory() {
-    if (G.conn !== "ready") return openConn();
+    if (!ready()) return openConn();
     GEN.call("GET", "/history").then(function (r) {
       var rows = r.history || [];
       C.modal("History", '<p class="hint" style="margin-bottom:.6rem">Files the local generator wrote on this computer.</p>' +
@@ -217,7 +280,7 @@
       '<div class="field"><span class="lab">Claude model</span>' + seg("model", "Claude model", [["sonnet", "Sonnet · faster"], ["opus", "Opus · more thorough"]]) + "</div>" +
       '<div class="field"><span class="lab">Plan</span><label class="checkline"><input type="checkbox" id="gen-review"' + (G.review ? " checked" : "") + "> <span>Let me review the plan before Claude writes the cases</span></label></div>" +
       "</div></details>" +
-      '<div class="banner warn gen-connwarn" id="gen-connwarn" hidden><span id="gen-connwarn-t"></span><span class="sp"></span><button type="button" class="btn sm" id="gen-open-conn">Connect</button></div>' +
+      '<div class="banner warn gen-connwarn" id="gen-connwarn" hidden><span id="gen-connwarn-t"></span><span class="sp"></span><button type="button" class="btn sm pink" id="gen-start">Start the generator</button></div>' +
       '<div class="gen-foot"><button type="button" class="btn plain" id="gen-back2">← Back</button><span class="hint" id="gen-go-hint"></span><button type="button" class="btn pink" id="gen-go"></button></div>';
   }
   function paint2() {
@@ -226,9 +289,14 @@
     $("gen-mixtext").textContent = c.s + " scripted · " + (c.h ? c.h + " hybrid · " : "") + c.g + " goal-based";
     $("gen-mixbar").innerHTML = (c.s ? '<span class="s" style="flex:' + c.s + '"></span>' : "") + (c.h ? '<span class="h" style="flex:' + c.h + '"></span>' : "") + (c.g ? '<span class="g" style="flex:' + c.g + '"></span>' : "");
     $("gen-more-sum").textContent = moreSummary();
-    $("gen-connwarn").hidden = G.conn === "ready";
-    $("gen-connwarn-t").textContent = G.conn === "unpaired" ? "The local generator is running but not paired with this tab." : G.conn === "unknown" ? "Checking the local generator…" : "The local generator is not running on this computer.";
-    var why = G.conn !== "ready" ? "Connect the local generator first." : !G.en && !G.nl ? "Pick at least one language." : G.cb > G.bb ? "The budget per case is above the batch budget." : "";
+    $("gen-connwarn").hidden = ready() || G.conn === "unknown";
+    $("gen-connwarn-t").textContent = G.starting ? "Starting the generator on this computer…"
+      : G.conn === "ready" && G.claude === false ? "Claude Code is not answering on this computer."
+      : G.conn === "ready" ? "The generator is checking that Claude Code answers…"
+      : G.conn === "unpaired" ? "The generator is running but not connected to this tab." : "The generator is not running on this computer.";
+    $("gen-start").textContent = G.conn === "ready" ? "Details" : G.conn === "unpaired" ? "Connect" : "Start the generator";
+    $("gen-start").disabled = G.starting || (G.conn === "ready" && G.claude === null);
+    var why = !ready() ? (G.conn === "ready" ? "Waiting for Claude Code." : "Start the generator first.") : !G.en && !G.nl ? "Pick at least one language." : G.cb > G.bb ? "The budget per case is above the batch budget." : "";
     $("gen-go").textContent = G.review ? "Draft the plan →" : "Generate " + G.n + " cases →";
     $("gen-go").disabled = !!why;
     $("gen-go-hint").textContent = why || "On " + (G.model === "opus" ? "Opus" : "Sonnet") + ", your Claude subscription · about " + (G.review ? "20 s for the plan" : Math.max(40, Math.round(G.n * 9)) + " s");
@@ -256,7 +324,7 @@
         paint2();
       });
     });
-    on("gen-open-conn", "click", openConn);
+    on("gen-start", "click", function () { if (G.conn === "ready") openConn(); else startGenerator(); });
     on("gen-back2", "click", function () { go(1); });
     on("gen-go", "click", draftPlan);
     paint2();
