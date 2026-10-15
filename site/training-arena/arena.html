@@ -42,6 +42,7 @@
       <a class="nav" href="#engine" data-pane="engine"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span class="t">Engine control</span></a>
       <a class="nav" href="#users" data-pane="users"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="t">Users</span></a>
       <a class="nav" href="#audit" data-pane="audit"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span class="t">Audit &amp; storage</span></a>
+      <a class="nav" href="#generator" data-pane="generator"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg><span class="t">Generator</span></a>
     </div>
     <p class="side-foot" id="side-foot"></p>
   </nav>
@@ -520,6 +521,26 @@ defaults:
     </section>
 
     <!-- ============================== AUDIT & STORAGE (super-admin) ============================== -->
+    <section id="p-generator" class="pane" hidden>
+      <div class="pane-head">
+        <div><h1>Generator <span class="sa-flag">🔒 Super-admin only</span></h1>
+          <p>Describe a skill; Claude Code on this computer writes a batch file the arena can run straight away — on your Claude subscription, with no API key and nothing running in AWS.</p></div>
+        <span class="sp"></span>
+        <div class="row" style="flex-wrap:nowrap"><button type="button" class="gen-pill" id="gen-conn"></button><button type="button" class="btn ghost sm" id="gen-hist">History</button></div>
+      </div>
+      <div class="gen-wizard">
+        <div class="stack" style="gap:.6rem">
+          <ol class="gen-stepper" id="gen-stepper" aria-label="Progress"></ol>
+          <div class="gen-track" aria-hidden="true"><span id="gen-track"></span></div>
+        </div>
+        <div class="gen-deck">
+          <div class="gen-pastwrap" id="gen-past"></div>
+          <section class="gen-front" id="gen-front" aria-live="polite"></section>
+          <div class="gen-edges" id="gen-edges" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
     <section id="p-audit" class="pane" hidden>
       <div class="pane-head"><div><h1>Audit &amp; storage <span class="sa-flag">🔒 Super-admin only</span></h1><p>Who did what, where the arena's data lives, and which Rudi release it is testing.</p></div></div>
       <div class="card" style="margin-bottom:1rem">
@@ -550,6 +571,8 @@ defaults:
 <script src="config.js"></script>
 <script src="demo-data.js"></script>
 <script src="arena-api.js"></script>
+<script src="arena-gen.js"></script>
+<script src="arena-generator.js"></script>
 <script src="arena.js"></script>
 </body>
 </html>

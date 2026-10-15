@@ -216,6 +216,7 @@ Layered, automated-first:
 | 18 | **Training Arena** (docs/training-arena.md): mass-simulated conversations with the **deployed** Rudi engine via `meetrudi-engine-turn` — never a copy of Rudi. Its own stack, bucket and role; synthetic inputs only. |
 | 19 | The arena runs on **its own model cascades and keys**, never live Rudi's quota. Tester and judge: **own Groq account, free tier first**, OVH as fallback, with preventive failover before a known limit is reached. |
 | 20 | Arena **budgets per case, batch, user-day and month**, counting model calls **and an assumed AWS overhead** unit price; a budget stop is its own outcome (`over_budget`). |
+| 21 | **Arena Generator — Prime Directive 3 exception, approved 2026-10-15.** Batch files may be written by Claude Code on a super-admin's own computer under their **Claude subscription** (Anthropic, US, consumer terms — no DPA). Allowed only because nothing personal is sent: the skill description (scanned for identifiers first), the format rules and the persona sheet — never Rudi's prompts, transcripts, results or keys. No API key is used; nothing runs in AWS. |
 
 ## 12. Open Questions
 

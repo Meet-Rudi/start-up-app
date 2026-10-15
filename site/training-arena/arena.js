@@ -17,8 +17,8 @@
   if (!sess) { location.replace("enter_arena.html"); return; }
   var isSA = sess.role === "superadmin";
 
-  var PANES = ["dashboard", "submit", "batches", "case", "formats", "account", "engine", "users", "audit"];
-  var SA_PANES = ["engine", "users", "audit"];
+  var PANES = ["dashboard", "submit", "batches", "case", "formats", "account", "engine", "users", "audit", "generator"];
+  var SA_PANES = ["engine", "users", "audit", "generator"];
   var OUTCOMES = ["success", "failed", "violation", "error", "none"];
   var LABEL = { success: "Success", failed: "Failed", violation: "Violation", error: "Error", none: "No verdict", over_budget: "Over budget",
     completed: "Completed", cancelled: "Cancelled", running: "Running", queued: "Queued" };
@@ -259,6 +259,7 @@
   function loadBatches() { return get("/batches").then(function (r) { D.batches = (r.batches || []).map(normBatch); }); }
 
   var LOAD = {
+    generator: function () { return D.BUCKET ? Promise.resolve() : get("/me").then(function (r) { D.me = r; D.BUCKET = r.bucket || D.BUCKET; }); },
     dashboard: function () {
       return get("/dashboard?days=30").then(function (r) {
         D.daily = (r.daily || []).map(normDay);
@@ -1527,6 +1528,10 @@
 
   // ================================================================== render table
   var RENDER = {
+    // The Generator pane lives in arena-generator.js; it gets the helpers it shares with the console.
+    generator: function () {
+      window.ArenaGeneratorPane.render({ toast: toast, fail: fail, modal: modal, eur: eur, API: API, LIVE: LIVE, sess: sess, D: D });
+    },
     dashboard: function () {
       if (!D.daily.length) return;                                                            // nothing loaded yet
       renderKpis(); renderRunning(); chartOutcomes(); chartLatency(); chartErrorsModels(); renderTables();
