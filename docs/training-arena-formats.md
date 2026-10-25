@@ -123,7 +123,7 @@ Each document holds exactly one top-level key, `case`.
 | `stop_on_rudi_conclude` | no | End the case when Rudi closes the session himself (phase `concluded`). Default `true`. |
 | `tags` | no | List of strings. |
 | `script` | scripted, hybrid | The fixed user messages (§3.3). |
-| `expect` | no | Criteria judged once on the whole conversation, at the end (scripted / hybrid). |
+| `expect` | no | Criteria judged once on the whole conversation, at the end — in every mode. A failed one fails the case, even when `success_when` was met. |
 | *any criterion* | — | `expect`, `success_when` and `abort_when` take a sentence, or `{text, evaluator}` to name who judges it — e.g. a decision model (§3.7). Default: the arena decides (the LLM judge, unless a routing rule says otherwise). |
 | `intent` | intent, hybrid | What the simulated user wants (§3.3). |
 | `stop` | no | Stopping criteria for the intent part (§3.3). |

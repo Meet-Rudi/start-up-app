@@ -59,6 +59,25 @@ until Ctrl+C; enter the code under *Started it some other way?* in the connectio
 Code: `gen_core.py` (the pipeline, pure; Claude is injected), `generator.py` (the local server and
 Claude Code), `personas.yaml` (the persona library). Tests: `../tests/test_generator.py`.
 
+## From a skill brief
+
+Instead of describing the skill in a few sentences, load a **skill brief** in step 1 (*Skill brief*):
+a structured Markdown file with settings, rules, user types and scenarios, every requirement with
+an ID — format [docs/skill-brief-format.md](../../../docs/skill-brief-format.md), example
+[gym-01-first-contact](../../../evals/skill-briefs/gym-01-first-contact.skill.md), blank template
+`site/training-arena/skill-brief-template.md` (also a download in the console).
+
+- `POST /brief {text}` reads and checks it (no Claude): `{brief: summary}`, or 400 `bad_brief` with
+  `issues: [{line, message}]` — the console shows them by line.
+- `/plan`, `/redo` and `/write` take `spec: {brief: <text>, name, model, by}`; everything else comes
+  from the brief. The slots are the brief's (scenario × user type × language); Claude titles them and
+  writes one persona per user type and language.
+- Every criterion starts with the brief IDs it checks (`[B3][N2] …`) and is a sentence; a case whose
+  criteria cite none of its scenario's checks, cite an unknown ID, or are not sentences goes back to
+  Claude (twice at most) and is otherwise left out.
+- Code: `skill_brief.py` (reading, checking, slots), `gen_core.py` (brief prompts and checks). Tests:
+  `../tests/test_skill_brief.py`. `/health` reports `version: "2"` from this release on.
+
 ## It also reads runs — the Improvements pane
 
 `POST /analyze {text, analysis_id, source: {name, batch_id}, model: sonnet|opus}` starts a job (poll

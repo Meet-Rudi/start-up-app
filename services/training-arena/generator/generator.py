@@ -55,7 +55,7 @@ try:
 except ImportError:                  # PyYAML missing: only --install still runs (and installs it)
     gen_core = None
 
-VERSION = "1"
+VERSION = "2"                        # 2: skill briefs (/brief, brief specs)
 REPO = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 REPO_FOLDER = os.path.join(REPO, "evals", "arena-batches", "generated")
 HOME = os.path.join(os.path.expanduser("~"), ".meetrudi", "arena-generator")
@@ -439,6 +439,14 @@ class App:
                          "The generator is still checking that Claude Code answers; try again in a few seconds."}
         if path == "/personas" and method == "GET":
             return 200, {"personas": gen_core.library()}
+        if path == "/brief" and method == "POST":
+            # Read and check a skill brief (no Claude): the console shows its summary, or its problems by line.
+            sb = gen_core.skill_brief
+            try:
+                b = sb.parse(str(body.get("text") or ""))
+            except sb.BriefError as ex:
+                return 400, {"error": "bad_brief", "detail": str(ex), "issues": [{"line": ln, "message": m} for ln, m in ex.issues]}
+            return 200, {"brief": sb.summary(b)}
         if path == "/plan" and method == "POST":
             spec = gen_core.normalize_spec(body.get("spec"))
             return 202, {"job": self.jobs.start("plan", lambda p, c: gen_core.plan(spec, self.claude.ask, p, c))}

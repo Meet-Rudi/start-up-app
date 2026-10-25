@@ -187,6 +187,7 @@ class SeedCatalogueTests(unittest.TestCase):
             self.assertIn(s["domain"], domains, s["id"])
             self.assertTrue(set(s["channels"]) <= {"whatsapp", "webchat", "call"}, s["id"])
             self.assertIn(s.get("arena"), ("chat", "none"), s["id"])
+            self.assertIn(s.get("status"), (None, "planned"), s["id"])
             self.assertTrue(s.get("summary") and s.get("expected") and s.get("code"), s["id"])
 
     def test_every_pointer_exists(self):

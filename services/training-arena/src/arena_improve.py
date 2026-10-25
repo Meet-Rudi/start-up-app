@@ -168,8 +168,9 @@ def load_catalogue(text=None, path=CATALOGUE_SEED):
 def catalogue_text(cat):
     L = []
     for s in cat["skills"]:
-        L.append("- %s — %s (%s; channels: %s; %s): %s Expected: %s Code: %s%s" % (
-            s["id"], s.get("name"), s.get("domain"), ", ".join(s.get("channels") or []),
+        L.append("- %s — %s%s (%s; channels: %s; %s): %s Expected: %s Code: %s%s" % (
+            s["id"], s.get("name"), " [PLANNED, not built yet]" if s.get("status") == "planned" else "", s.get("domain"),
+            ", ".join(s.get("channels") or []),
             "the arena's chat exercises it" if s.get("arena") == "chat" else "not exercised by the arena",
             _txt(s.get("summary"), 400), _txt(s.get("expected"), 300), "; ".join(s.get("code") or [])[:400],
             " Known gaps: " + _txt(s.get("gaps"), 300) if s.get("gaps") else ""))

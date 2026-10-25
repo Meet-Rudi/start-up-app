@@ -20,7 +20,7 @@
   }
   function token() { try { return sessionStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
   function setToken(t) { try { if (t) sessionStorage.setItem(KEY, t); else sessionStorage.removeItem(KEY); } catch (e) { /* private window */ } }
-  function err(code, detail, status) { var e = new Error(detail || code); e.code = code; e.detail = detail; e.status = status; return e; }
+  function err(code, detail, status, body) { var e = new Error(detail || code); e.code = code; e.detail = detail; e.status = status; e.body = body; return e; }
 
   // call("POST", "/plan", {...}) → Promise of the JSON answer; rejects with .code and .detail.
   function call(method, path, body) {
@@ -30,7 +30,7 @@
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (res.ok) return data;
         if (res.status === 401 && data.error === "not_paired") setToken("");
-        throw err(data.error || "http_" + res.status, data.detail || "The local generator answered " + res.status + ".", res.status);
+        throw err(data.error || "http_" + res.status, data.detail || "The local generator answered " + res.status + ".", res.status, data);
       });
     }, function () {
       throw err("offline", "The local generator is not running on this computer (or the browser blocked the connection).");

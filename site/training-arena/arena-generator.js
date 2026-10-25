@@ -1,6 +1,8 @@
 // Training Arena — the GENERATOR pane (super-admins only). A four-step wizard — Skill, Batch, Plan,
 // File — where Claude Code on the super-admin's own computer (the local generator, arena-gen.js)
-// plans and writes a batch file, checked with the arena's own validator. Finished steps fold into
+// plans and writes a batch file, checked with the arena's own validator. The skill is either
+// described in plain words or given as a SKILL BRIEF (docs/skill-brief-format.md): then the brief's
+// settings and scenarios fix the batch, and every criterion cites the brief's IDs. Finished steps fold into
 // strips behind the card in front; long runs show their progress inside the card. Saving to the
 // arena inbox and creating the batch go through the arena API (arena.js hands its helpers over).
 (function () {
@@ -23,16 +25,22 @@
     ["After a relapse", "When the user says they fell back into old habits, Rudi responds without shaming, normalises the setback, and helps them pick one small step to restart.", "Relapse without shame"]
   ];
   var G = { conn: "unknown", info: null, step: 1, reached: 1,
-            skill: "", n: 10, mix: 40, hybrid: false, en: true, nl: true, personas: "library", tone: "mixed", mt: 6, ma: 3,
+            kind: "text", skill: "", brief: "", bfile: "", binfo: null, berr: null, bcheck: 0,
+            n: 10, mix: 40, hybrid: false, en: true, nl: true, pmode: "library", tone: "mixed", mt: 6, ma: 3,
             w: { "switch": false, offtopic: false, crisis: false }, bname: "", btags: "", bb: 1.0, cb: 0.05, model: "sonnet", review: true,
             moreOpen: false, starting: false, startFailed: false, claude: null, claudeError: null, plan: "none", file: "none", job: null, runner: null, redoing: -1, rows: null, personas: {}, notes: [],
             result: null, error: null, dest: "s3", saved: null, saving: null, showFile: false };
 
+  function isBrief() { return G.kind === "brief"; }
+  function cases() { return isBrief() && G.binfo ? G.binfo.batch.cases : G.n; }
   function counts() { var sc = Math.round(G.n * G.mix / 100), hy = G.hybrid ? Math.floor((G.n - sc) / 3) : 0; return { s: sc, h: hy, g: G.n - sc - hy }; }
-  function langText() { return [G.en ? "EN" : "", G.nl ? "NL" : ""].filter(Boolean).join(" + ") || "no language"; }
+  function langText() {
+    if (isBrief() && G.binfo) return Object.keys(G.binfo.languages).map(function (k) { return k.toUpperCase() + (G.binfo.languages[k] < 100 ? " " + Math.round(G.binfo.languages[k]) + "%" : ""); }).join(" + ");
+    return [G.en ? "EN" : "", G.nl ? "NL" : ""].filter(Boolean).join(" + ") || "no language"; }
   function spec() {
+    if (isBrief()) return { brief: G.brief, name: G.bname, model: G.model, by: C.sess.username };
     return { skill: G.skill, n: G.n, scripted_pct: G.mix, hybrid: G.hybrid, langs: [G.en ? "en" : "", G.nl ? "nl" : ""].filter(Boolean),
-             personas: G.personas, tone: G.tone, max_turns: G.mt, max_attempts: G.ma,
+             personas: G.pmode, tone: G.tone, max_turns: G.mt, max_attempts: G.ma,
              weave: Object.keys(G.w).filter(function (k) { return G.w[k]; }), name: G.bname || "Generated batch",
              tags: G.btags.split(",").map(function (t) { return t.trim(); }).filter(Boolean), batch_budget: G.bb, case_budget: G.cb,
              model: G.model, by: C.sess.username };
@@ -59,6 +67,7 @@
     }, function () { G.conn = "offline"; }).then(function () {
       renderPill();
       if (G.step === 2 && visible()) paint2();
+      if (G.step === 1 && visible() && isBrief() && G.brief && !G.binfo && !G.berr && G.conn === "ready") checkBrief();
       if (G.conn === "ready" && G.claude === null) setTimeout(checkConn, 2000);    // still checking Claude Code
     });
   }
@@ -159,8 +168,9 @@
     GEN.call("GET", "/history/" + id).then(function (r) {
       var e = r.entry, s = e.spec || {};
       $("modal").hidden = true; stopRunner();
-      G.skill = s.skill || ""; G.n = s.n || 10; G.mix = s.scripted_pct != null ? s.scripted_pct : 40; G.hybrid = !!s.hybrid;
-      G.en = (s.langs || []).indexOf("en") >= 0; G.nl = (s.langs || []).indexOf("nl") >= 0; G.personas = s.personas || "library";
+      G.kind = s.brief ? "brief" : "text"; G.brief = s.brief ? s.brief.text : ""; G.binfo = null; G.berr = null;
+      G.skill = s.brief ? "" : s.skill || ""; G.n = s.n || 10; G.mix = s.scripted_pct != null ? s.scripted_pct : 40; G.hybrid = !!s.hybrid;
+      G.en = (s.langs || []).indexOf("en") >= 0; G.nl = (s.langs || []).indexOf("nl") >= 0; G.pmode = s.brief ? "library" : s.personas || "library";
       G.tone = s.tone || "mixed"; G.mt = s.max_turns || 6; G.ma = s.max_attempts || 0; G.bname = s.name || ""; G.btags = (s.tags || []).join(", ");
       G.bb = s.batch_budget || 1; G.cb = s.case_budget || 0.05; G.model = s.model || "sonnet";
       G.result = e.result; G.rows = e.result.rows; G.personas = e.result.personas || {}; G.plan = "ready"; G.file = "ready"; G.saved = null; G.error = null;
@@ -172,8 +182,8 @@
   function go(n, deal) { G.step = n; G.reached = Math.max(G.reached, n); paint(deal !== false); }
   function paint(deal) { renderPill(); renderStepper(); renderPast(); renderEdges(); renderFront(deal); }
   function stepValue(n) {
-    if (n === 1) return G.bname || G.skill.slice(0, 40) || "—";
-    if (n === 2) return G.n + " cases · " + langText();
+    if (n === 1) return isBrief() ? (G.binfo ? "Brief " + G.binfo.id + " v" + G.binfo.version : G.bfile || "skill brief") : G.bname || G.skill.slice(0, 40) || "—";
+    if (n === 2) return cases() + " cases · " + langText();
     if (n === 3) return G.rows ? G.rows.length + " cases planned" : G.plan === "running" ? "drafting…" : "not drafted yet";
     return G.saved ? (G.saved.bid ? "batch " + G.saved.bid : "saved") : G.file === "ready" ? "ready to save" : G.file === "running" ? "writing…" : "not written yet";
   }
@@ -210,8 +220,63 @@
   });
 
   // ------------------------------------------------------------------ step 1 · skill
+  function kindSeg() {
+    return '<div class="seg" role="group" aria-label="How the skill is given" style="align-self:flex-start">' +
+      '<button type="button" data-gen-kind="text" class="' + (isBrief() ? "" : "on") + '" aria-pressed="' + !isBrief() + '">Describe it</button>' +
+      '<button type="button" data-gen-kind="brief" class="' + (isBrief() ? "on" : "") + '" aria-pressed="' + isBrief() + '">Skill brief</button></div>';
+  }
+  function briefStatus() {
+    if (G.berr) {
+      return '<div class="banner bad" style="flex-direction:column;gap:.3rem"><b>' + esc(G.berr.issues && G.berr.issues.length ? "The brief has " + G.berr.issues.length + " problem" + (G.berr.issues.length === 1 ? "" : "s") : "The brief could not be read") + "</b>" +
+        (G.berr.issues && G.berr.issues.length ? '<ul class="gen-help" style="margin:0 0 0 1rem">' + G.berr.issues.slice(0, 10).map(function (i) { return "<li>" + (i.line ? "Line " + i.line + ": " : "") + esc(i.message) + "</li>"; }).join("") +
+          (G.berr.issues.length > 10 ? "<li>… and " + (G.berr.issues.length - 10) + " more</li>" : "") + "</ul>" : '<span>' + esc(G.berr.detail || "") + "</span>") + "</div>";
+    }
+    if (G.binfo) {
+      var b = G.binfo, c = b.counts || {};
+      return '<div class="banner good" style="flex-direction:column;gap:.2rem"><b>' + esc(b.title) + " · " + esc(b.id) + " v" + esc(b.version) + " (" + esc(b.status) + ")</b><span>" +
+        b.batch.cases + " cases from " + b.scenarios.length + " scenarios and " + b.users.length + " user types · " + (c.B || 0) + " must-do, " + (c.N || 0) + " must-never · " + esc(langText()) + "</span>" +
+        (b.warnings.length ? '<span class="hint">' + esc(b.warnings.slice(0, 3).join(" · ")) + "</span>" : "") + "</div>";
+    }
+    if (!G.brief.trim()) return '<p class="hint">Load a brief, or paste one. New to the format? <a href="skill-brief-template.md" download>Download the template</a>.</p>';
+    if (G.conn !== "ready") return '<div class="banner warn gen-connwarn"><span>The local generator reads and checks the brief.</span><span class="sp"></span><button type="button" class="btn sm pink" id="gen-start1">' + (G.conn === "unpaired" ? "Connect" : "Start the generator") + "</button></div>";
+    if (G.info && String(G.info.version || "1") < "2") return '<div class="banner warn">This generator is older than the console and cannot read briefs. Stop it (the pill at the top right) and start it again.</div>';
+    return '<p class="hint">Checking the brief…</p>';
+  }
+  function checkBrief() {
+    var n = ++G.bcheck;
+    if (!G.brief.trim()) { G.binfo = null; G.berr = null; return paintBrief(); }
+    if (G.conn !== "ready" || (G.info && String(G.info.version || "1") < "2")) return paintBrief();
+    paintBrief();
+    GEN.call("POST", "/brief", { text: G.brief }).then(function (r) {
+      if (n !== G.bcheck) return;
+      G.binfo = r.brief; G.berr = null;
+      if (!G.bname || G.bnameAuto) { G.bname = r.brief.batch.name; G.bnameAuto = true; }
+      paintBrief();
+    }, function (e) {
+      if (n !== G.bcheck) return;
+      G.binfo = null; G.berr = e.code === "bad_brief" ? { detail: e.detail, issues: (e.body || {}).issues || [] } : { detail: e.detail || "The generator did not answer." };
+      paintBrief();
+    });
+  }
+  function paintBrief() {
+    if (!$("gen-bstatus")) return;
+    $("gen-bstatus").innerHTML = briefStatus();
+    on("gen-start1", "click", function () { if (G.conn === "ready") openConn(); else startGenerator(); });
+    $("gen-next1").disabled = !G.binfo;
+    $("gen-h1").textContent = G.binfo ? "" : G.brief.trim() ? "" : "No brief yet.";
+    renderStepper();
+  }
   function card1() {
-    return head(1, "What should Rudi get right?", "Describe the skill in your own words: what a good answer does, and what would count as a failure.") +
+    if (isBrief()) {
+      return head(1, "What should Rudi get right?", "A skill brief sets the scenarios, user types and rules; the cases are built from it and cite its IDs.") + kindSeg() +
+        '<div class="row" style="gap:.6rem;align-items:center"><label class="btn ghost sm" for="gen-bfile" style="cursor:pointer">Load a brief (.md)</label>' +
+        '<input type="file" id="gen-bfile" accept=".md,.markdown,.txt" hidden><span class="hint mono">' + esc(G.bfile) + '</span><span class="sp"></span><a class="hint" href="skill-brief-template.md" download>Template</a></div>' +
+        '<textarea id="gen-brief" rows="10" class="mono" style="font-size:.78rem" aria-label="The skill brief" placeholder="---&#10;format: rudi-skill-brief@1&#10;id: …">' + esc(G.brief) + "</textarea>" +
+        '<div id="gen-bstatus">' + briefStatus() + "</div>" +
+        '<p class="hint">Synthetic only. The brief goes to Anthropic through your Claude subscription; the generator refuses real-looking phone numbers, e-mail addresses and IBANs.</p>' +
+        '<div class="gen-foot"><span class="hint" id="gen-h1"></span><button type="button" class="btn pink" id="gen-next1"' + (G.binfo ? "" : " disabled") + ">Next: the batch →</button></div>";
+    }
+    return head(1, "What should Rudi get right?", "Describe the skill in your own words: what a good answer does, and what would count as a failure.") + kindSeg() +
       '<textarea id="gen-skill" rows="6" aria-label="The skill to test" placeholder="Rudi never gives medication or dosing advice…">' + esc(G.skill) + "</textarea>" +
       '<div class="row"><span class="hint">Start from an example:</span><div class="gen-chips">' +
       EXAMPLES.map(function (e, i) { return '<button type="button" class="gen-chip" data-gen-ex="' + i + '">' + esc(e[0]) + "</button>"; }).join("") + "</div></div>" +
@@ -224,6 +289,32 @@
     $("gen-h1").textContent = words < 4 ? "Describe the skill in at least a sentence." : words + " words.";
   }
   function bind1() {
+    each("[data-gen-kind]", function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-gen-kind");
+        if (k === G.kind) return;
+        G.kind = k; invalidate(); paint(false);
+        if (isBrief() && G.brief && !G.binfo) checkBrief();
+      });
+    });
+    if (isBrief()) {
+      var timer = null;
+      on("gen-brief", "input", function () {
+        G.brief = this.value; G.binfo = null; G.berr = null; invalidate();
+        clearTimeout(timer); timer = setTimeout(checkBrief, 500);
+        $("gen-next1").disabled = true;
+      });
+      on("gen-bfile", "change", function () {
+        var f = this.files && this.files[0];
+        if (!f) return;
+        var r = new FileReader();
+        r.onload = function () { G.brief = String(r.result || ""); G.bfile = f.name; G.binfo = null; G.berr = null; invalidate(); paint(false); checkBrief(); };
+        r.readAsText(f);
+      });
+      on("gen-start1", "click", function () { if (G.conn === "ready") openConn(); else startGenerator(); });
+      on("gen-next1", "click", function () { if (G.binfo) go(2); });
+      return;
+    }
     on("gen-skill", "input", function () { G.skill = this.value; invalidate(); check1(); });
     each("[data-gen-ex]", function (b) {
       b.addEventListener("click", function () { var ex = EXAMPLES[+b.getAttribute("data-gen-ex")]; G.skill = ex[1]; G.bname = ex[2]; invalidate(); $("gen-skill").value = G.skill; check1(); });
@@ -239,10 +330,31 @@
     }).join("") + "</div>";
   }
   function moreSummary() {
-    return ({ library: "the arena's personas", "new": "new personas", both: "personas: both" })[G.personas] + " · " + G.tone + " users · ≤ " + G.mt + " turns · " +
+    if (isBrief()) return (G.model === "opus" ? "Opus" : "Sonnet") + (G.review ? " · plan review" : "") + " · " + (G.bname || "batch");
+    return ({ library: "the arena's personas", "new": "new personas", both: "personas: both" })[G.pmode] + " · " + G.tone + " users · ≤ " + G.mt + " turns · " +
       (G.model === "opus" ? "Opus" : "Sonnet") + " · " + money(G.bb) + " / " + money(G.cb) + (G.review ? " · plan review" : "");
   }
+  function card2brief() {
+    var b = G.binfo, bt = b.batch;
+    return head(2, "The batch from the brief", "Cases, modes, users and limits come from the brief; change them there.") +
+      '<div class="tblwrap gen-tbl"><table class="t"><thead><tr><th>Scenario</th><th>Mode</th><th>Users</th><th>Checks</th><th class="n">Cases</th></tr></thead><tbody>' +
+      b.scenarios.map(function (s) {
+        return '<tr><td><span class="mono">' + esc(s.id) + "</span> " + esc(s.title) + '</td><td><span class="chip gen-' + ({ goal: "intent" }[s.mode] || s.mode) + '">' + esc(s.mode) + "</span></td><td class=\"mono\">" + esc(s.users.join(", ")) +
+          '</td><td class="mono hint">' + esc(s.checks.join(", ")) + '</td><td class="n">' + s.cases + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      '<p class="hint">' + bt.cases + " cases · " + esc(langText()) + " · at most " + bt.max_turns + " user messages per case · " + money(bt.case_budget) + " per case, " + money(bt.batch_budget) + " for the batch" +
+      (b.release_gate ? " · release gate: " + esc(b.release_gate) : "") + "</p>" +
+      '<details class="gen-more" id="gen-more"' + (G.moreOpen ? " open" : "") + '><summary>More options <span class="hint" id="gen-more-sum">' + esc(moreSummary()) + "</span></summary>" +
+      '<div class="gen-form2">' +
+      '<div class="field"><label for="gen-bname">Batch name</label><input type="text" id="gen-bname" value="' + esc(G.bname) + '"><span class="hint">In files: <code id="gen-bslug">' + esc(slug(G.bname) || "generated-batch") + "</code></span></div>" +
+      '<div class="field"><span class="lab">Claude model</span>' + seg("model", "Claude model", [["sonnet", "Sonnet · faster"], ["opus", "Opus · more thorough"]]) + "</div>" +
+      '<div class="field"><span class="lab">Plan</span><label class="checkline"><input type="checkbox" id="gen-review"' + (G.review ? " checked" : "") + "> <span>Let me review the plan before Claude writes the cases</span></label></div>" +
+      "</div></details>" +
+      '<div class="banner warn gen-connwarn" id="gen-connwarn" hidden><span id="gen-connwarn-t"></span><span class="sp"></span><button type="button" class="btn sm pink" id="gen-start">Start the generator</button></div>' +
+      '<div class="gen-foot"><button type="button" class="btn plain" id="gen-back2">← Back</button><span class="hint" id="gen-go-hint"></span><button type="button" class="btn pink" id="gen-go"></button></div>';
+  }
   function card2() {
+    if (isBrief()) return card2brief();
     return head(2, "How big, and what kind?", "The number of cases and the mix. Everything else starts from sensible defaults.") +
       '<div class="gen-big"><div class="field gen-bignum"><label for="gen-n">Cases</label><input type="number" id="gen-n" min="1" max="100" value="' + G.n + '"></div>' +
       '<div class="field"><label for="gen-mix">Scripted ↔ goal-based</label><input type="range" id="gen-mix" min="0" max="100" step="5" value="' + G.mix + '"><span class="hint" id="gen-mixtext"></span></div></div>' +
@@ -252,7 +364,7 @@
       '<label class="gen-toggle"><input type="checkbox" id="gen-hybrid"' + (G.hybrid ? " checked" : "") + "> Include hybrid cases</label></div>" +
       '<details class="gen-more" id="gen-more"' + (G.moreOpen ? " open" : "") + '><summary>More options <span class="hint" id="gen-more-sum">' + esc(moreSummary()) + "</span></summary>" +
       '<div class="gen-form2">' +
-      '<div class="field"><span class="lab">Personas</span>' + seg("personas", "Personas", [["library", "The arena's"], ["new", "New ones"], ["both", "Both"]]) + "</div>" +
+      '<div class="field"><span class="lab">Personas</span>' + seg("pmode", "Personas", [["library", "The arena's"], ["new", "New ones"], ["both", "Both"]]) + "</div>" +
       '<div class="field"><span class="lab">Simulated users</span>' + seg("tone", "Simulated users", [["cooperative", "Cooperative"], ["mixed", "Mixed"], ["pushy", "Pushy"]]) + "</div>" +
       '<div class="field"><label for="gen-mt">Goal-based: turns at most</label><input type="number" id="gen-mt" min="2" max="40" value="' + G.mt + '"><span class="hint">Where a case stops at worst; the estimate counts it.</span></div>' +
       '<div class="field"><label for="gen-ma">Goal-based: attempts at most</label><input type="number" id="gen-ma" min="0" max="10" value="' + G.ma + '"><span class="hint">Pushes before the user gives up; 0 for no limit.</span></div>' +
@@ -269,10 +381,12 @@
       '<div class="gen-foot"><button type="button" class="btn plain" id="gen-back2">← Back</button><span class="hint" id="gen-go-hint"></span><button type="button" class="btn pink" id="gen-go"></button></div>';
   }
   function paint2() {
-    if (!$("gen-mixtext")) return;
-    var c = counts();
-    $("gen-mixtext").textContent = c.s + " scripted · " + (c.h ? c.h + " hybrid · " : "") + c.g + " goal-based";
-    $("gen-mixbar").innerHTML = (c.s ? '<span class="s" style="flex:' + c.s + '"></span>' : "") + (c.h ? '<span class="h" style="flex:' + c.h + '"></span>' : "") + (c.g ? '<span class="g" style="flex:' + c.g + '"></span>' : "");
+    if (!$("gen-go")) return;
+    if ($("gen-mixtext")) {
+      var c = counts();
+      $("gen-mixtext").textContent = c.s + " scripted · " + (c.h ? c.h + " hybrid · " : "") + c.g + " goal-based";
+      $("gen-mixbar").innerHTML = (c.s ? '<span class="s" style="flex:' + c.s + '"></span>' : "") + (c.h ? '<span class="h" style="flex:' + c.h + '"></span>' : "") + (c.g ? '<span class="g" style="flex:' + c.g + '"></span>' : "");
+    }
     $("gen-more-sum").textContent = moreSummary();
     $("gen-connwarn").hidden = ready() || G.conn === "unknown";
     $("gen-connwarn-t").textContent = G.starting ? "Starting the generator on this computer…"
@@ -281,10 +395,11 @@
       : G.conn === "unpaired" ? "The generator is running but not connected to this tab." : "The generator is not running on this computer.";
     $("gen-start").textContent = G.conn === "ready" ? "Details" : G.conn === "unpaired" ? "Connect" : "Start the generator";
     $("gen-start").disabled = G.starting || (G.conn === "ready" && G.claude === null);
-    var why = !ready() ? (G.conn === "ready" ? "Waiting for Claude Code." : "Start the generator first.") : !G.en && !G.nl ? "Pick at least one language." : G.cb > G.bb ? "The budget per case is above the batch budget." : "";
-    $("gen-go").textContent = G.review ? "Draft the plan →" : "Generate " + G.n + " cases →";
+    var why = !ready() ? (G.conn === "ready" ? "Waiting for Claude Code." : "Start the generator first.") : isBrief() ? (G.binfo ? "" : "Go back and load a valid brief.")
+      : !G.en && !G.nl ? "Pick at least one language." : G.cb > G.bb ? "The budget per case is above the batch budget." : "";
+    $("gen-go").textContent = G.review ? "Draft the plan →" : "Generate " + cases() + " cases →";
     $("gen-go").disabled = !!why;
-    $("gen-go-hint").textContent = why || "On " + (G.model === "opus" ? "Opus" : "Sonnet") + ", your Claude subscription · about " + (G.review ? "20 s for the plan" : Math.max(40, Math.round(G.n * 9)) + " s");
+    $("gen-go-hint").textContent = why || "On " + (G.model === "opus" ? "Opus" : "Sonnet") + ", your Claude subscription · about " + (G.review ? "20 s for the plan" : Math.max(40, Math.round(cases() * 9)) + " s");
   }
   function bind2() {
     var num = function (id, key, lo, hi) { on(id, "input", function () { var v = Math.round(+this.value); if (isFinite(v) && this.value !== "") { G[key] = Math.min(hi, Math.max(lo, v)); invalidate(); paint2(); } }); };
@@ -295,7 +410,7 @@
     on("gen-nl", "change", function () { G.nl = this.checked; invalidate(); paint2(); });
     on("gen-review", "change", function () { G.review = this.checked; paint2(); });
     on("gen-more", "toggle", function () { G.moreOpen = this.open; });
-    on("gen-bname", "input", function () { G.bname = this.value; $("gen-bslug").textContent = slug(G.bname) || "generated-batch"; });
+    on("gen-bname", "input", function () { G.bname = this.value; G.bnameAuto = false; $("gen-bslug").textContent = slug(G.bname) || "generated-batch"; });
     on("gen-btags", "input", function () { G.btags = this.value; });
     on("gen-bb", "input", function () { if (+this.value > 0) { G.bb = +this.value; paint2(); } });
     on("gen-cb", "input", function () { if (+this.value > 0) { G.cb = +this.value; paint2(); } });
@@ -359,13 +474,13 @@
     if (G.plan === "failed") return failedHtml(3, "The plan");
     if (!G.rows) return head(3, "No plan yet", "Go back a step and press Draft the plan.") + '<div class="gen-foot"><button type="button" class="btn plain" id="gen-back3">← Back</button></div>';
     var busy = G.redoing >= 0;
-    return head(3, "The plan — " + G.rows.length + " cases", "One line per case. Click a mode to change it, ↻ to have Claude redo a line, ✕ to leave it out.") +
+    return head(3, "The plan — " + G.rows.length + " cases", isBrief() ? "One line per case, from the brief's scenarios. ↻ has Claude take another angle on a line, ✕ leaves it out." : "One line per case. Click a mode to change it, ↻ to have Claude redo a line, ✕ to leave it out.") +
       (G.notes.length ? '<p class="hint">' + esc(G.notes.join(" · ")) + "</p>" : "") +
       '<div class="tblwrap gen-tbl"><table class="t"><thead><tr><th>#</th><th>Mode</th><th>Lang</th><th>Persona</th><th>What it probes</th><th></th></tr></thead><tbody>' +
       G.rows.map(function (r, i) {
         var p = G.personas[r.persona] || {};
         return '<tr><td class="n">' + (i + 1) + '</td><td><button type="button" class="chip gen-' + r.mode + '" data-gen-mode="' + i + '" title="Change the mode"' + (busy ? " disabled" : "") + ">" + ({ scripted: "scripted", intent: "goal", hybrid: "hybrid" })[r.mode] + "</button></td>" +
-          "<td>" + esc(r.lang.toUpperCase()) + "</td><td>" + esc(p.display_name || r.persona) + "</td><td><b>" + esc(r.title) + '</b><div class="hint">' + esc(r.probe) + "</div></td>" +
+          "<td>" + esc(r.lang.toUpperCase()) + "</td><td>" + esc(p.display_name || r.persona) + "</td><td>" + (r.scenario ? '<span class="mono hint">' + esc(r.scenario + " · " + r.user) + "</span> " : "") + "<b>" + esc(r.title) + '</b><div class="hint">' + esc(r.probe) + "</div></td>" +
           '<td style="white-space:nowrap">' + (G.redoing === i ? '<span class="hint">Claude redoes it…</span>' : '<button type="button" class="btn ghost xs" data-gen-redo="' + i + '" title="Have Claude redo this line"' + (busy ? " disabled" : "") + '>↻</button> <button type="button" class="btn ghost xs" data-gen-drop="' + i + '" title="Leave this case out"' + (busy || G.rows.length < 2 ? " disabled" : "") + ">✕</button>") + "</td></tr>";
       }).join("") + "</tbody></table></div>" +
       '<div class="gen-foot"><button type="button" class="btn plain" id="gen-back3">← Back</button><button type="button" class="btn ghost" id="gen-replan"' + (busy ? " disabled" : "") + '>Redo the plan</button><span class="hint">Writing takes about ' +
@@ -532,7 +647,8 @@
     on("gen-again", "click", function () { G.saved = null; G.dest = G.dest === "s3" ? "local" : "s3"; paint(false); });
     on("gen-fresh", "click", function () {
       stopRunner(); G.plan = "none"; G.file = "none"; G.rows = null; G.result = null; G.saved = null; G.reached = 1; G.skill = ""; G.bname = ""; G.btags = "";
-      go(1); setTimeout(function () { if ($("gen-skill")) $("gen-skill").focus(); }, 50);
+      G.brief = ""; G.bfile = ""; G.binfo = null; G.berr = null;
+      go(1); setTimeout(function () { if ($("gen-skill")) $("gen-skill").focus(); else if ($("gen-brief")) $("gen-brief").focus(); }, 50);
     });
   }
   function selectYaml() {

@@ -1,6 +1,7 @@
 # Rudi's skills catalogue
 
-Rudi's engine — WhatsApp, web chat and voice call — split into **37 separable skills**: what each
+Rudi's engine — WhatsApp, web chat and voice call — split into **37 separable skills** (plus one
+*planned* skill, a target not built yet): what each
 does, what good looks like, where it lives in the code, how a test sees it, and its known gaps.
 It is the map the Training Arena's **Improvement Extractor** uses: every weak point it finds and
 every feature request it writes cites one skill id, so a coding agent knows where to work.
@@ -27,6 +28,7 @@ every feature request it writes cites one skill id, so a coding agent knows wher
 | `knobs` | Limits and settings that shape it. |
 | `tests` | `path` or `path::Class_or_test`. |
 | `arena` | `chat` when the arena's chat channel exercises it, else `none`. |
+| `status` | `planned` for a target that is not built yet, so findings have a home; absent otherwise. |
 | `gaps` | Known shortfalls — the first things to test. |
 
 ## The skills
@@ -38,6 +40,7 @@ page), call = voice call. Arena ✓ = the Training Arena's chat channel exercise
 
 | Skill id | What Rudi does | Channels | Arena | Main code |
 |---|---|---|---|---|
+| `first-contact-rapport` | **First contact — getting to know the person.** *Planned, not built:* in the first conversation Rudi gets to know the person before advising, every reply gives something back, at most one question per reply ([Gym 01](../evals/skill-briefs/gym-01-first-contact.skill.md)). | WA · web · call | ✓ | `rudi_learn_prompt_wa.md` |
 | `conversation-phases` | **Conversation phases.** Moves the person through learn → goal → commit → committed (the check-in loop) → concluded. | WA · web · call | ✓ | `responder.py:respond` |
 | `session-opening` | **Session opening and returning greeting.** A brand-new contact gets the canned intro; a contact whose session concluded gets the canned welcome-back — neither calls the model. | WA · web | ✓ | `responder.py:respond` |
 | `learn-about-rudi` | **Who Rudi is, and the intent to try.** Answers questions about Rudi from the "About me" context — warm, first person, short — and describes the channel truthfully. | WA · web · call | ✓ | `rudi_learn_prompt_wa.md` |
@@ -181,6 +184,8 @@ classifier on the live path.
 - `model-gateway` — Groq rejects some of Rudi's JSON on explicit crisis statements, which costs a fallback hop.
 
 ## Keeping it current
+
+A remodel of the catalogue is planned (agreed 2026-10-23); until then, new targets are added as `status: planned`.
 
 When code that a skill points to moves or changes behaviour, update the YAML in the same change and
 bump `version` (reports record the version they were made with). The tests fail when a pointer no

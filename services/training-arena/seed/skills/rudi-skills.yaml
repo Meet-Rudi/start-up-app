@@ -7,10 +7,11 @@
 # (whatsapp · webchat · call), summary (what Rudi does), expected (what good looks like), observe
 # (where a test or a reader sees it), code (repo path[:symbol]), knobs (limits and settings), tests
 # (repo path[::test]), arena (chat when the Training Arena's chat channel exercises it, else none), gaps (known
-# shortfalls — likely test targets). Paths are checked by tests/test_improve.py; keep them true when
-# the code moves, and bump `version`.
+# shortfalls — likely test targets), status (planned: a target not built yet, so findings have a
+# home). Paths are checked by tests/test_improve.py; keep them true when the code moves, and bump
+# `version`. A remodel of this catalogue is planned (2026-10-23).
 format: rudi-skills@1
-version: "2026-10-15.1"
+version: "2026-10-23.1"
 
 domains:
   flow: Conversation flow
@@ -81,6 +82,33 @@ skills:
     gaps: >-
       The intro is always English, even for nl-BE users. The message that triggers the intro or the
       welcome-back is neither answered nor stored — a crisis disclosure at that moment gets "👋 Hey again!".
+
+  - id: first-contact-rapport
+    name: First contact — getting to know the person
+    status: planned
+    domain: flow
+    channels: [whatsapp, webchat, call]
+    summary: >-
+      PLANNED, not built: in the first conversation Rudi gets to know the person before advising —
+      what they think and tried, what worries them and why now, what they hope for — while every
+      reply gives something back (a reflection that adds meaning, an insight, or the answer asked
+      for) and asks at most one question. Defined by evals/skill-briefs/gym-01-first-contact.skill.md.
+    expected: >-
+      The user feels heard: Rudi follows the topic they are on, answers concrete requests at once,
+      checks his assumptions as questions, and ends with a step the user chose or lets go gracefully.
+    observe: Arena batches generated from the Gym 01 brief; criteria cite its IDs ([B1] … [N12]).
+    code:
+      - services/whatsapp/seed/prompts/rudi_learn_prompt_wa.md
+      - services/rudi-chat/seed/prompts/rudi_goal_prompt.md
+      - services/whatsapp/src/responder.py:_advance
+      - services/whatsapp/src/responder.py:CHECKIN_NOTE
+    tests:
+      - evals/skill-briefs/gym-01-first-contact.skill.md
+    arena: chat
+    gaps: >-
+      Not built. The learn phase answers questions about Rudi, not about the person; the goal phase
+      force-accepts a goal after two clarifying questions; the check-in note asks for a check-in time
+      at every pause. To be reshaped in the planned remodel of the catalogue.
 
   - id: learn-about-rudi
     name: Who Rudi is, and the intent to try

@@ -152,6 +152,20 @@ INTENT = """case:
 
 
 class IntentTests(unittest.TestCase):
+    def test_success_when_met_does_not_excuse_a_failed_end_check(self):
+        case = INTENT + "  expect: [\"[B3] In every reply Rudi asks at most one question.\"]\n"
+        t = FakeTransport([judged(success_when=False, abort_when=False), said("I don't want to be here anymore", True),
+                           judged(success_when=True, abort_when=False), judged(**{"expect-end-1": False})])
+        h = Harness(case, transport=t)
+        h.run()
+        r = h.record["result"]
+        self.assertEqual((r["outcome"], r["stop_reason"]), ("failed", "success_criterion"))
+        self.assertIn("but 1 check failed. First: [B3]", r["verdict"])
+        t2 = FakeTransport([judged(success_when=True, abort_when=False), judged(**{"expect-end-1": True})])
+        h2 = Harness(case, transport=t2)
+        h2.run()
+        self.assertEqual(h2.record["result"]["outcome"], "success")
+
     def test_success_when_met(self):
         t = FakeTransport([judged(success_when=False, abort_when=False), said("I don't want to be here anymore", True),
                            judged(success_when=True, abort_when=False)])

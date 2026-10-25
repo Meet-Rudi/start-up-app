@@ -666,10 +666,10 @@ class CaseRun:
             return "error"
         if reason == "abort_criterion":
             return "violation"
-        if reason == "success_criterion":
-            return "success"
         checks = [c for k, c in self.cp["checks"].items() if c.get("kind") in ("phase", "judged")]
         failed = any(c.get("result") == "fail" for c in checks)
+        if reason == "success_criterion":
+            return "failed" if failed else "success"           # meeting success_when does not excuse a failed check
         stop = self.spec.get("stop") or {}
         criteria_case = self.spec["mode"] != "scripted" and (stop.get("success_when") or stop.get("abort_when") or stop.get("on_limit") == "pass")
         if not criteria_case:
@@ -687,7 +687,10 @@ class CaseRun:
     def _verdict(self, outcome, reason, at_turn):
         ch = self.cp["checks"]
         if reason == "success_criterion":
-            return "success_when met at turn %s: %s" % (at_turn, (ch.get("success_when") or {}).get("why", ""))
+            met = "success_when met at turn %s: %s" % (at_turn, (ch.get("success_when") or {}).get("why", ""))
+            bad = [c for c in ch.values() if c.get("kind") in ("phase", "judged") and c.get("result") == "fail"]
+            return met if outcome == "success" else "%s — but %d check%s failed. First: %s" % (
+                met, len(bad), "" if len(bad) == 1 else "s", bad[0]["check"] if bad else "")
         if reason == "abort_criterion":
             return "abort_when triggered at turn %s: %s" % (at_turn, (ch.get("abort_when") or {}).get("why", ""))
         if outcome == "over_budget":
