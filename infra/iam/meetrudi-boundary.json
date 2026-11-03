@@ -1,0 +1,111 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": [
+        "arn:aws:logs:eu-central-1:949753869755:log-group:/aws/lambda/meetrudi-*",
+        "arn:aws:logs:eu-central-1:949753869755:log-group:/aws/lambda/meetrudi-*:*"
+      ]
+    },
+    {
+      "Sid": "PlatformBuckets",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": [
+        "arn:aws:s3:::meetrudi-internal-*",
+        "arn:aws:s3:::meetrudi-internal-*/*",
+        "arn:aws:s3:::meetrudi-tenant-*",
+        "arn:aws:s3:::meetrudi-tenant-*/*"
+      ]
+    },
+    {
+      "Sid": "LegacyDataBucketDuringCoexistence",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::meetrudi-ai-data-949753869755",
+        "arn:aws:s3:::meetrudi-ai-data-949753869755/*"
+      ]
+    },
+    {
+      "Sid": "PlatformQueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes", "sqs:GetQueueUrl"
+      ],
+      "Resource": [
+        "arn:aws:sqs:eu-central-1:949753869755:meetrudi-internal-*",
+        "arn:aws:sqs:eu-central-1:949753869755:meetrudi-tenant-*"
+      ]
+    },
+    {
+      "Sid": "InvokePlatformFunctions",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": [
+        "arn:aws:lambda:eu-central-1:949753869755:function:meetrudi-internal-*",
+        "arn:aws:lambda:eu-central-1:949753869755:function:meetrudi-tenant-*"
+      ]
+    },
+    {
+      "Sid": "PlatformSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": [
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/internal/*",
+        "arn:aws:secretsmanager:eu-central-1:949753869755:secret:meetrudi/tenant/*"
+      ]
+    },
+    {
+      "Sid": "PlatformParameters",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+      "Resource": "arn:aws:ssm:eu-central-1:949753869755:parameter/meetrudi/*"
+    },
+    {
+      "Sid": "PlatformKeys",
+      "Effect": "Allow",
+      "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+      "Resource": "arn:aws:kms:eu-central-1:949753869755:key/*",
+      "Condition": {
+        "ForAnyValue:StringLike": {
+          "kms:ResourceAliases": ["alias/meetrudi-tenant-*", "alias/meetrudi-internal-*"]
+        }
+      }
+    },
+    {
+      "Sid": "PlatformEvents",
+      "Effect": "Allow",
+      "Action": "events:PutEvents",
+      "Resource": "arn:aws:events:eu-central-1:949753869755:event-bus/meetrudi-*"
+    },
+    {
+      "Sid": "VoiceWebSocketReplies",
+      "Effect": "Allow",
+      "Action": "execute-api:ManageConnections",
+      "Resource": "arn:aws:execute-api:eu-central-1:949753869755:*/*/POST/@connections/*"
+    },
+    {
+      "Sid": "OutboundEmail",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "arn:aws:ses:eu-central-1:949753869755:identity/*"
+    },
+    {
+      "Sid": "Tracing",
+      "Effect": "Allow",
+      "Action": ["xray:PutTraceSegments", "xray:PutTelemetryRecords"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NeverIdentityOrAccountChanges",
+      "Effect": "Deny",
+      "Action": ["iam:*", "organizations:*", "account:*", "sts:AssumeRole"],
+      "Resource": "*"
+    }
+  ]
+}

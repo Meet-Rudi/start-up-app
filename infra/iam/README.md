@@ -3,6 +3,33 @@
 The `rudi-deployer` user is **not** allowed to create IAM objects, so all roles/policies here
 are created by hand in the console. CloudFormation/SAM only *references* them by ARN.
 
+**Changing for the platform (decision #35):** once step 0 below is done, platform templates may
+create their own roles named `meetrudi-internal-*` or `meetrudi-tenant-*`, always with the
+`meetrudi-boundary` permissions boundary attached. Legacy roles (`meetrudi-lambda-runner`,
+`meetrudi-arena-runner`) stay console-made.
+
+## 0. Permissions boundary for platform roles (one-time)
+
+Paste the JSON files without changes; they contain no comments because IAM rejects unknown keys.
+
+1. Console → IAM → Policies → **Create policy** → JSON → paste
+   [`meetrudi-boundary.json`](meetrudi-boundary.json) → name it exactly **`meetrudi-boundary`**.
+   It is the most any template-made role can ever do: logs, the `meetrudi-internal-*` /
+   `meetrudi-tenant-*` buckets, queues, functions, secrets and keys, the legacy data bucket while
+   CM coexists, events, voice WebSocket replies, SES sending. It denies every IAM, Organizations
+   and account action and `sts:AssumeRole`, so no platform role can raise its own rights.
+2. Console → IAM → Policies → **Create policy** → JSON → paste
+   [`rudi-deployer.boundary-roles-add.json`](rudi-deployer.boundary-roles-add.json) → name it
+   **`meetrudi-deployer-platform-roles`**. Then IAM → Users → `rudi-deployer` → **Add
+   permissions** → *Attach policies directly* → tick it. Use a managed policy, not an inline
+   one: a user's inline policies share a 2,048-character limit and this one alone is ~1,700.
+   It lets the deployer create, change, pass and delete only `meetrudi-internal-*` and
+   `meetrudi-tenant-*` roles, only with `meetrudi-boundary` attached, and never edit the
+   boundary itself or remove a boundary from a role.
+
+Until both exist, platform templates must not declare roles, and a deploy that tries fails with
+AccessDenied.
+
 Account: `949753869755` · Region: `eu-central-1`
 
 ## 1. Role: `meetrudi-lambda-runner`

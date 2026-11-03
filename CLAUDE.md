@@ -1,7 +1,13 @@
 # CLAUDE.md — Coding Rules & Conventions for MEET_RUDI
 
 > Machine-loaded each session. The *why/what* lives in [project.md](project.md); this file is
-> the *how*. When product context is needed, read project.md. Last updated: 2026-06-04.
+> the *how*. When product context is needed, read project.md. Last updated: 2026-10-28.
+>
+> **Platform pivot (2026-10-28):** Rudi is becoming a multi-tenant conversational platform. Its
+> design is [docs/platform/blueprint.md](docs/platform/blueprint.md); its binding rules (ids,
+> resource names, run time, memory, coexistence) are
+> [docs/platform/conventions.md](docs/platform/conventions.md). Read both before writing
+> platform code.
 
 ---
 
@@ -9,6 +15,9 @@
 
 1. **No PII leaves the AWS EU plane.** The neo-cloud GPU plane and any 3rd-party AI API receive
    only **minimized, pseudonymized** payloads (opaque IDs, never names/contact/free PII).
+   *Approved exception (decision #30):* PlanetScale Postgres in eu-central-1 is the platform's
+   system of record, under its DPA and the 2021 SCCs. No other datastore outside AWS without a
+   new recorded decision.
 2. **Not a medical device / no medical advice.** Never produce diagnostic or treatment output.
    Route medical-advice requests and red-flag content through the guardrail layer (§6).
 3. **EU residency only.** Every datastore, queue, bucket, model endpoint, and 3rd-party service
@@ -26,6 +35,24 @@ All AWS resources we create — **Lambdas, queues, IAM roles, and related infra*
 **`meetrudi-`** prefix (e.g. `meetrudi-ask-ai`, `meetrudi-lambda-runner`). SSM/Secrets keys use
 the `meetrudi/` path prefix. S3 data bucket: `meetrudi-ai-data-<account-id>`.
 
+**Platform resources** (everything new from 2026-10-28) add a plane, a stage and, for tenant
+traffic, a cell — build names with `rudi_platform.naming`, never by hand:
+
+- `meetrudi-internal-{stage}-{component}` — platform-managing (console API, registry, arena,
+  skill factory, migrations).
+- `meetrudi-tenant-{stage}-{cell}-{component}` — serving tenant traffic (adapters, router,
+  engine, skills, scheduler); skill Lambdas are `skill-<slug>`.
+- Secrets `meetrudi/{plane}/{stage}/…`; tenant KMS alias `alias/meetrudi-tenant-{stage}-{ten_…}`.
+- Existing unprefixed resources are legacy and keep their names until their service is cut over.
+
+## 0b. Identifiers (mandatory)
+
+Every stored object id is **`{cat}_` + 32 lowercase Crockford base32 characters**, minted with
+`rudi_platform.ids.new_id(Cat.X)` (end-user ids: `pseudonym_id(...)`). The three-letter prefixes
+are registered in `Cat` and in the table in
+[docs/platform/conventions.md](docs/platform/conventions.md) §1 — add a category to both in the
+same change, never rename or reuse one, and never hand-build an id string.
+
 ## 1. Languages, Repo & Layout
 
 - **Python** = AI / messaging / orchestration core. **TypeScript/JS** = front-end & ops UI.
@@ -37,10 +64,19 @@ the `meetrudi/` path prefix. S3 data bucket: `meetrudi-ai-data-<account-id>`.
   /infra           # IaC: /infra/sam, /infra/cfn (Fargate+net), /infra/neocloud
   /corpus          # curated guideline corpus + ingestion (RAG source)
   /evals           # offline eval suites & datasets
+  /db              # platform Postgres (PlanetScale) migrations — see db/README.md
   /docs            # project.md lives at root; deeper docs here
   ```
+- **Platform core:** `packages/rudi_platform` — ids, naming, skill contract, manifest and
+  composer, run budget and hand-over, model gateway, de-identification, leak guard, timeline,
+  OCEAN persona, i18n catalogue, access (roles as data), registry store and publishing.
+  Standard library only. Tests:
+  `python -m unittest discover -s packages/rudi_platform/tests -v`.
+- **Platform model calls go through `rudi_platform.gateway.ModelGateway` only**, with a cascade
+  from `resolve_cascade(endpoints, tenant_policy, tier)`; never call a provider directly.
 - **Python:** 3.12+, type hints required, `ruff` (lint+format), `mypy` for typed packages,
-  `pytest`. Prefer `pydantic` models at boundaries.
+  `pytest`. Prefer `pydantic` models at boundaries — but not in Lambda code paths yet (zip
+  bundles are built on Windows; see conventions §7). New platform code is ruff-clean.
 - **TypeScript:** strict mode on, ESLint + Prettier, no `any` without a written reason.
 
 ---
@@ -55,7 +91,12 @@ These are the swap-points the whole architecture depends on. Code against the in
 - **`ModelGateway`** — `embed()`, `generate()`, (later `transcribe()`, `vision()`). Routes per
   workload to **API** or **self-hosted** backends. Callers never know which backend served them.
 - **`MemoryStore`** — profile read/write, event append, summary get/set, vector upsert/query.
-  Backed by Postgres+pgvector now; the interface must not leak pgvector specifics.
+  **Pluggable per use case** (conventions §5): the legacy S3 store (serves CM until replaced),
+  S3 fast-memory snapshots for latency-critical real-time skills, and Postgres (PlanetScale)
+  as the record. The interface must not leak any backend's specifics.
+- **Platform seams** (blueprint §3): `ChannelAdapter` (generalises `WhatsAppProvider`),
+  `RegistryStore`, `ScheduleStore`, `IdentityProvider`, and the skill envelope
+  `SkillRequest`/`SkillResult` that every skill — real-time, turn or background — speaks.
 
 When adding a feature, ask: *does this belong behind one of these interfaces?* If yes, extend
 the interface — don't reach around it.
@@ -126,18 +167,28 @@ Before any outbound generated message is sent:
   **plain CloudFormation (or a thin Terraform module)** for Fargate + networking; **neo-cloud
   provisioned via its own IaC/API**. Don't force SAM to do Fargate/GPU.
 - **Lambda = container images.** Keep functions single-purpose and fast.
+- **13-minute rule (mandatory):** no Lambda run does work past 13 minutes. Long work uses
+  `rudi_platform.runtime.budget.RunBudget` and hands over via `runtime.handover.hand_over`
+  (checkpoint first, then an async invoke of itself) starting at 12 minutes. Keep `Timeout: 900`
+  on such functions as AWS's backstop only.
 - **Fargate** for long-running orchestrator/workers/serving shims.
 - **Async-first:** prefer SQS/event decoupling over synchronous chains; the conversation can
   tolerate 10–15s.
 - Every resource: **EU region, tagged** (env, service, cost-center), least-privilege IAM.
 
-### IAM is console-only (mandatory)
-- The `rudi-deployer` user **cannot create IAM roles/policies.** **Never** put `AWS::IAM::*`
-  resources in SAM/CFN templates. Instead, hand the user **role/policy JSON files** (store them
-  in `infra/iam/`) to create in the AWS Console, and have templates **reference** the role by
-  ARN (`!Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-..."`).
+### IAM (mandatory)
+- **Legacy and everything until the boundary exists — console-only.** The `rudi-deployer` user
+  **cannot create IAM roles/policies.** **Never** put `AWS::IAM::*` resources in SAM/CFN
+  templates. Instead, hand the user **role/policy JSON files** (store them in `infra/iam/`) to
+  create in the AWS Console, and have templates **reference** the role by ARN
+  (`!Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-..."`).
 - Lambdas that use a pre-created role require the deployer to have `iam:PassRole` on it — supply
   that as a console policy addition too.
+- **Platform roles (decision #35), only after `infra/iam/README.md` §0 is done** (the user
+  confirms `meetrudi-boundary` and `meetrudi-deployer-platform-roles` exist): templates may
+  declare `AWS::IAM::Role` resources named `meetrudi-internal-*` / `meetrudi-tenant-*`, each with
+  `PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/meetrudi-boundary"`. Managed
+  policies, users and the boundary itself stay console-only.
 
 ### Deployment workflow (mandatory)
 - **One-command deploys.** A Python wrapper (`deploy.py`) prepares and ships a component: the
@@ -180,6 +231,10 @@ Before any outbound generated message is sent:
 - **Do not write application code until explicitly asked.** Blueprint/rules/docs are fine;
   features are not, until greenlit.
 - When a task touches a Prime Directive (§0), call it out before proceeding.
+- **Coexistence (mandatory):** while the platform is built, today's CM service stays fully
+  working at every step. Replace a component only after its successor is live, tested and holds
+  the data; never leave an existing Rudi skill unavailable because its successor is under
+  construction (conventions §6).
 - Prefer extending an existing abstraction over adding a new vendor dependency; if a new
   dependency or service is needed, flag EU-residency + DPA implications first.
 - When product intent is unclear, ask — don't assume. Keep the Decisions Log in project.md

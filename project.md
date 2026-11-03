@@ -2,11 +2,18 @@
 
 > Human-facing blueprint (the *why* and *what*). Coding rules and conventions live in
 > [CLAUDE.md](CLAUDE.md) (the *how*), which Claude Code auto-loads each session.
-> Last updated: 2026-06-04.
+> Last updated: 2026-10-28.
 
 ---
 
 ## 1. Mission & Non-Goals
+
+> **Pivot (2026-10-28).** MEET_RUDI is becoming a **multi-tenant conversational platform**:
+> tenants configure clones from versioned skills and consume them through our API, as a
+> white-label service, or on channels we run (WhatsApp, voice, chat). Coaching comes first; any
+> legal purpose later. The diabetes lifestyle coach described in this file continues as
+> **tenant #1 (CM)**. Platform design: [docs/platform/blueprint.md](docs/platform/blueprint.md);
+> decisions #24–#35 below. Sections 2–10 still describe the CM service until they are rewritten.
 
 **Mission.** MEET_RUDI ("Rudi") helps people adhere to a prescribed *lifestyle* (movement,
 diet, daily activity, and related habits) in order to support their recovery or treatment.
@@ -219,8 +226,27 @@ Layered, automated-first:
 | 21 | **Arena Generator — Prime Directive 3 exception, approved 2026-10-15.** Batch files may be written by Claude Code on a super-admin's own computer under their **Claude subscription** (Anthropic, US, consumer terms — no DPA). Allowed only because nothing personal is sent: the skill description (scanned for identifiers first), the format rules and the persona sheet — never Rudi's prompts, transcripts, results or keys. No API key is used; nothing runs in AWS. |
 | 22 | **Improvement Extractor — exception 21 extended, requested 2026-10-15.** Any arena user may have an arena **results log** read by Claude Code on their own computer under their Claude subscription, to draft improvement work (application errors, Rudi's weak points, feature requests). Sent: the results log — **synthetic** conversations, judge verdicts and recorded errors only, with e-mail addresses, phone numbers and IBANs masked before sending — and the **skills catalogue** (`services/training-arena/seed/skills/rudi-skills.yaml`, which describes Rudi's behaviour and code locations). Never Rudi's prompts, live conversations or keys. Without the local generator the analysis runs in AWS on the arena's own EU cascade (OVH, DPA), counted in the arena's month budget. |
 | 23 | **First contact — target behaviour (Gym 01), agreed 2026-10-23.** Rudi may give recipes and training schedules and answer general nutrition questions for people with diabetes (anything a personal trainer, dietitian, sleep or habit coach may say); medication, insulin, supplements, diagnoses and reading glucose or lab values stay out. Distress (divorce, stress, grief) is coached with empathy; only risk signals (suicidal thoughts, self-harm, chest pain, stroke or severe hypo signs) stop coaching, with 1813 / 112. The first conversation ends with a step the user chose — offered, never forced. This is the target the arena measures against; the coaching prompts change through feature requests and evals, not by this entry. Skills are trained from **skill briefs** (`rudi-skill-brief@1`). A remodel of the skills catalogue is planned. |
+| 24 | **Platform pivot, approved 2026-10-28.** Rudi becomes a multi-tenant conversational platform: tenant → clone → immutable clone versions (draft → staging → live), several clones per tenant, several personas per clone with each end-user pinned to one. Coaching first, any legal purpose later; first tenant types: corporate wellbeing/HR, fitness and lifestyle, adult and workplace education. **We are processor for every tenant.** CM becomes tenant #1. Design: `docs/platform/blueprint.md`. |
+| 25 | **Skill model.** Three kinds: **real-time** (inside the engine process, every turn), **turn** (own Lambda, called in parallel within the turn deadline, skipped when late), **background** (own Lambda, after the reply or on a schedule). One envelope (`SkillRequest`/`SkillResult`, optional `context` dictionary). Runtime package and training brief are separate formats linked by `slug@version`. Semantic versions; clones pin a major, minors roll out after the skill brief passes. |
+| 26 | **Clones are configuration, skills are code.** A clone built from existing skills, persona and psychometric tuning, settings and knowledge are console actions with no deploy. A new skill, or a skill gaining or losing a tool or sub-agent, ships through `deploy.py`. New skills are **minted** from the console: scope request → legal vetting by the team → inventory match % → arena rounds until the release gate → added to the clone. |
+| 27 | **Policies are skills.** Acceptable-use exclusions (minors, EU AI Act high-risk uses, financial/legal/debt advice) and safety behaviours ship as a default-included **Baseline pack**, removable or changeable only with a contract addendum, our review and an arena gate. A mandatory, non-removable baseline is deferred. |
+| 28 | **Tiered isolation, one AWS account.** Pooled cell by default, dedicated cells (own Lambdas with reserved concurrency, queue, database, KMS key) as premium. Stages by name. Resources: `meetrudi-internal-{stage}-…` (platform-managing) and `meetrudi-tenant-{stage}-{cell}-…` (tenant traffic). |
+| 29 | **Identifiers.** `{cat}_` + 32 lowercase Crockford base32 characters; three-letter prefixes registered in `packages/rudi_platform/ids.py` and `docs/platform/conventions.md`. End-user ids are derived per tenant (HMAC of the tenant salt and the channel handle), so identities never link across tenants. |
+| 30 | **PlanetScale Postgres is the platform's system of record — Prime Directive 1 exception, approved 2026-10-28.** eu-central-1, pgvector, row-level security for pooled tenants, a database per dedicated cell. PlanetScale's DPA states its primary processing facilities are in the US; accepted under the DPA and the 2021 SCCs, and listed as a sub-processor for every tenant. Aurora rejected (resource throttling, Data API limits). |
+| 31 | **Memory is pluggable per use case.** The legacy S3 store keeps serving CM until its replacement is live; S3 **fast-memory snapshots** serve latency-critical real-time skills; Postgres is the record. Derived stores are rebuildable and covered by erasure. |
+| 32 | **13-minute rule.** No Lambda run works past 13 minutes; long work hands over (checkpoint, then async self-invoke) from 12 minutes, using `rudi_platform.runtime`. Every skill accepts an optional context dictionary that a successor run inherits. |
+| 33 | **Roles are data.** Permission catalogue, roles scoped to platform or tenant, assignments per tenant. Seed roles: platform super-admin, platform support, platform skill tester, tenant admin, clone designer, tenant operator, tester. Super-admin defines new roles and delegates their assignment to tenant admins. |
+| 34 | **Coexistence and sequencing.** Today's CM service stays fully working at every step; a component is replaced only after its successor is live and holds the data. A basic console moves into Phase 2 and runs on CM as the live demo for onboarding further tenants. |
+| 35 | **Platform IAM roles under a permissions boundary.** Once `meetrudi-boundary` and `meetrudi-deployer-platform-roles` exist (console), templates may create `meetrudi-internal-*` / `meetrudi-tenant-*` roles carrying that boundary. Legacy roles, managed policies and the boundary stay console-only. |
 
 ## 12. Open Questions
+
+- **Inference wave (platform):** EU-resident defaults for live traffic, and which model vendors
+  (OpenAI, Anthropic, OpenRouter, Groq, OVH) become tenant sub-processors. Groq (US) still leads
+  the live cascade. Open Prime Directive 1/3 item.
+- **Team and infrastructure budget** for the platform build (assumed: two engineers plus Claude
+  Code, under €1,000/month until tenant #3).
+- **Meta Tech Provider enrolment** for onboarding tenants' own WhatsApp accounts through Twilio.
 
 - Data-controller vs processor split with the pilot org; DPIA scope.
 - Which 3rd-party LLM/ASR/vision APIs are EU-residency-eligible and acceptable.
