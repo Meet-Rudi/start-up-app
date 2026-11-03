@@ -27,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "packages"))
 
+from rudi_platform import i18n as p_i18n
 from rudi_platform import timeline as p_timeline
 from rudi_platform.guards import leakguard as p_leakguard
 from rudi_platform.persona import ocean as p_ocean
@@ -62,6 +63,7 @@ def _load_personality() -> types.ModuleType:
 
 
 s_deid = _load("deid")
+s_i18n = _load("i18n")
 s_leakguard = _load("leakguard")
 s_timeline = _load("timeline")
 s_personality = _load_personality()
@@ -144,6 +146,17 @@ class Parity(unittest.TestCase):
         self.assertEqual(
             p_ocean.render_block(seed, name="Rudi", briefing="Loves puns."), live
         )
+
+    def test_canned_strings_are_identical_for_rudi(self):
+        """The platform strings with persona="Rudi" are today's strings, word for word."""
+        catalogue = p_i18n.Catalogue()
+        for locale, table in s_i18n.STRINGS.items():
+            for key in table:
+                with self.subTest(locale=locale, key=key):
+                    self.assertEqual(
+                        catalogue.text(key, locale, persona="Rudi", kind="photo"),
+                        s_i18n.t(key, locale, kind="photo"),
+                    )
 
 
 if __name__ == "__main__":
