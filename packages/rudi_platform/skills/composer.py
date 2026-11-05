@@ -10,9 +10,13 @@ skill's manifest marks overridable:
       "skills": [
         {"skill": "goal-setting", "major": 1,
          "settings": {"max_clarifiers": 1},
-         "prompt_overrides": {"examples": {"mode": "append", "text": {"nl": "…"}}}}
+         "prompt_overrides": {"examples": {"mode": "append", "text": {"nl": "…"}}}},
+        {"skill": "persona-ocean", "major": 1, "channels": ["whatsapp"]}
       ]
     }
+
+`channels` on a skill narrows where it runs in this clone (it can never widen what the manifest
+serves); without it, a skill runs on every clone channel its manifest serves.
 
 `compose()` resolves each pin to the newest released version of that major (minors and patches
 roll out automatically, decision #25) and checks the whole mix. It never raises for a bad mix:
@@ -39,7 +43,7 @@ from typing import Any
 
 from ..i18n import normalize_locale
 from .contract import SkillKind
-from .manifest import CHANNEL_LATENCY, LATENCIES, SLUG_RE, SkillManifest
+from .manifest import ANY_LOCALE, CHANNEL_LATENCY, LATENCIES, SLUG_RE, SkillManifest
 
 # Memory the platform itself provides; skills may read it without a writer.
 PLATFORM_MEMORY = frozenset({"locale", "timezone", "first_seen_at", "last_inbound_at"})
@@ -58,6 +62,11 @@ class SkillChoice:
     major: int
     settings: Mapping[str, Any] = field(default_factory=dict)
     prompt_overrides: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    channels: frozenset[str] | None = None  # None: every clone channel the skill serves
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.settings or self.prompt_overrides or self.channels is not None)
 
 
 @dataclass(frozen=True)
@@ -116,7 +125,26 @@ def parse_composition(raw: Mapping[str, Any]) -> Composition:
         if not isinstance(settings, Mapping) or not isinstance(overrides, Mapping):
             problems.append(f"{slug}: settings and prompt_overrides must be objects")
             continue
-        choices.append(SkillChoice(slug, major, dict(settings), dict(overrides)))
+        only = item.get("channels")
+        if only is not None and (
+            not isinstance(only, list)
+            or not only
+            or not isinstance(channels, list)
+            or not set(only) <= set(channels)
+        ):
+            problems.append(
+                f"{slug}: channels must be a non-empty subset of the clone's"
+            )
+            continue
+        choices.append(
+            SkillChoice(
+                slug,
+                major,
+                dict(settings),
+                dict(overrides),
+                frozenset(only) if only is not None else None,
+            )
+        )
     if not choices:
         problems.append("a clone needs at least one skill")
     if problems:
@@ -148,6 +176,8 @@ class ComposedClone:
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
     review_reasons: tuple[str, ...]
+    session_memory: frozenset[str] = frozenset()  # cleared when a new session opens
+    assets: frozenset[str] = frozenset()  # clone knowledge the skills require
 
     @property
     def ok(self) -> bool:
@@ -156,6 +186,19 @@ class ComposedClone:
     def pins(self) -> dict[str, str]:
         """slug → exact version, as recorded on every turn."""
         return {s.manifest.slug: s.ref for s in self.skills}
+
+    def skill(self, slug: str) -> ResolvedSkill | None:
+        return next((s for s in self.skills if s.manifest.slug == slug), None)
+
+    def memory_schema_for(self, channel: str) -> dict[str, str]:
+        """The memory fields written by the skills that run on `channel`: the shape of that
+        channel's stored state (a call's state is not a WhatsApp thread's)."""
+        out: dict[str, str] = {}
+        for r in self.skills:
+            if channel in r.channels:
+                for name, type_name in r.manifest.memory_writes.items():
+                    out.setdefault(name, type_name)
+        return out
 
 
 def _newest(versions: Sequence[SkillManifest], major: int) -> SkillManifest | None:
@@ -190,6 +233,8 @@ def compose(
             continue
 
         effective = manifest.channels & composition.channels
+        if choice.channels is not None:
+            effective &= choice.channels
         if not effective:
             errors.append(f"{choice.slug} serves none of the clone's channels")
         if manifest.kind is not SkillKind.BACKGROUND and manifest.latency:
@@ -230,7 +275,16 @@ def compose(
                 errors.append(f"{where}: text must map languages to text")
             else:
                 for loc, text in texts.items():
-                    if normalize_locale(loc) not in composition.locales:
+                    if loc == ANY_LOCALE and ANY_LOCALE not in spec_s.locales:
+                        errors.append(
+                            f"{where}: is localised; give a text per language"
+                        )
+                    elif loc == ANY_LOCALE and len(texts) > 1:
+                        errors.append(f"{where}: '*' text stands alone")
+                    elif loc == ANY_LOCALE:
+                        if not isinstance(text, str) or not text.strip():
+                            errors.append(f"{where}: empty text for '*'")
+                    elif normalize_locale(loc) not in composition.locales:
                         errors.append(
                             f"{where}: {loc!r} is not one of the clone's languages"
                         )
@@ -238,6 +292,8 @@ def compose(
                         errors.append(f"{where}: empty text for {loc!r}")
 
         for section, spec_s in manifest.prompt_sections.items():
+            if ANY_LOCALE in spec_s.locales:
+                continue  # instruction text: one version serves every language
             ov = choice.prompt_overrides.get(section)
             texts = ov.get("text") if isinstance(ov, Mapping) else None
             replaced = (
@@ -301,8 +357,7 @@ def compose(
                 f"baseline skill {slug} removed: needs a contract addendum, review and an arena gate"
             )
         elif slug in by_slug and any(
-            c.slug == slug and (c.settings or c.prompt_overrides)
-            for c in composition.skills
+            c.slug == slug and c.changed for c in composition.skills
         ):
             review.append(
                 f"baseline skill {slug} changed: needs a contract addendum, review and an arena gate"
@@ -330,4 +385,8 @@ def compose(
         errors=tuple(errors),
         warnings=tuple(warnings),
         review_reasons=tuple(review),
+        session_memory=frozenset().union(
+            *(r.manifest.memory_session for r in resolved)
+        ),
+        assets=frozenset().union(*(r.manifest.assets for r in resolved)),
     )

@@ -1,7 +1,7 @@
 # CLAUDE.md — Coding Rules & Conventions for MEET_RUDI
 
 > Machine-loaded each session. The *why/what* lives in [project.md](project.md); this file is
-> the *how*. When product context is needed, read project.md. Last updated: 2026-10-28.
+> the *how*. When product context is needed, read project.md. Last updated: 2026-11-04.
 >
 > **Platform pivot (2026-10-28):** Rudi is becoming a multi-tenant conversational platform. Its
 > design is [docs/platform/blueprint.md](docs/platform/blueprint.md); its binding rules (ids,
@@ -69,9 +69,14 @@ same change, never rename or reuse one, and never hand-build an id string.
   ```
 - **Platform core:** `packages/rudi_platform` — ids, naming, skill contract, manifest and
   composer, run budget and hand-over, model gateway, de-identification, leak guard, timeline,
-  OCEAN persona, i18n catalogue, access (roles as data), registry store and publishing.
-  Standard library only. Tests:
+  OCEAN persona, i18n catalogue, access (roles as data), registry store and publishing,
+  journey, conversation memory (incl. CM's legacy S3 adapter), the Turn Engine and the arena
+  door. Real-time skills: `packages/rudi_skills` (one package per skill). Tenants in code:
+  `packages/rudi_tenants` (`cm.py`). Standard library only. Tests (all three packages):
   `python -m unittest discover -s packages/rudi_platform/tests -v`.
+- **CM parity:** `tests/test_engine_parity.py` (WhatsApp) and `tests/test_voice_parity.py`
+  (calls) hold CM's clone to the live engines turn by turn. A change to a CM prompt or rule goes
+  into both `services/whatsapp` or `services/call` and the skill package, or the tests fail.
 - **Platform model calls go through `rudi_platform.gateway.ModelGateway` only**, with a cascade
   from `resolve_cascade(endpoints, tenant_policy, tier)`; never call a provider directly.
 - **Python:** 3.12+, type hints required, `ruff` (lint+format), `mypy` for typed packages,

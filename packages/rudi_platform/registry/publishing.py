@@ -5,9 +5,11 @@ MEET_RUDI platform — moving a clone version forward (blueprint §5.1, A7, B6).
            tenant or platform              platform only (our review)
 
 Both steps compose the version against the released skill inventory and refuse when the
-composer finds errors, when there is no persona, or when the clone's strings miss a language it
-serves. `approve_live` composes again because pinned majors resolve to the newest minor, which
-may have changed since staging. Every outcome, refused or not, is written to the audit log.
+composer finds errors, when there is no persona, when the journey does not fit the skill mix,
+when a knowledge asset a skill needs is not configured, or when the clone's strings miss a
+language it serves. `approve_live` composes again because pinned majors resolve to the newest
+minor, which may have changed since staging. Every outcome, refused or not, is written to the
+audit log.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ..i18n import Catalogue, I18nError
+from ..journey import JourneyError, check_journey, parse_journey
 from ..skills.composer import (
     ComposedClone,
     CompositionError,
@@ -56,8 +59,28 @@ def check_version(
         raise PublishRefused(e.problems) from None
     composed = compose(composition, store.released_manifests(ctx), baseline)
     problems = list(composed.errors)
-    if not store.personas(ctx, version_id):
+    personas = store.personas(ctx, version_id)
+    if not personas:
         problems.append("a clone version needs at least one persona")
+    default_persona = version.settings.get("default_persona")
+    if default_persona is not None and default_persona not in {p.key for p in personas}:
+        problems.append(
+            f"default_persona {default_persona!r} is not one of the personas"
+        )
+    try:
+        problems.extend(check_journey(parse_journey(version.journey), composed))
+    except JourneyError as e:
+        problems.extend(f"journey: {p}" for p in e.problems)
+    assets = version.settings.get("assets") or {}
+    if not isinstance(assets, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v for k, v in assets.items()
+    ):
+        problems.append("settings.assets must map asset names to storage keys")
+    else:
+        for name in sorted(composed.assets - set(assets)):
+            problems.append(
+                f"no knowledge asset {name!r} configured (a skill needs it)"
+            )
     try:
         catalogue = Catalogue(
             version.settings.get("strings") or {},

@@ -1,0 +1,1 @@
+- Stay on the user's goal. Don't drift into unrelated topics or general-assistant tasks.

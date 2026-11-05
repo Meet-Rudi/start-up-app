@@ -10,12 +10,18 @@ configuration and the policy allow, and an empty result fails closed with Policy
 
 `ModelEndpoint.from_config` reads today's config/ai_endpoints.json entries unchanged. Entries
 without tags count as region "other" with no DPA, so a strict policy refuses them until tagged.
+`params` are extra request fields for that model (e.g. {"reasoning_effort": "low"}), the same key
+the Training Arena's cascades use.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
+
+# Request fields `params` may never override: the gateway owns them.
+RESERVED_PARAMS = frozenset({"model", "messages", "response_format", "max_tokens"})
 
 REGIONS = ("eu", "us", "other")
 TIERS = ("classify", "coach", "long")  # cheap classification, conversation, long-form
@@ -42,6 +48,7 @@ class ModelEndpoint:
     price_in_eur_per_mtok: float = 0.0
     price_out_eur_per_mtok: float = 0.0
     enabled: bool = True
+    params: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         if not self.name or not self.url or not self.model or not self.secret:
@@ -57,6 +64,11 @@ class ModelEndpoint:
             raise ValueError(
                 f"tiers must be a non-empty subset of {TIERS}, got {sorted(self.tiers)}"
             )
+        if not isinstance(self.params, Mapping):
+            raise ValueError("params must be an object")  # noqa: TRY004 - a bad config, like the rest
+        clash = RESERVED_PARAMS & set(self.params)
+        if clash:
+            raise ValueError(f"params may not set {sorted(clash)}")
 
     @classmethod
     def from_config(cls, d: Mapping[str, object]) -> ModelEndpoint:
@@ -85,6 +97,7 @@ class ModelEndpoint:
             price_in_eur_per_mtok=float(d.get("price_in_eur_per_mtok", 0.0)),  # type: ignore[arg-type]
             price_out_eur_per_mtok=float(d.get("price_out_eur_per_mtok", 0.0)),  # type: ignore[arg-type]
             enabled=bool(d.get("enabled", True)),
+            params=dict(d.get("params") or {}),  # type: ignore[call-overload]
         )
 
     def cost_eur(self, tokens_in: int, tokens_out: int) -> float:

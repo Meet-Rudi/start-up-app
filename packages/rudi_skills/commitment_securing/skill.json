@@ -1,0 +1,82 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "commitment-securing",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Securing a commitment",
+  "summary": "Journey stage: secures one concrete, doable next action toward the goal, within a bounded number of messages; uses the clone's guidance library for health-related goals.",
+  "channels": [
+    "whatsapp",
+    "api",
+    "widget",
+    "telegram",
+    "voice"
+  ],
+  "hooks": [
+    "on_enter",
+    "contribute",
+    "on_signals"
+  ],
+  "outcomes": [
+    "committed",
+    "gave_up"
+  ],
+  "prompt_sections": {
+    "body": {
+      "overridable": true,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "max_attempts": {
+      "type": "int",
+      "default": 7,
+      "min": 2,
+      "max": 15,
+      "overridable": true
+    },
+    "guidance_domains": {
+      "type": "str_list",
+      "overridable": true,
+      "default": [
+        "fitness",
+        "diet",
+        "sleep",
+        "stress",
+        "habit"
+      ]
+    }
+  },
+  "memory": {
+    "reads": {
+      "goal": "str",
+      "goal_domain": "str"
+    },
+    "writes": {
+      "commitment": "str",
+      "commitment_agreed_at": "datetime",
+      "commit_attempts": "int"
+    },
+    "session": [
+      "commitment",
+      "commitment_agreed_at",
+      "commit_attempts"
+    ]
+  },
+  "signals": [
+    "commitment_made",
+    "check_in_about"
+  ],
+  "markers": [
+    "commitment_made",
+    "attempts_left",
+    "# health & wellness coaching guidance",
+    "[runtime:"
+  ],
+  "data_classes": [
+    "personal",
+    "health"
+  ]
+}

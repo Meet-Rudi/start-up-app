@@ -1,0 +1,28 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "medical-advice-refusal",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "No medical advice",
+  "summary": "Never gives medical advice, diagnoses, or medication or treatment instructions.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "rule": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  }
+}

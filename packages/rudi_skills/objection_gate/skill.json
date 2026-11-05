@@ -1,0 +1,20 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "objection-gate",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Objection gate",
+  "summary": "Stops the conversation on a wrong number, an opt-out or hostility (word list, every language), before any model call.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "on_inbound"
+  ]
+}

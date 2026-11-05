@@ -1,0 +1,28 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "goal-scope-rejection",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Out-of-scope goals",
+  "summary": "Coaches only goals about the person's own life; refuses goals about others, illegal or harmful ones.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "rule": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  }
+}

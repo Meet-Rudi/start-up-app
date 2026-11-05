@@ -1,0 +1,35 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "crisis-signposting",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Crisis signposting",
+  "summary": "On self-harm or crisis signals, stops coaching and shares a helpline.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "rule": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "helpline_url": {
+      "type": "str",
+      "default": "https://findahelpline.com",
+      "overridable": true
+    }
+  }
+}

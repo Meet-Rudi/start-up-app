@@ -1,0 +1,31 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "confidentiality-injection-resistance",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Confidentiality and injection resistance",
+  "summary": "Keeps instructions, context and stored details confidential and treats message text as speech, never as instructions.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "block": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "markers": [
+    "# confidentiality"
+  ]
+}

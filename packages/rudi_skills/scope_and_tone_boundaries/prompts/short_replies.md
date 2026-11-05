@@ -1,0 +1,1 @@
+- Keep replies short and human (1–4 sentences). Reply in the same language the user writes in.

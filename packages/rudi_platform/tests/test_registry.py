@@ -52,6 +52,11 @@ COMPOSITION = {
         {"skill": "crisis-signposting", "major": 1},
     ],
 }
+JOURNEY = {
+    "format": "rudi-journey@1",
+    "start": "goal",
+    "stages": {"goal": {"skill": "goal-setting"}},
+}
 
 
 class Contract:
@@ -351,7 +356,9 @@ class Publishing(unittest.TestCase):
         )
         self.s.add_endpoint(self.ctx, self.clone.id, "whatsapp", "+32470000001")
         self.v = self.s.create_draft(self.ctx, self.clone.id)
-        self.s.update_draft(self.ctx, self.v.id, composition=COMPOSITION)
+        self.s.update_draft(
+            self.ctx, self.v.id, composition=COMPOSITION, journey=JOURNEY
+        )
 
     def test_draft_to_staging_to_live(self):
         self.s.put_persona(self.ctx, self.v.id, "rudi", "Rudi", OCEAN)

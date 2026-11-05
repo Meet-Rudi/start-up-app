@@ -13,17 +13,32 @@ through `slug@version`.
       "channels": ["whatsapp", "voice", "api", "widget"],
       "latency": "voice",                       # fastest class it can serve (not for background)
       "model_tier": "coach",                    # gateway tier, if it calls a model
-      "hooks": ["contribute", "on_signals"],    # real_time only
+      "hooks": ["on_enter", "contribute", "on_signals"],   # real_time only
+      "outcomes": ["accepted", "gave_up"],      # real_time only: what on_signals may report
       "tool": {"name": "...", "description": "...", "input_schema": {...}},   # turn only
       "triggers": ["turn.completed"],           # background only
       "settings": {"max_clarifiers": {"type": "int", "default": 2, "min": 0, "max": 5,
                                       "overridable": true}},
-      "prompt_sections": {"rules": {"overridable": false, "locales": ["en", "nl"]}},
-      "memory": {"reads": {"goal": "str"}, "writes": {"goal": "str", "goal_domain": "str"}},
-      "requires": ["journey-engine@1"], "conflicts": [],
+      "prompt_sections": {"rules": {"overridable": false, "locales": ["en", "nl"]},
+                          "body": {"overridable": false, "locales": ["*"]}},
+      "memory": {"reads": {"goal": "str"},
+                 "writes": {"goal": "str", "goal_domain": "str", "clarifiers_used": "int"},
+                 "session": ["clarifiers_used"]},
+      "assets": ["about"],                      # clone knowledge the skill cannot run without
+      "requires": ["persona-ocean@1"], "conflicts": [],
       "signals": ["goal_status"], "markers": ["goal_status"],
       "data_classes": ["personal"], "permissions": []
     }
+
+Hooks (real-time skills, run in the engine process): `on_inbound` (gates the inbound message),
+`on_enter` (the conversation enters the journey stage this skill serves), `contribute` (prompt
+parts), `on_reply` (gates the model's reply), `on_signals` (reads the reply's signals; a stage
+skill reports one of its `outcomes`, which the journey maps to the next stage).
+
+`memory.session` lists written fields that belong to one session: they are cleared when a new
+session opens, the rest of the conversation's memory carries over. A prompt section whose locales
+are `["*"]` is model instruction text that serves every language (the model answers in the
+person's language); a list of codes means localised text.
 
 `parse_manifest` collects every problem before raising, so an author fixes a manifest in one go.
 """
@@ -43,7 +58,8 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 REQUIRE_RE = re.compile(r"^(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)@(?P<major>\d+)$")
 
-HOOKS = ("on_inbound", "contribute", "on_reply", "on_signals")
+HOOKS = ("on_inbound", "on_enter", "contribute", "on_reply", "on_signals")
+ANY_LOCALE = "*"
 TRIGGERS = (
     "turn.completed",
     "schedule.due",
@@ -142,6 +158,9 @@ class SkillManifest:
     prompt_sections: Mapping[str, PromptSection] = field(default_factory=dict)
     memory_reads: Mapping[str, str] = field(default_factory=dict)
     memory_writes: Mapping[str, str] = field(default_factory=dict)
+    memory_session: frozenset[str] = frozenset()
+    outcomes: frozenset[str] = frozenset()
+    assets: frozenset[str] = frozenset()
     requires: tuple[Requirement, ...] = ()
     conflicts: frozenset[str] = frozenset()
     signals: frozenset[str] = frozenset()
@@ -231,6 +250,9 @@ def _parse_sections(raw: Any, problems: list[str]) -> dict[str, PromptSection]:
         if not locales:
             problems.append(f"{where}: lists no locales")
             continue
+        if ANY_LOCALE in locales and len(locales) > 1:
+            problems.append(f"{where}: '*' (every language) stands alone")
+            continue
         out[str(name)] = PromptSection(
             str(name), bool(spec.get("overridable", False)), frozenset(locales)
         )
@@ -253,6 +275,14 @@ def _parse_memory(raw: Any, key: str, problems: list[str]) -> dict[str, str]:
             continue
         out[str(name)] = t
     return out
+
+
+def _names(raw: Any, where: str, problems: list[str]) -> list[str]:
+    names = _strings(raw, where, problems)
+    bad = [n for n in names if not NAME_RE.match(n)]
+    if bad:
+        problems.append(f"{where}: {bad} must be snake_case names")
+    return [n for n in names if NAME_RE.match(n)]
 
 
 def parse_manifest(raw: Mapping[str, Any]) -> SkillManifest:
@@ -345,6 +375,22 @@ def parse_manifest(raw: Mapping[str, Any]) -> SkillManifest:
     permissions = _strings(raw.get("permissions"), "permissions", problems)
     _subset(permissions, PERMISSIONS, "permissions", problems)
 
+    outcomes = _names(raw.get("outcomes"), "outcomes", problems)
+    if outcomes and kind is not SkillKind.REAL_TIME:
+        problems.append(
+            "only a real-time skill serves a journey stage and reports outcomes"
+        )
+    if outcomes and "on_signals" not in hooks:
+        problems.append("a skill that reports outcomes implements on_signals")
+    assets = _names(raw.get("assets"), "assets", problems)
+
+    memory_writes = _parse_memory(raw.get("memory"), "writes", problems)
+    memory_raw = raw.get("memory") if isinstance(raw.get("memory"), Mapping) else {}
+    session = _names(memory_raw.get("session"), "memory.session", problems)
+    unwritten = sorted(set(session) - set(memory_writes))
+    if unwritten:
+        problems.append(f"memory.session: {unwritten} must be fields the skill writes")
+
     manifest = SkillManifest(
         slug=slug,
         version=version,
@@ -360,7 +406,10 @@ def parse_manifest(raw: Mapping[str, Any]) -> SkillManifest:
         settings=_parse_settings(raw.get("settings"), problems),
         prompt_sections=_parse_sections(raw.get("prompt_sections"), problems),
         memory_reads=_parse_memory(raw.get("memory"), "reads", problems),
-        memory_writes=_parse_memory(raw.get("memory"), "writes", problems),
+        memory_writes=memory_writes,
+        memory_session=frozenset(session),
+        outcomes=frozenset(outcomes),
+        assets=frozenset(assets),
         requires=tuple(requires),
         conflicts=frozenset(conflicts),
         signals=frozenset(_strings(raw.get("signals"), "signals", problems)),

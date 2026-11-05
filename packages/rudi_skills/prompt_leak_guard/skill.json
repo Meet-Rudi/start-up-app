@@ -1,0 +1,20 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "prompt-leak-guard",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Reply leak gate",
+  "summary": "Deterministic reply gate: a reply that recites internal markers or copies the prompt is replaced by a redirect.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "on_reply"
+  ]
+}

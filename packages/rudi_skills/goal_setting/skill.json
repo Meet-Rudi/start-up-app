@@ -1,0 +1,88 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "goal-setting",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Goal setting",
+  "summary": "Journey stage: elicits one self-directed goal, with a bounded number of clarifying questions and rejections.",
+  "channels": [
+    "whatsapp",
+    "api",
+    "widget",
+    "telegram",
+    "voice"
+  ],
+  "hooks": [
+    "on_enter",
+    "contribute",
+    "on_signals"
+  ],
+  "outcomes": [
+    "accepted",
+    "gave_up"
+  ],
+  "prompt_sections": {
+    "body": {
+      "overridable": true,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "max_clarifiers": {
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 5,
+      "overridable": true
+    },
+    "max_rejects": {
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 10,
+      "overridable": true
+    },
+    "goal_domains": {
+      "type": "str_list",
+      "overridable": true,
+      "default": [
+        "fitness",
+        "diet",
+        "sleep",
+        "stress",
+        "habit",
+        "other"
+      ]
+    }
+  },
+  "memory": {
+    "writes": {
+      "goal": "str",
+      "goal_domain": "str",
+      "clarifiers_used": "int",
+      "reject_count": "int"
+    },
+    "session": [
+      "clarifiers_used",
+      "reject_count"
+    ]
+  },
+  "signals": [
+    "goal_status",
+    "goal",
+    "goal_domain"
+  ],
+  "markers": [
+    "goal_status",
+    "goal_domain",
+    "clarifiers_left",
+    "reject_attempts_left",
+    "[runtime:"
+  ],
+  "data_classes": [
+    "personal",
+    "health"
+  ]
+}

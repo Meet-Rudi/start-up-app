@@ -4,7 +4,7 @@
 > `meetrudi-internal-…` or `meetrudi-tenant-…`. Legacy services keep their current names until
 > they are cut over. The design these serve is [blueprint.md](blueprint.md).
 > Code that enforces them: [`packages/rudi_platform`](../../packages/rudi_platform).
-> Last updated: 2026-10-28.
+> Last updated: 2026-11-04.
 
 ## 1. Identifiers
 
@@ -154,14 +154,37 @@ AWS kills a Lambda at 15 minutes. **No instance does work past 13 minutes.**
   and the training brief (`rudi-skill-brief@1`). They do not share a format.
 - **Versions:** semantic versioning. Clones pin a major; minors roll out after the skill brief
   passes. A change to inputs, outputs, memory fields or the set of tools is a major.
-- **Manifest:** every runtime package carries a `rudi-skill@1` manifest (skill.yaml, compiled to
-  JSON at build time). Its fields and rules are in `rudi_platform.skills.manifest`. Only what a
-  manifest marks `overridable` can be changed by a clone. Internal headings and signal names
-  go in `markers`, so the leak guard protects them.
+- **Manifest:** every runtime package carries a `rudi-skill@1` manifest as `skill.json` (JSON so
+  Lambdas need no YAML parser and there is no build step). Its fields and rules are in
+  `rudi_platform.skills.manifest`. Only what a manifest marks `overridable` can be changed by a
+  clone. Internal headings and signal names go in `markers`, so the leak guard protects them.
+  A stage skill lists the `outcomes` its `on_signals` may report; `memory.session` lists the
+  fields cleared when a new session opens; `assets` names the clone knowledge it cannot run
+  without. A prompt section with locales `["*"]` is instruction text for every language.
+- **Real-time skill packages** live in `packages/rudi_skills/<slug_with_underscores>/`:
+  `skill.json`, `skill.py` (`class Skill(RealTimeSkill)`, exactly the manifest's hooks) and
+  `prompts/<section>.md` (or `<section>.<locale>.md`). Prompt text uses `{persona}`, never a
+  persona's name, and takes its other values from settings (`{helpline_url}`). Hooks take a
+  `SkillRequest` and return a `SkillResult`; a memory write outside `memory.writes` is refused.
+- **Journey:** a clone version's `journey` is a `rudi-journey@1` stage graph
+  (`rudi_platform.journey`): stages served by real-time skills, outcomes mapped to the next stage
+  or to `concluded`. `channels` holds per-channel variants (another start, other transitions:
+  a call ends when the person commits). It is checked against the skill mix at every publish.
+- **Prompt slots:** skills contribute parts to fixed slots (`engine.prompt.SLOTS`: rules,
+  policies, persona, style, stage, call, stage_note, budget, channel, language, check_in, time),
+  ordered by `order` inside a slot. Safety text goes in `rules` or `policies`, never later.
 - **Composition:** a clone version's `composition` pins `{skill, major}` with optional
-  `settings` and `prompt_overrides` per skill, plus `channels` and `locales`. The default
-  language comes first. `rudi_platform.skills.composer.compose()` runs at every publish, and a
-  version with errors never reaches staging.
+  `settings`, `prompt_overrides` and `channels` (narrowing where the skill runs in this clone)
+  per skill, plus `channels` and `locales`. The default language comes first.
+  `rudi_platform.skills.composer.compose()` runs at every publish, and a version with errors
+  never reaches staging.
+- **Per channel:** a conversation's stored state holds the memory fields of the skills on its
+  channel (`ComposedClone.memory_schema_for`); a clone asset may have a channel version,
+  `<name>@<channel>`. What a channel does around the skills (opening, speech clean-up, time
+  budget, whether a concluded conversation restarts) is its `engine.channels` profile.
+- **Calls:** the voice adapter calls `engine.voice.open_call` / `call_turn` with the call
+  config; the engine makes the name an alias and scrubs topic and notes before any skill sees
+  them, in `request.context["call"]`.
 - **Baseline pack:** `rudi_platform.skills.packs.BASELINE_SKILLS`. Removing or changing one of
   these skills turns into a review reason for the go-live reviewer.
 
@@ -205,13 +228,24 @@ Rudi skill is unavailable because its successor is under construction.
 | `access` | Permission catalogue, seed roles, `AccessPolicy` decisions for checks, delegation and role definitions |
 | `i18n` | The strings we author (greeting, errors, nudge…), with `{persona}` instead of a fixed name; clone overrides checked at publish |
 | `skills.manifest`, `skills.composer`, `skills.packs` | The `rudi-skill@1` manifest, the publish-time check of a clone's skill mix, the Baseline pack |
-| `registry` | The `RegistryStore` seam with tenant and platform contexts, an in-memory implementation, and publishing (draft → staging → live, audited) |
+| `registry` | The `RegistryStore` seam with tenant and platform contexts, an in-memory implementation, and publishing (draft → staging → live, audited; journey, personas, strings and assets checked) |
+| `journey` | The `rudi-journey@1` stage graph and its check against a clone's skills |
+| `memory` | `ConversationState` and its flat stored form (CM's `ai_state`), the `ConversationStore` seam, the in-memory store and `LegacyS3ConversationStore` (CM's `conversations/{uid}/meta.json`) |
+| `engine` | The Turn Engine: prompt slots, channel profiles, the real-time skill base and runtime, `load_clone`, `TurnEngine`, and the Training Arena's door (`engine.door`) |
+
+Next to it: `packages/rudi_skills` (the real-time skill packages) and `packages/rudi_tenants`
+(tenant definitions kept in code until the console holds them; `cm.py` is tenant #1). Their
+tests run with the platform tests.
 
 User-facing text that is not written by the model comes from `i18n.Catalogue`, never from a
 literal in code (CLAUDE.md §3).
 
 Modules ported from `services/whatsapp/src` (deid, leakguard, timeline, the OCEAN text) are held
 to the live copies by `tests/test_parity.py` until CM is cut over. A fix lands in both places.
+CM's clone version 1 is held to the live engines turn by turn: WhatsApp (`webchat.chat_turn` →
+`responder.respond`) by `tests/test_engine_parity.py`, calls (`ws.py` → `brain.py`) by
+`tests/test_voice_parity.py`. A change to a CM prompt or rule in either place must be made in
+both, or those tests fail.
 
 ## 8. Database
 

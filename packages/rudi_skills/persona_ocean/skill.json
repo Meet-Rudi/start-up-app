@@ -1,0 +1,23 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "persona-ocean",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Persona temperament (OCEAN)",
+  "summary": "Colours tone and style with the persona's OCEAN profile, below the safety rules.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "markers": [
+    "your personality profile:"
+  ]
+}

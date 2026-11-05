@@ -1,0 +1,32 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "language-mirroring-and-i18n",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Language mirroring",
+  "summary": "Replies in the person's language and reports it, so the conversation's language is remembered.",
+  "channels": [
+    "whatsapp",
+    "api",
+    "widget",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "prompt_sections": {
+    "note": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "signals": [
+    "lang"
+  ],
+  "markers": [
+    "[language:"
+  ]
+}

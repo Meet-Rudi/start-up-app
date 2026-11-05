@@ -1,0 +1,45 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "call-closing-and-time-budget",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Ending a call",
+  "summary": "Closes warmly on the turn the person commits, steers to a close as call time runs out, and ends the call when it is out of time.",
+  "channels": [
+    "voice"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "prompt_sections": {
+    "farewell": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "farewell_in": {
+      "type": "str_list",
+      "default": [],
+      "overridable": true
+    },
+    "no_budget_note_in": {
+      "type": "str_list",
+      "default": [],
+      "overridable": true
+    },
+    "default_max_minutes": {
+      "type": "int",
+      "default": 12,
+      "min": 1,
+      "max": 30,
+      "overridable": true
+    }
+  },
+  "markers": [
+    "[runtime:"
+  ]
+}

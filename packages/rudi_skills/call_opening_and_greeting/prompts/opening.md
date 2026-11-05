@@ -1,0 +1,2 @@
+This is the very first thing they hear after picking up, and they have not spoken yet. Nobody answers a phone in silence — they will say 'hello' the moment they lift it, so anything you say now lands on top of them.
+Say ONLY a short greeting that hands the turn straight back: their first name if you know it, and nothing more than a few words. One short sentence. Do not explain who or what you are yet, do not say why you are calling, do not mention their topic. Wait for them to answer.

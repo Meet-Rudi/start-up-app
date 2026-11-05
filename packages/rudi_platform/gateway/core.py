@@ -24,6 +24,7 @@ Logs carry endpoint names and outcomes, never message content.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -42,6 +43,26 @@ DEFAULT_MAX_RETRIES = 2
 DEFAULT_BACKOFF_S = 0.5
 DEFAULT_ATTEMPT_TIMEOUT_S = 25.0
 MIN_ATTEMPT_S = 2.0
+
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+
+
+def failure_kind(error: Exception | None) -> str:
+    """Why one attempt failed, as a short label for logs. Never the error text: a provider's error
+    body can quote what it was sent."""
+    if isinstance(error, RateLimitError):
+        return "rate-limited"
+    text = str(error or "")
+    if "timed out" in text or "TimeoutError" in text:
+        return "timeout"
+    if "returned no content" in text:
+        return "no-content"
+    if "token cap" in text:
+        return "truncated"
+    status = _HTTP_STATUS.search(text)
+    if status:
+        return f"http-{status.group(1)}"
+    return type(error).__name__ if error is not None else "unknown"
 
 
 @dataclass(frozen=True)
@@ -114,6 +135,7 @@ class ModelGateway:
         *,
         json_mode: bool = False,
         budget_s: float | None = None,
+        attempt_timeout_s: float | None = None,
         max_tokens: int | None = None,
         vault: AliasVault | None = None,
         detector: PersonDetector | None = None,
@@ -125,7 +147,9 @@ class ModelGateway:
 
         With a `vault`, a `detector` is required: it must know the clone's persona names
         (HeuristicDetector(keep=...)), or the persona's own name in the prompt would be masked.
-        Raises AllRateLimited, AIError, or ValueError for a malformed call.
+        `attempt_timeout_s` caps every single attempt (a live call: a stall past it is dead
+        air, so the cascade moves on). Raises AllRateLimited, AIError, or ValueError for a
+        malformed call.
         """
         if not cascade:
             raise ValueError(
@@ -149,6 +173,8 @@ class ModelGateway:
             last: Exception | None = None
             for attempt in range(self._max_retries + 1):
                 timeout = ep.timeout_s or DEFAULT_ATTEMPT_TIMEOUT_S
+                if attempt_timeout_s is not None:
+                    timeout = min(timeout, float(attempt_timeout_s))
                 if deadline is not None:
                     timeout = min(timeout, max(deadline - self._clock(), 0.0))
                 attempts += 1
@@ -198,7 +224,7 @@ class ModelGateway:
                 )
             if isinstance(last, RateLimitError):
                 rate_limited += 1
-            log.info("endpoint=%s failed: %s", ep.name, type(last).__name__)
+            log.info("endpoint=%s failed: %s", ep.name, failure_kind(last))
             errors.append(f"{ep.name}: {last}")
 
         latency_ms = int((self._clock() - start) * 1000)
@@ -266,6 +292,9 @@ class ModelGateway:
         limit = max_tokens or ep.max_tokens
         if limit:
             payload["max_tokens"] = int(limit)
+        payload.update(
+            ep.params
+        )  # checked at construction: never model/messages/format/cap
         resp = self._transport.post_json(ep.url, headers, payload, timeout)
         choices = resp.get("choices") if isinstance(resp.get("choices"), list) else []
         choice = choices[0] if choices and isinstance(choices[0], dict) else {}

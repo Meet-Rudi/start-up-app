@@ -1,0 +1,24 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "time-awareness",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Time awareness",
+  "summary": "Gives the model the person's local clock, so times are said and stored correctly.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "markers": [
+    "[now:",
+    "[time marker"
+  ]
+}

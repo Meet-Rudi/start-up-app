@@ -1,0 +1,31 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "ai-identity-disclosure",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "AI identity disclosure",
+  "summary": "Says honestly that it is an AI when asked, and never claims to be human.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "rule": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "markers": [
+    "non-negotiable rules"
+  ]
+}

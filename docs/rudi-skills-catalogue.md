@@ -1,7 +1,7 @@
 # Rudi's skills catalogue
 
-Rudi's engine — WhatsApp, web chat and voice call — split into **37 separable skills** (plus one
-*planned* skill, a target not built yet): what each
+Rudi's engine — WhatsApp, web chat and voice call — split into **37 separable skills** (plus five
+*planned* skills, targets not built yet): what each
 does, what good looks like, where it lives in the code, how a test sees it, and its known gaps.
 It is the map the Training Arena's **Improvement Extractor** uses: every weak point it finds and
 every feature request it writes cites one skill id, so a coding agent knows where to work.
@@ -93,6 +93,7 @@ page), call = voice call. Arena ✓ = the Training Arena's chat channel exercise
 | `keep-warm-reach-out` | **Proactive message content.** Writes one short warm message about the person's goal or last step — about THE promised thing when there is one; no re-introduction, no new goals or homework; canned nudge on AI error. | WA · call | — | `responder.py:reach_out` |
 | `outreach-limits-and-quiet-hours` | **Outreach limits and quiet hours.** At most 2 unanswered system-initiated sends in a row; at least 45 minutes after the last outbound; nothing proactive between 21:30 and 06:30 local time; consent, active status and keep_warm gate every proactive send; replies are never held. | WA · call | — | `store.py:outreach_block` |
 | `out-of-window-templates` | **Out-of-window templates.** After the 24 h window lapses, sends a pre-approved template with {{1}} = the stored goal or a generic phrase; rotates template SIDs per locale; at least 48 h between templates; dormant after 3 unanswered. | WA | — | `reengage.py:_send_template` |
+| `schedule-driven-check-ins` | **Check-ins timed by the person's schedule.** *Planned, not built:* check-ins after each planned session from `schedule-intake`, never on rest days or at night; free-form in the 24 h window, an approved template outside it ([TA brief](../skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md) K3). | WA | — | `store.py:compute_next_proactive` |
 
 ### Channel — WhatsApp
 
@@ -116,6 +117,18 @@ page), call = voice call. Arena ✓ = the Training Arena's chat channel exercise
 | `call-closing-and-time-budget` | **Ending a call.** The call ends the moment the person commits: that turn confirms the commitment, says when Rudi will be back in touch, thanks them by name and wishes them well. | call | — | `brain.py:FAREWELL` |
 | `call-voicemail-and-failure-recovery` | **Voicemail and failure recovery on calls.** Never talks to a machine: Twilio AMD plus a screen of the first utterance (≥60 characters and a voicemail phrase means a silent hang-up). | call | — | `relay.py:looks_like_voicemail` |
 | `call-dispatch-and-follow-up-calls` | **Placing calls.** Dials only with consent, an active contact, outside quiet hours and to the registered number; tester limits (5 connected calls each, 40 a day, one at a time); at most one Rudi-initiated reach-back; a speak-only call when the AI has no headroom; a frozen WhatsApp thread cancels every pending call. | call | — | `dispatcher.py:place_call` |
+
+### Back-end skills (documents and plans in, hand-overs out)
+
+Not conversation behaviour: the services a skill needs behind the conversation. New ones come out of
+Training Arena work as feature requests; a person adds them here as *planned* after reviewing the
+results, never the arena itself.
+
+| Skill id | What it does | Channels | Arena | Main code |
+|---|---|---|---|---|
+| `document-intake` | **Document intake — link, API, e-mail.** *Planned in this repository:* receives documents through a shared link, an API call or a dedicated e-mail address, stores them de-identified in the EU plane under the person's pseudonymous id, and hands them to the reading skill. A side-built prototype exists; its code comes here with the first skill that needs it. | — | — | `skills/contract.py` |
+| `schedule-intake` | **Schedule intake — a person's plan, structured.** *Planned, not built:* reads a plan (first: a runner's training schedule as PDF, CSV or app export) into one structured plan per person and gives the engine today's and the next session ([TA brief](../skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md) K1, K10). | — | — | `memory/store.py` |
+| `human-handover` | **Hand-over to the person's human coach.** *Planned, not built:* with consent and on an agreed trigger, a minimal hand-over to the coach or care professional through the tenant's channel (TA brief K11). | — | — | `alerts.py:conversation_frozen` |
 
 ### Platform (not a Rudi behaviour; where application errors are located)
 

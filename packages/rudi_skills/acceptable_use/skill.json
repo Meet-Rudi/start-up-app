@@ -1,0 +1,31 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "acceptable-use",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Acceptable-use exclusions",
+  "summary": "Keeps the clone out of excluded uses: minors, financial, legal or debt advice, and judging people for others.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "block": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "markers": [
+    "# what you never do here"
+  ]
+}

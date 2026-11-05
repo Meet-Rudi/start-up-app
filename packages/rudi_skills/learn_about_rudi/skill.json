@@ -1,0 +1,53 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "learn-about-rudi",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Learn about the clone",
+  "summary": "Journey stage: answers questions about who the clone is, from the clone's About document, and notices when the person wants to start.",
+  "channels": [
+    "whatsapp",
+    "voice"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "outcomes": [
+    "wants_to_try"
+  ],
+  "assets": [
+    "about"
+  ],
+  "prompt_sections": {
+    "body": {
+      "overridable": true,
+      "locales": [
+        "*"
+      ]
+    },
+    "body_voice": {
+      "overridable": true,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "companion": {
+      "type": "str",
+      "default": "coaching companion",
+      "overridable": true
+    }
+  },
+  "signals": [
+    "want_to_try",
+    "check_in_minutes",
+    "check_in_about"
+  ],
+  "markers": [
+    "want_to_try",
+    "# about me (context)",
+    "respond only as a single json"
+  ]
+}

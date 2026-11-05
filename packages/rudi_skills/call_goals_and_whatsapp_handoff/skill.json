@@ -1,0 +1,66 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "call-goals-and-whatsapp-handoff",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Call brief, call goals and the WhatsApp hand-off",
+  "summary": "Tells the model who it called and why, and how this kind of call must end: a promised call-back, reported, or a hand-over to WhatsApp.",
+  "channels": [
+    "voice"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "prompt_sections": {
+    "check_in": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    },
+    "handoff": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "quiet_start": {
+      "type": "str",
+      "default": "21:30",
+      "overridable": true
+    },
+    "quiet_end": {
+      "type": "str",
+      "default": "06:30",
+      "overridable": true
+    }
+  },
+  "memory": {
+    "writes": {
+      "check_in_minutes": "int",
+      "check_in_about": "str"
+    },
+    "session": [
+      "check_in_minutes",
+      "check_in_about"
+    ]
+  },
+  "signals": [
+    "check_in_minutes",
+    "check_in_about"
+  ],
+  "markers": [
+    "# call brief",
+    "# coming back to them",
+    "# handing over to whatsapp",
+    "call_goal",
+    "start_phase",
+    "get_to_know",
+    "set_nearterm_goal",
+    "goal_followup",
+    "reinstate_talk"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "scope-and-tone-boundaries",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Scope and tone boundaries",
+  "summary": "No pressure or shaming, no promised results, stays on the person's goal, short human replies.",
+  "channels": [
+    "whatsapp",
+    "voice",
+    "api",
+    "widget",
+    "sms",
+    "email",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "no_pressure": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    },
+    "no_promises": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    },
+    "stay_on_goal": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    },
+    "short_replies": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  }
+}

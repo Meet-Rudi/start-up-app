@@ -212,6 +212,37 @@ class Cascade(unittest.TestCase):
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertEqual(payload["max_tokens"], 250)
         self.assertEqual(payload["model"], "model-a")
+        self.assertNotIn("reasoning_effort", payload)
+
+    def test_an_endpoints_own_params_ride_along(self):
+        low = ModelEndpoint.from_config(
+            {"name": "low", "endpoint": "https://low.example/v1", "model": "gpt-oss",
+             "secret": "meetrudi/test/a", "params": {"reasoning_effort": "low"}}
+        )  # fmt: skip
+        gw, transport, _, _, _ = gateway({low.url: [ok("{}")]})
+        gw.generate(MSGS, [low], json_mode=True, max_tokens=1024)
+        payload = transport.calls[0]["payload"]
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertEqual(payload["max_tokens"], 1024)
+
+    def test_failures_are_logged_as_a_kind_never_a_body(self):
+        from rudi_platform.gateway.core import failure_kind
+
+        self.assertEqual(failure_kind(RateLimitError("HTTP 429 from x: slow down")),
+                         "rate-limited")  # fmt: skip
+        self.assertEqual(failure_kind(AIError("network error: The read operation timed out")),
+                         "timeout")  # fmt: skip
+        self.assertEqual(
+            failure_kind(AIError("a returned no content (finish_reason=length)")),
+            "no-content",
+        )
+        self.assertEqual(
+            failure_kind(AIError("a hit the token cap mid-JSON")), "truncated"
+        )
+        self.assertEqual(
+            failure_kind(AIError("HTTP 400 from x: {'failed_generation': 'Hi Peter'}")),
+            "http-400",
+        )
 
     def test_malformed_calls_are_refused(self):
         gw, _, _, _, _ = gateway({})
@@ -227,6 +258,13 @@ class Budget(unittest.TestCase):
         gw, transport, _, _, _ = gateway({slow.url: [ok("x")]})
         gw.generate(MSGS, [slow], budget_s=5)
         self.assertEqual(transport.calls[0]["timeout"], 5)
+
+    def test_a_live_call_caps_every_attempt(self):
+        slow = ep("slow", timeout_s=25)
+        gw, transport, _, _, _ = gateway({slow.url: [ok("x")]})
+        gw.generate(MSGS, [slow], budget_s=18, attempt_timeout_s=7, max_tokens=250)
+        self.assertEqual(transport.calls[0]["timeout"], 7)
+        self.assertEqual(transport.calls[0]["payload"]["max_tokens"], 250)
 
     def test_stops_when_too_little_budget_is_left(self):
         gw, transport, sink, _, _ = gateway(
@@ -343,6 +381,11 @@ class Policy(unittest.TestCase):
             {"kind": "carrier-pigeon"},
             {"tiers": frozenset({"poetry"})},
             {"url": ""},
+            {
+                "params": {"model": "someone-else"}
+            },  # params never override the gateway's own
+            {"params": {"max_tokens": 99999}},
+            {"params": ["reasoning_effort"]},
         ):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 ModelEndpoint(

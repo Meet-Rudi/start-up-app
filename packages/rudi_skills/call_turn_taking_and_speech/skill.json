@@ -1,0 +1,32 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "call-turn-taking-and-speech",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Speaking on a call",
+  "summary": "Replies are speakable: one or two short sentences, one question, no markup.",
+  "channels": [
+    "voice"
+  ],
+  "hooks": [
+    "contribute"
+  ],
+  "prompt_sections": {
+    "style": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "after_stage_in": {
+      "type": "str_list",
+      "default": [],
+      "overridable": true
+    }
+  },
+  "markers": [
+    "# speaking, not writing"
+  ]
+}

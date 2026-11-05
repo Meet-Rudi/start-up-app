@@ -11,7 +11,7 @@
 # home). Paths are checked by tests/test_improve.py; keep them true when the code moves, and bump
 # `version`. A remodel of this catalogue is planned (2026-10-23).
 format: rudi-skills@1
-version: "2026-10-23.1"
+version: "2026-11-04.1"
 
 domains:
   flow: Conversation flow
@@ -24,6 +24,7 @@ domains:
   webchat: Channel — web chat
   call: Channel — voice call
   platform: Platform (not a Rudi behaviour; where application errors are located)
+  backend: Back-end skills (documents and plans in, hand-overs out)
 
 skills:
   # ------------------------------------------------------------------ conversation flow
@@ -666,6 +667,30 @@ skills:
     arena: none
     gaps: No template SIDs are configured, so nothing is sent after the window lapses.
 
+  - id: schedule-driven-check-ins
+    name: Check-ins timed by the person's schedule
+    status: planned
+    domain: proactive
+    channels: [whatsapp]
+    summary: >-
+      PLANNED, not built: times proactive check-ins by the person's plan (schedule-intake) instead of
+      Rudi's own promise: after each planned session, never on a rest day, outside quiet hours and within
+      the outreach limits. In the 24 h window the check-in is free-form; outside it, an approved template
+      that names the session (Meta proactive outreach is approved, and a new use-case template is a quick
+      approval). Requested by the TA brief, skill-inputs/uc-01-smart-running (K3, B16).
+    expected: >-
+      One check-in per planned session at the agreed moment, naming the session; none on rest days or at
+      night; out of window always through an approved template.
+    observe: The proactive sends and their timing against the person's plan.
+    code:
+      - services/whatsapp/src/store.py:compute_next_proactive
+      - services/whatsapp/src/reengage.py:handler
+      - services/whatsapp/src/reengage.py:_send_template
+    tests:
+      - skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md
+    arena: none
+    gaps: Not built. Today a check-in is timed by Rudi's own promise (check-in-promise), capped at 24 h.
+
   # ------------------------------------------------------------------ channel: WhatsApp
   - id: whatsapp-ingest-and-delivery
     name: WhatsApp ingest and delivery
@@ -840,6 +865,76 @@ skills:
       - services/whatsapp/tests/test_tester_call_runner.py
       - services/call/tests/test_status.py
     arena: none
+
+  # ------------------------------------------------------------------ back-end skills
+  # Planned entries are added by a person after reviewing training results, never by the arena itself.
+  - id: document-intake
+    name: Document intake — link, API, e-mail
+    status: planned
+    domain: backend
+    channels: []
+    summary: >-
+      PLANNED in this repository: receives documents for a tenant or a person through three doors — a
+      file shared by link, an API call, or a dedicated e-mail address — stores them in the EU plane under
+      the person's pseudonymous id, de-identified before any model reads them, and hands them to the
+      skill that reads them. A prototype was built on the side for earlier testing; its code comes back
+      here when the first skill needs it (schedule-intake, TA brief K1).
+    expected: >-
+      Every delivered file arrives once, is linked to the right person, never leaves the EU plane, is
+      covered by the erasure cascade, and reaches the reading skill within minutes.
+    observe: The intake log (door, person id, file type and size, outcome); the stored document.
+    code:
+      - packages/rudi_platform/skills/contract.py
+      - packages/rudi_platform/privacy/deid.py
+      - docs/platform/blueprint.md
+    tests:
+      - skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md
+    arena: none
+    gaps: Not in this repository yet; the side-built prototype has not served a live use case.
+
+  - id: schedule-intake
+    name: Schedule intake — a person's plan, structured
+    status: planned
+    domain: backend
+    channels: []
+    summary: >-
+      PLANNED, not built: reads a person's plan delivered through document-intake, or sent in the chat,
+      into one structured plan per person (date, session type, distance or duration, planned time, note),
+      replaces it when a new version arrives, and gives the engine today's and the next item. First use:
+      a runner's training schedule as PDF, CSV or app export (TA brief K1, K10).
+    expected: >-
+      The structured plan matches the source item by item, nothing invented; a new version replaces the
+      old one the same day; the engine is given the right session for today and the next one.
+    observe: The stored plan per person; the session the engine is given on each turn.
+    code:
+      - packages/rudi_platform/skills/contract.py
+      - packages/rudi_platform/memory/store.py
+    tests:
+      - skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md
+    arena: none
+    gaps: Not built. The arena cannot seed a plan into a case yet (arena-harness).
+
+  - id: human-handover
+    name: Hand-over to the person's human coach
+    status: planned
+    domain: backend
+    channels: []
+    summary: >-
+      PLANNED, not built: when a tenant wants it and the person has consented, sends a minimal hand-over
+      to their human coach or care professional, through the tenant's own channel, on an agreed trigger
+      (first candidate: pain, a wish to quit or repeated missed sessions in the TA pilot, K11). It carries
+      health data to a third party, so explicit consent and a data-processing agreement come first.
+    expected: >-
+      A hand-over only on an agreed trigger and with recorded consent; minimal content (who, what, when),
+      never conversation text; the person knows it happens.
+    observe: The hand-over log (trigger, person id, recipient, consent reference).
+    code:
+      - services/whatsapp/src/alerts.py:conversation_frozen
+      - packages/rudi_platform/privacy/deid.py
+    tests:
+      - skill-inputs/uc-01-smart-running/ta-training-adherence.skill.md
+    arena: none
+    gaps: Not built. Today Rudi can only ask the person to tell their coach themselves.
 
   # ------------------------------------------------------------------ platform
   - id: model-gateway

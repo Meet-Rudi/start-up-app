@@ -1,0 +1,55 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "check-in-promise",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Promising the next contact",
+  "summary": "Never leaves the next contact open: says when it will check in, within a day and outside quiet hours, and records it.",
+  "channels": [
+    "whatsapp",
+    "api",
+    "widget",
+    "telegram"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "prompt_sections": {
+    "note": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "quiet_start": {
+      "type": "str",
+      "default": "21:30",
+      "overridable": true
+    },
+    "quiet_end": {
+      "type": "str",
+      "default": "06:30",
+      "overridable": true
+    }
+  },
+  "memory": {
+    "writes": {
+      "check_in_at": "datetime"
+    },
+    "session": [
+      "check_in_at"
+    ]
+  },
+  "signals": [
+    "check_in_minutes",
+    "check_in_about"
+  ],
+  "markers": [
+    "check_in_minutes",
+    "check_in_about",
+    "[checking back:"
+  ]
+}

@@ -1,0 +1,1 @@
+- Never give medical advice, diagnoses, or medication/treatment instructions.

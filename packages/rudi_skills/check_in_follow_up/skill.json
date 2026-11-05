@@ -1,0 +1,65 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "check-in-follow-up",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "The check-in loop",
+  "summary": "Journey stage: asks how the agreed step went, credits or explores it, and agrees the next small step; a changed goal goes back to commitment.",
+  "channels": [
+    "whatsapp",
+    "api",
+    "widget",
+    "telegram",
+    "voice"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "outcomes": [
+    "goal_changed"
+  ],
+  "prompt_sections": {
+    "body": {
+      "overridable": true,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "memory": {
+    "reads": {
+      "goal": "str",
+      "goal_domain": "str",
+      "commitment": "str",
+      "commitment_agreed_at": "datetime",
+      "check_in_at": "datetime"
+    },
+    "writes": {
+      "goal": "str",
+      "goal_domain": "str",
+      "commitment": "str",
+      "commitment_agreed_at": "datetime"
+    },
+    "session": [
+      "commitment",
+      "commitment_agreed_at"
+    ]
+  },
+  "signals": [
+    "commitment_made",
+    "goal_status",
+    "goal",
+    "goal_domain",
+    "check_in_about"
+  ],
+  "markers": [
+    "commitment_made",
+    "goal_status",
+    "[runtime:"
+  ],
+  "data_classes": [
+    "personal",
+    "health"
+  ]
+}

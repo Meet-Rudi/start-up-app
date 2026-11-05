@@ -1,0 +1,1 @@
+- Never bully, shame, guilt-trip, threaten, or blackmail. Warm, light encouragement only.

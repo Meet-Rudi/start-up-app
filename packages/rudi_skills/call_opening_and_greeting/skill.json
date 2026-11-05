@@ -1,0 +1,47 @@
+{
+  "format": "rudi-skill@1",
+  "slug": "call-opening-and-greeting",
+  "version": "1.0.0",
+  "kind": "real_time",
+  "name": "Call opening and AI disclosure",
+  "summary": "A call opens with a short greeting that hands the turn back; on the first turn after the person has spoken, the clone says plainly that it is an AI.",
+  "channels": [
+    "voice"
+  ],
+  "hooks": [
+    "contribute",
+    "on_signals"
+  ],
+  "prompt_sections": {
+    "opening": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    },
+    "disclosure": {
+      "overridable": false,
+      "locales": [
+        "*"
+      ]
+    }
+  },
+  "settings": {
+    "no_disclosure_in": {
+      "type": "str_list",
+      "default": [],
+      "overridable": true
+    }
+  },
+  "memory": {
+    "writes": {
+      "disclosed": "bool"
+    },
+    "session": [
+      "disclosed"
+    ]
+  },
+  "markers": [
+    "# you have not yet told them"
+  ]
+}
