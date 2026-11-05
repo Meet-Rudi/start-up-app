@@ -62,6 +62,8 @@ COMPONENTS = {
         "build": True,
         "seed_dir": "services/whatsapp/seed",   # WhatsApp-aware prompt(s)
         "seed_bucket_from": "meetrudi-base",
+        # The platform Turn Engine + CM clone as a layer (packages/ copied, checked to load).
+        "prebuild": "services/whatsapp/build_layer.py",
         # Tester console settings. The dispatch URL is read straight off the call stack so the
         # two are never wired together by hand; the rest come from deploy.local.json because
         # they are phone numbers and addresses, which do not belong in git.

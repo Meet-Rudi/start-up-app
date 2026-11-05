@@ -43,6 +43,7 @@ Thumbs.db
 services/tts/layer/
 services/training-arena/layer/
 services/call/layer/
+services/whatsapp/layer/
 services/tts/.voice-cache/
 services/tts/.token
 

@@ -39,6 +39,44 @@ Twilio ──POST──► meetrudi-wa-webhook (Function URL)
 - `tests/` — zero-dependency unit + contract tests (`python -m unittest`, no boto3/moto).
 - `template.yaml` — SAM: queues, 3 Lambdas, Function URLs.
 
+> The diagram above is the operator-console milestone. Since then the processor answers with
+> Rudi (`AI_RESPONDER: "true"`), and which engine answers is the section below.
+
+## Two engines
+
+Every AI reply on WhatsApp, in the tester console's chat (Track A) and through the Training
+Arena's door (`meetrudi-engine-turn`) comes from one of two engines, behind one function,
+[`src/chat_engine.py`](src/chat_engine.py) (decision #40):
+
+| Engine | What runs | Where |
+|---|---|---|
+| `legacy` | `responder.py`, as since August | the functions' own code |
+| `platform` | CM's clone version 1 on the Turn Engine, held to `responder.py` turn by turn by `packages/rudi_platform/tests/test_engine_parity.py` | layer `meetrudi-tenant-prod-pool-engine-whatsapp`, built from `packages/` by [`build_layer.py`](build_layer.py) |
+
+- **Which one:** `CHAT_ENGINE` in `template.yaml`'s Globals (`platform` since 2026-11-05),
+  read by the processor, the tester API and the arena door. Rolling back is `CHAT_ENGINE:
+  legacy` and `python deploy.py whatsapp`. The arena door takes `engine` per event; without it, it follows
+  `CHAT_ENGINE`, so the arena measures what live WhatsApp runs.
+- **Per message, one state.** Both engines read and write the same `meta.ai_state` (CM's flat
+  form), so a conversation can move between them at any message, in either direction.
+- **Never the reason a reply is lost.** If the platform cannot load, or breaks on a message for
+  any reason other than the models, that message runs on legacy (logged `platform turn failed`).
+  Model failures are the legacy gateway's errors on both engines, so the person gets the same
+  "tired" / "error" line either way.
+- **Around the engine, nothing changed.** De-identification before storage, the objection gate
+  (lexicon + classifier, ahead of everything), delivery, scheduling, profile summaries and
+  proactive reach-out stay in the processor and runners (background work moves with the
+  scheduler, Phase 2). If the platform's own gate halts a message the processor's gate let
+  through, the contact is frozen exactly as if that gate had fired.
+- **Models.** The platform reads `config/ai_endpoints.json` every message and adds the same
+  Groq fallback, with the same retries and timeouts as `gateway.py`. Arena turns use only the
+  arena's cascade, on both engines.
+- **Not switched:** the operator test console (`test_console.py`, which predates
+  de-identification) and `services/rudi-chat` stay on legacy.
+- **Simulated conversations:** [`rudi_sim_chat.py`](rudi_sim_chat.py) plays a scripted chat
+  (English, Dutch, or a language switch) through the deployed arena door on either engine, on
+  the arena's keys; nothing is stored or sent.
+
 ## Storage layout (S3, per-conversation isolation)
 ```
 conversations/{userId}/meta.json                       # contact record + conversation state

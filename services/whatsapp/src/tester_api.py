@@ -74,6 +74,7 @@ import tester_store
 import tester_mail
 import deid
 import webchat
+import chat_engine
 from tester_store import Tester, TesterStore
 
 _s3 = boto3.client("s3")
@@ -504,7 +505,9 @@ def _chat_thread(tester):
         meta = store.ContactMeta(user_id=tester.tester_id, display_name=tester.first_name,
                                  locale=tester.locale, keep_warm=False, consent_state="granted")
         CHAT.put_meta(meta)
-        reply, ai_state, _ = responder.respond({}, "", locale=_engine_locale(tester.locale))
+        # The same engine as WhatsApp (CHAT_ENGINE). A first greeting is canned: no model call.
+        reply, ai_state, _ = chat_engine.respond({}, "", locale=_engine_locale(tester.locale),
+                                                 personality_block="", legacy=responder)
         CHAT.record_outbound(tester.tester_id,
                              store.Message(id=store.new_message_id(), direction="out",
                                            type="text", text=reply, operator_id="ai:rudi"),
@@ -540,12 +543,14 @@ def _chat_send(tester, payload):
     # De-identify FIRST, exactly as the WhatsApp path does: identifiers are removed for good and
     # names swapped for aliases before the message is stored, and before the model ever sees it.
     # webchat.chat_turn does both — the same function the Training Arena drives — and is handed
-    # this module's engine references so the tests' doubles still apply.
+    # this module's engine references so the tests' doubles still apply. The engine answering
+    # is WhatsApp's (CHAT_ENGINE), so a tester's chat runs where their WhatsApp thread runs.
     vault, _ = deid.session_vault(meta)
     asked_at = store.iso_now()
+    engine = chat_engine.Responder(meta.persona, vault, legacy=responder, personas=personality)
     try:
         turn = webchat.chat_turn(vault, meta.ai_state, text, locale, meta.persona,
-                                 detector=_CHAT_DETECTOR, engine=responder, personas=personality)
+                                 detector=_CHAT_DETECTOR, engine=engine, personas=personality)
     except gateway.AllRateLimited:
         return _resp(503, {"error": "rate_limited"})
     except Exception as e:  # noqa: BLE001 - surface engine failure honestly, don't 500 blankly

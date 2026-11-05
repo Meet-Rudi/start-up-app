@@ -16,7 +16,12 @@ Operations:
 The arena chooses only WHOSE KEYS a turn spends. A `turn` must carry the arena's own Rudi cascade,
 and it is refused unless every entry points at a provider live Rudi already uses and every key
 lives under meetrudi/arena/rudi-. Inside gateway.using() the in-code live Groq fallback is not
-appended, so an arena turn can never spend live Rudi's quota.
+appended, so an arena turn can never spend live Rudi's quota; the platform engine gets exactly
+the same cascade and nothing else (chat_engine._cascade).
+
+Which engine answers (decision #40): the event's `engine` ("legacy" | "platform"), else the one
+live WhatsApp runs on (CHAT_ENGINE). The response's engine.name says which one did — a platform
+turn that breaks for a reason other than the models falls back to legacy, as live turns do.
 
 Logs carry opaque IDs, operations and timings only — never message text (CLAUDE.md §5).
 """
@@ -26,6 +31,7 @@ import time
 import datetime
 import urllib.parse
 
+import chat_engine
 import deid
 import gateway
 import personality
@@ -90,8 +96,22 @@ def _now(value):
     return dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)
 
 
-def _engine():
-    return {"release": RELEASE, "assets": responder.asset_versions()}
+def _engine(name=chat_engine.LEGACY):
+    return {"release": RELEASE, "assets": responder.asset_versions(), "name": name}
+
+
+class BadEngine(ValueError):
+    pass
+
+
+def _which(event):
+    """The engine this event asks for, else the one live WhatsApp runs on."""
+    asked = event.get("engine")
+    if asked in (None, ""):
+        return chat_engine.default_engine()
+    if asked not in chat_engine.ENGINES:
+        raise BadEngine("engine must be one of %s" % ", ".join(chat_engine.ENGINES))
+    return asked
 
 
 def _usage(info):
@@ -102,12 +122,17 @@ def _usage(info):
 
 
 def _open(event):
-    reply, state, info = responder.respond({}, "", locale=event.get("locale") or "en")
+    which = _which(event)
+    if which == chat_engine.PLATFORM:
+        reply, state, info = chat_engine.respond({}, "", locale=event.get("locale") or "en",
+                                                 personality_block="", engine=which, cascade=[])
+    else:
+        reply, state, info = responder.respond({}, "", locale=event.get("locale") or "en")
     return {"ok": True, "reply": reply, "state": state, "vault": deid.AliasVault().to_dict(),
             "info": {"phase_before": None, "phase": info.get("phase"), "signals": {}, "model": "none",
                      "lang": None, "leak_blocked": False, "pii_redacted": {}},
             "usage": {"model": "none", "tokens_in": 0, "tokens_out": 0, "estimated": False},
-            "engine": _engine(), "ms": 0}
+            "engine": _engine(info.get("engine") or chat_engine.LEGACY), "ms": 0}
 
 
 def _turn(event):
@@ -119,12 +144,17 @@ def _turn(event):
     except BadCascade as e:
         return {"ok": False, "error": "bad_cascade", "detail": str(e)}
     vault = deid.AliasVault.from_dict(event.get("vault") or None)
+    persona = event.get("personality") or ""
+    routed = {}
+    if _which(event) == chat_engine.PLATFORM:
+        routed["engine"] = chat_engine.Responder(persona, vault, engine=chat_engine.PLATFORM,
+                                                 cascade=cascade)
     started = time.time()
     try:
         with gateway.using(cascade):
             t = webchat.chat_turn(vault, event.get("state") or {}, text, event.get("locale") or "en",
-                                  event.get("personality") or "", tz=event.get("tz") or "",
-                                  now=_now(event.get("now")), redacted="[%s removed]")
+                                  persona, tz=event.get("tz") or "",
+                                  now=_now(event.get("now")), redacted="[%s removed]", **routed)
     except gateway.AllRateLimited as e:
         return {"ok": False, "error": "rate_limited", "detail": str(e)[:300]}
     except gateway.AIError as e:
@@ -135,8 +165,11 @@ def _turn(event):
             "info": {"phase_before": info.get("phase_before"), "phase": info.get("phase"),
                      "signals": info.get("signals") or {}, "model": info.get("model"),
                      "lang": info.get("lang"), "leak_blocked": bool(info.get("leak_blocked")),
-                     "pii_redacted": t["found"] or {}},
-            "usage": _usage(info), "engine": _engine(), "ms": ms}
+                     "pii_redacted": t["found"] or {},
+                     **({"guard": info["guard"]} if info.get("guard") else {}),
+                     **({"halted": info["halted"]} if info.get("halted") else {})},
+            "usage": _usage(info), "engine": _engine(info.get("engine") or chat_engine.LEGACY),
+            "ms": ms}
 
 
 def _scan(event):
@@ -168,6 +201,8 @@ def handler(event, context=None):
             out = _info(event)
         else:
             out = {"ok": False, "error": "bad_request", "detail": "unknown op"}
+    except BadEngine as e:
+        out = {"ok": False, "error": "bad_request", "detail": str(e)}
     except Exception as e:  # noqa: BLE001 - the arena must get an answer, never a stack trace
         print("ERROR engine-turn op=%s case=%s: %s" % (op, trace.get("case"), type(e).__name__))
         out = {"ok": False, "error": "engine_failed", "detail": type(e).__name__}

@@ -73,11 +73,34 @@ Globals:
     Runtime: python3.12
     Timeout: 30
     MemorySize: 256
+    Environment:
+      Variables:
+        # Which engine answers WhatsApp messages, the tester console's chat and (by default) the
+        # Training Arena door (decision #40): legacy = responder.py; platform = CM's clone on
+        # the platform Turn Engine (layer meetrudi-tenant-prod-pool-engine-whatsapp). Both
+        # share one conversation state. platform since 2026-11-05; roll back with "legacy" and
+        # python deploy.py whatsapp. (An environment value, not a stack parameter: a deploy
+        # keeps a parameter's previous value, so a changed default would never arrive.)
+        CHAT_ENGINE: platform
     # NOTE: Role and CodeUri are set per-function below. Role: SAM disallows it in Globals.
     # CodeUri: `aws cloudformation package` only rewrites CodeUri on individual functions,
     # not in Globals — keeping it per-function keeps both `sam` and raw-CLI deploys correct.
 
 Resources:
+
+  # The platform Turn Engine and CM's clone (packages/rudi_platform, rudi_skills, rudi_tenants),
+  # built by build_layer.py before `sam build`. This service's own copy: the call service ships
+  # meetrudi-tenant-prod-pool-engine, so each deploy carries the engine its adapter was tested
+  # with (decision #40).
+  EngineLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: meetrudi-tenant-prod-pool-engine-whatsapp
+      Description: Platform Turn Engine + CM clone for WhatsApp, tester chat and the arena door.
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
 
   WaDlq:
     Type: AWS::SQS::Queue
@@ -179,6 +202,8 @@ Resources:
       CodeUri: src/
       Timeout: 60
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Layers:
+        - !Ref EngineLayer
       Environment:
         Variables:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
@@ -333,6 +358,8 @@ Resources:
       Timeout: 60
       MemorySize: 512
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Layers:
+        - !Ref EngineLayer
       Environment:
         Variables:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
@@ -427,6 +454,8 @@ Resources:
       Timeout: 90
       MemorySize: 256
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Layers:
+        - !Ref EngineLayer
       Environment:
         Variables:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
