@@ -3,7 +3,7 @@
 > Things Claude cannot do with the `rudi-deployer` profile (console-only IAM, secrets, quotas,
 > vendor accounts). None blocks work today. Each item says **what it blocks**, so it gets done
 > when it starts standing in the way. Claude adds new items here instead of stopping work, and
-> ticks them only after you confirm. Last updated: 2026-10-28.
+> ticks them only after you confirm. Last updated: 2026-11-04.
 
 ## Open
 
@@ -53,6 +53,16 @@
      Console → Secrets Manager → Store a new secret → *Other type of secret* → Plaintext →
      `{"host": "...", "port": 5432, "database": "...", "user": "...", "password": "...", "sslmode": "verify-full"}`
      → name it exactly **`meetrudi/internal/dev/planetscale`** (region eu-central-1).
+
+### 4. Groq: move off the free tier
+
+- **Blocks:** call turns staying fast. The free tier gives 8,000 tokens a minute per model; a call
+  turn asks for about 2,500 (4,300 in a first call), so after about three turns a call falls to
+  slower providers (2–7 s pauses), and WhatsApp shares the same allowance.
+- **How:** Groq console → the organisation that owns the key in `meetrudi-groq-firstkey` →
+  Billing → upgrade to the Developer (pay-as-you-go) tier. The arena's price note for
+  gpt-oss-120b is USD 0.15 in / 0.60 out per million tokens: about a cent per call. Check that
+  Groq's terms and DPA still fit (Prime Directive §0.1, pseudonymized payloads only).
 
 ## Later (not needed before Phase 2)
 

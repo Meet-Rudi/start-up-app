@@ -3,7 +3,7 @@
 > Status: **approved with changes** (review of v0.1 completed 2026-10-28). This file is the
 > source of truth for the platform design; [conventions.md](conventions.md) holds the binding
 > rules (ids, names, run time). Decisions are logged in [project.md](../../project.md) §11,
-> entries #24–#35. Last updated: 2026-10-28.
+> entries #24–#38. Last updated: 2026-11-04.
 
 Rudi becomes a multi-tenant conversational platform. A **clone** is a tenant's configured
 conversational agent: personas, a journey, a mix of versioned skills, channels and a model policy.
@@ -47,7 +47,7 @@ End-user (usr_)  derived per tenant (per clone by default); handles (hdl_), cons
 - **Router** maps an endpoint to tenant, clone, live version and cell; applies rate limits; mints
   the end-user id with the tenant salt.
 - **Inbound queue** (FIFO per end-user) for messaging; API and voice go to the engine directly.
-- **Turn Engine** (`packages/engine`, run in-process by the adapters' Lambdas): loads state and
+- **Turn Engine** (`packages/rudi_platform/engine`, run in-process by the adapters' Lambdas): loads state and
   composition, runs the journey and real-time skills, fans out to turn skills, assembles the
   prompt, calls the gateway, applies reply gates, persists, emits events.
 - **Model Gateway**: model policy, de-identification and restore, cascade, reply envelope,
@@ -90,11 +90,25 @@ pre-fetched once per call run inside a turn; no tool loops.
   confidentiality and leak guard, stop and wrong-number handling, acceptable-use exclusions
   (minors, EU AI Act high-risk uses, financial/legal/debt advice; education clones serve adult
   and workplace learning and never assess or decide access).
+- **Conversation** (added in Phase 1): persona temperament, language mirroring, time awareness,
+  scope and tone — the basics every text clone uses.
 - **Coaching**: learn, first-contact rapport, goal setting and scope rejection, commitment,
-  check-in loop and promise, keep-warm reach-out, profile summary.
-- **Voice call**: call opening, speech style, call goals and WhatsApp hand-off, closing.
-- De-identification is not a skill; it lives in the gateway so nothing can skip it.
-- CM's clone = Baseline + Coaching + Voice call + diabetes guidance library + CM consent settings.
+  check-in loop and promise, keep-warm reach-out, profile summary, no medical advice.
+- **Voice call**: call opening and AI disclosure, speech style, call brief with call goals and
+  WhatsApp hand-off, closing and time budget (4 skills; voicemail screening and dial rules stay in
+  the voice adapter). The voice channel profile carries what the live call brain does around
+  them: a model-written greeting on pick-up, speakable replies, an 18 s turn with 7 s attempts,
+  and a call that ends rather than restarts.
+- De-identification is not a skill. The engine de-identifies at the conversation boundary
+  (inbound scrubbed before it is stored or sent, names restored only for the person); the gateway
+  does it for every other model call.
+- CM's clone = Baseline + Conversation + Coaching + Voice call + diabetes guidance library + CM
+  consent settings, on WhatsApp and calls. Version 1 (`packages/rudi_tenants/cm.py`) is today's
+  CM exactly, held to both live engines by parity tests: without `acceptable-use` (adding it is
+  version 2, after an arena batch); persona and objection gate on WhatsApp only (the live calls
+  have neither); today's three call-brain quirks kept as visible settings, including the missing
+  AI-disclosure instruction in learn-stage calls; real-time skills only (background skills come
+  with the scheduler).
 
 Today's 37 catalogue skills map onto these kinds as in the v0.1 review page (section 06); the
 catalogue becomes an index generated from manifests and brief links.
@@ -256,8 +270,8 @@ replaced only after its successor is live, tested and holds the data. In particu
 | Phase | Scope |
 |---|---|
 | 0 Ground | **Done:** conventions; `rudi_platform` core (ids, naming, skill envelope, 13-minute budget and hand-over); the platform model gateway; de-identification, leak guard, timeline and OCEAN persona with parity tests against the live copies; access model (roles as data); registry, access and audit schema with row-level security (`db/migrations`, syntax-checked, not yet run); i18n catalogue with `{persona}`. **Open:** migration runner, PlanetScale `RegistryStore` and first run on the dev database (USER-TODO #3); quota raise and permissions boundary (USER-TODO #1, #2); move the ask-ai seed, then retire the K4 services (deferred by decision). |
-| 1 Tenant-aware engine | **Done:** skill manifest (`rudi-skill@1`) and composer; `RegistryStore` seam with the in-memory store and contract tests; publishing draft → staging → live with audit. **Open:** journey engine; Baseline and Coaching packs as real manifests and code; clone-aware engine-turn; arena targets `clone@version`; CM as tenant #1 on the legacy S3 memory adapter. |
-| 2 Channels and basic console | `edge-whatsapp`, `edge-voice` (fast memory), `edge-api` and widget; scheduler and background skills; **basic console running on CM** (conversations, clone settings, usage, accounts and roles) as the live demo for onboarding; CM cut over to the platform engine. |
+| 1 Tenant-aware engine | **Done:** skill manifest (`rudi-skill@1`) and composer; `RegistryStore` seam with the in-memory store and contract tests; publishing draft → staging → live with audit; journey engine (`rudi-journey@1`, checked at publish); Baseline, Conversation, Coaching and Voice call packs as 21 real-time skill packages (`packages/rudi_skills`); the Turn Engine running any clone version on WhatsApp and calls (journey variants per channel, per-channel memory and assets); `ConversationStore` seam with the legacy S3 adapter (state round-trips with CM's `ai_state`); CM as tenant #1 on both channels (clone version 1, held to the live engines turn by turn by `test_engine_parity.py` and `test_voice_parity.py`); the arena door (`engine/door.py`, the `meetrudi-engine-turn` contract plus `target: cm/rudi@live` and calls); `engine/voice.py`, the call brain's interface for the voice adapter; CM's live calls on the platform engine (decision #38: layer `meetrudi-tenant-prod-pool-engine`, `CALL_ENGINE: platform` since 2026-11-05, legacy kept as the fallback and rollback; simulated calls and recorded voice checks as the release evidence). **Open:** retire `brain.py` once calls have run on the platform for a while; deploy the door as `meetrudi-tenant-dev-pool-engine` and let the arena pick a target (needs USER-TODO #1); run an arena batch on both doors; CM version 2 (`acceptable-use`, the call disclosure gap, one guidance document). |
+| 2 Channels and basic console | `edge-whatsapp`, `edge-voice` (fast memory; the engine side is done in Phase 1), `edge-api` and widget; scheduler and background skills; **basic console running on CM** (conversations, clone settings, usage, accounts and roles) as the live demo for onboarding; CM cut over to the platform engine. |
 | 3 Full console and tenant #2 | Scope requests with inventory match, knowledge upload, takeover, keys and webhooks, templates, draft → staging → live; tenant #2 from existing skills, no deploy; CM data moves to Postgres when the backend is live. |
 | 4 Minting and reach | The minting path end to end; first turn skill (knowledge retrieval); SMS and e-mail reach-out. |
 

@@ -284,6 +284,9 @@ def parse_envelope(text):
 
 
 _ALIAS = re.compile(r"<\s*\|\s*[A-Za-z0-9_\-]{1,40}\s*\|\s*>")
+# An alias the model wrote without its brackets ("Hi Person_A", "Hi Person A"). Smaller fallback
+# models do this (seen on calls, 2026-11-04); the caller then heard "Person A" instead of a name.
+_BARE_ALIAS = re.compile(r"\bPerson(?:_([A-Z]{1,3})|\s([A-Z]))\b")
 
 
 def _speakable(text):
@@ -291,7 +294,8 @@ def _speakable(text):
 
     Aliases are set aside first. Turning "_" into a space made "<| Person_A |>" into
     "<| Person A |>", which the vault no longer recognises — so a masked name was spoken as a raw
-    placeholder instead of being restored.
+    placeholder instead of being restored. A bare alias is put back into placeholder form, so the
+    name is restored rather than read out.
     """
     held = []
 
@@ -299,7 +303,12 @@ def _speakable(text):
         held.append(m.group(0))
         return "\x00%d\x00" % (len(held) - 1)
 
+    def _hold_bare(m):
+        held.append("<| Person_%s |>" % (m.group(1) or m.group(2)))
+        return "\x00%d\x00" % (len(held) - 1)
+
     out = _ALIAS.sub(_hold, text or "")
+    out = _BARE_ALIAS.sub(_hold_bare, out)
     out = out.replace("**", "").replace("*", "").replace("#", "")
     out = out.replace("`", "").replace("_", " ")
     out = " ".join(out.split())

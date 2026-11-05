@@ -35,10 +35,11 @@ ENDPOINTS_KEY = os.environ.get("ENDPOINTS_CONFIG_KEY", "config/ai_endpoints.json
 TURN_BUDGET_S = float(os.environ.get("AI_TURN_BUDGET_S", "18"))
 ATTEMPT_TIMEOUT_S = float(os.environ.get("AI_ATTEMPT_TIMEOUT_S", "7"))
 MIN_ATTEMPT_S = float(os.environ.get("AI_MIN_ATTEMPT_S", "2"))
-# Replies are one or two spoken sentences; the longest ever recorded was 35 words. 250 tokens is
-# several times that, so it cannot clip real speech — it is there to stop a runaway generation
-# from eating the whole budget.
-MAX_OUTPUT_TOKENS = int(os.environ.get("AI_MAX_OUTPUT_TOKENS", "250"))
+# Replies are one or two spoken sentences; the longest ever recorded was 35 words. The cap is
+# there to stop a runaway generation from eating the whole budget — but gpt-oss THINKS before it
+# answers and the thinking counts against it. At 250 it spent the lot thinking and returned
+# nothing, on every endpoint, every turn (2026-11-04). 1024 leaves room to think and still speak.
+MAX_OUTPUT_TOKENS = int(os.environ.get("AI_MAX_OUTPUT_TOKENS", "1024"))
 
 GROQ_FALLBACK = {
     "name": "groq-fallback",

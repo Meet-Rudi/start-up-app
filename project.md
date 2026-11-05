@@ -2,7 +2,7 @@
 
 > Human-facing blueprint (the *why* and *what*). Coding rules and conventions live in
 > [CLAUDE.md](CLAUDE.md) (the *how*), which Claude Code auto-loads each session.
-> Last updated: 2026-10-28.
+> Last updated: 2026-11-04.
 
 ---
 
@@ -13,7 +13,7 @@
 > white-label service, or on channels we run (WhatsApp, voice, chat). Coaching comes first; any
 > legal purpose later. The diabetes lifestyle coach described in this file continues as
 > **tenant #1 (CM)**. Platform design: [docs/platform/blueprint.md](docs/platform/blueprint.md);
-> decisions #24–#35 below. Sections 2–10 still describe the CM service until they are rewritten.
+> decisions #24–#38 below. Sections 2–10 still describe the CM service until they are rewritten.
 
 **Mission.** MEET_RUDI ("Rudi") helps people adhere to a prescribed *lifestyle* (movement,
 diet, daily activity, and related habits) in order to support their recovery or treatment.
@@ -238,6 +238,9 @@ Layered, automated-first:
 | 33 | **Roles are data.** Permission catalogue, roles scoped to platform or tenant, assignments per tenant. Seed roles: platform super-admin, platform support, platform skill tester, tenant admin, clone designer, tenant operator, tester. Super-admin defines new roles and delegates their assignment to tenant admins. |
 | 34 | **Coexistence and sequencing.** Today's CM service stays fully working at every step; a component is replaced only after its successor is live and holds the data. A basic console moves into Phase 2 and runs on CM as the live demo for onboarding further tenants. |
 | 35 | **Platform IAM roles under a permissions boundary.** Once `meetrudi-boundary` and `meetrudi-deployer-platform-roles` exist (console), templates may create `meetrudi-internal-*` / `meetrudi-tenant-*` roles carrying that boundary. Legacy roles, managed policies and the boundary stay console-only. |
+| 36 | **CM clone version 1 = today's CM, proven by parity, 2026-11-03.** CM's first clone version reproduces the live WhatsApp engine exactly (same prompt text and order, journey, limits, personas, documents); `test_engine_parity.py` compares the two turn by turn and is the release gate of the 17 skill packages' version 1.0.0 (recorded as gate `legacy-parity` in the audit log, not an arena gate). Consequences: `acceptable-use` is left out of CM v1 (it would change CM's prompt; CM v2 adds it after an arena batch); the crisis helpline stays Belgian as a clone setting. The engine de-identifies at the conversation boundary (inbound scrubbed before storage and model; names restored only in the text the person reads), as CM's channels do today, instead of through the gateway's mask-and-restore, which would store replies with real names. **Confirmed 2026-11-03.** |
+| 37 | **CM's calls join the platform now, 2026-11-04.** The Voice call pack (4 skills) and the engine's call support are pulled forward from Phase 2; CM clone v1 serves WhatsApp and calls, and `test_voice_parity.py` holds its calls to the live call brain (`services/call`) turn by turn. v1 keeps today's call behaviour, quirks included, as visible settings to remove in v2 after an arena run: the speaking-style block's position in the learn stage, no time note in learn, and **no AI-disclosure instruction in calls that start in learn** (every first call). Live findings, not yet fixed: that disclosure gap; calls ignore the `max_seconds` callers send (the brain reads `max_minutes`, so every call runs on the 12-minute default); calls coach from `health-coaching-guidance.md` while WhatsApp uses `diabetes-t2d-guidance.md`. |
+| 38 | **CM's live calls run on the platform engine, 2026-11-05.** `services/call` carries both engines (`platform_call.py`): each call is fixed to one when answered (`manifest.engine`), from its config's `engine` or the service default `CALL_ENGINE`, **`platform` since 2026-11-05** (`legacy` + redeploy rolls back); a platform that cannot load or open sends the call to legacy. The engine ships as the layer `meetrudi-tenant-prod-pool-engine`. Release evidence instead of a phone test (the user does not speak Flemish): 12 whole simulated calls against the deployed stack, both engines, EN and NL, every call goal (`rudi_sim_call.py`); 11 recorded voice checks, real Twilio calls to the account's own spare number, each voice heard by Whisper in the language it was set up for and saying the given text, voice/language switches included (`rudi_voice_check.py`; only calls to an own number are ever recorded). The call disclosure gap (#37) stays as it is for now: the existing-solution exception covers it (user, 2026-11-04). Found while testing, fixed in both engines: the 250-token reply cap returned nothing on every turn since gpt-oss thinks first (now 1024), and a bracketless name alias was spoken as "Person A" (now restored). Platform calls try `ovh-gpt-oss-120b` and Llama last (both overran the 7 s attempt). Open: Groq's free tier (8,000 tokens a minute per model, about three call turns) is the binding limit on call latency (USER-TODO #4); since names are de-identified (09-16) models sometimes invent the caller's name ("Jan"), on both engines; OVH's gpt-oss-20b sometimes trips the leak guard; Twilio rejects the dispatcher's status-event list (21626), so only `completed` callbacks arrive. |
 
 ## 12. Open Questions
 

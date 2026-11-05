@@ -20,6 +20,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
 sys.path.insert(0, HERE)
+# The platform Turn Engine, as the meetrudi-tenant-prod-pool-engine layer ships it.
+sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "packages"))
 
 from fake_s3 import FakeS3  # noqa: E402
 
@@ -70,6 +72,9 @@ import relay      # noqa: E402
 import ws         # noqa: E402
 import dispatcher  # noqa: E402
 import leakguard  # noqa: E402
+import platform_call  # noqa: E402
+import status  # noqa: E402
+import voicecheck  # noqa: E402
 
 _REPLIES: list = []
 
@@ -89,6 +94,32 @@ _REAL_GENERATE = gateway.generate
 brain.gateway.generate = _fake_generate
 dispatcher._twilio_post = lambda path, form, creds: (
     _TWILIO_CALLS.append((path, form)) or {"sid": "CA999", "status": "queued"})
+
+
+class _PlatformModel:
+    """The provider behind the platform gateway in these tests. Speaks from the same _REPLIES
+    script as the legacy stub, and keeps every payload so a test can see what the model saw."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.payloads, self.fail = [], 0
+
+    def post_json(self, url, headers, payload, timeout):
+        from rudi_platform.gateway import AIError as PlatformAIError
+
+        self.payloads.append(payload)
+        if self.fail:
+            self.fail -= 1
+            raise PlatformAIError("provider stalled")
+        text = _fake_generate(payload["messages"], "response_format" in payload)["text"]
+        return {"choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+
+_PLATFORM_MODEL = _PlatformModel()
+platform_call._load()[1]._transport = _PLATFORM_MODEL
 
 
 # Pinned to 14:00 Brussels. Every test that dials must be deterministic: an earlier version of
@@ -581,7 +612,8 @@ class TurnBudget(unittest.TestCase):
     def test_output_is_capped_and_the_attempt_is_timed(self):
         seen = self._answer()
         _REAL_GENERATE([{"role": "user", "content": "hi"}])
-        self.assertEqual(seen["payload"]["max_tokens"], 250)
+        # Room for gpt-oss to think AND speak: at 250 it returned nothing (2026-11-04).
+        self.assertEqual(seen["payload"]["max_tokens"], 1024)
         self.assertEqual(seen["timeout"], gateway.ATTEMPT_TIMEOUT_S)
 
     def test_an_empty_completion_is_a_failure_not_a_reply(self):
@@ -958,6 +990,18 @@ class Confidentiality(unittest.TestCase):
         self.assertEqual(brain._speakable("Say hi to <| Person_A |> **today**"),
                          "Say hi to <| Person_A |> today")
 
+    def test_an_alias_written_without_brackets_is_still_restored(self):
+        """Regression (2026-11-04): a fallback model wrote "Hi Person_A"; the "_" became a space
+        and the caller heard "Person A" instead of their name."""
+        for bare in ("Hi Person_A, ready?", "Hi Person A, ready?"):
+            self.assertEqual(brain._speakable(bare), "Hi <| Person_A |>, ready?")
+        for prose in ("A Person Andrew knows", "Personal best", "the Person AI said"):
+            self.assertEqual(brain._speakable(prose), prose)
+        _REPLIES[:] = [("Hi Person_A?", {})]
+        payload = _new_call()
+        Relay(payload["call_id"], "conn-bare").setup()
+        self.assertEqual(_spoken(), ["Hi Filip?"])
+
     # ------------------------------------------------------------------ the reply gate
     def test_a_reply_reciting_the_prompt_is_never_spoken(self):
         _REPLIES[:] = [("Hello Filip?", {}),
@@ -1089,6 +1133,388 @@ class Protocol(unittest.TestCase):
         self.assertEqual(frame["type"], "text")
         self.assertTrue(frame["interruptible"])
         self.assertTrue(frame["last"])
+
+
+class PlatformEngine(unittest.TestCase):
+    """The engine switch (platform_call.py): which engine a call runs on, and that a call on the
+    platform engine goes through ws.py exactly as a legacy call does — telephony, ledger,
+    de-identification, failures. What Rudi SAYS on the platform engine is held to brain.py turn by
+    turn in packages/rudi_platform/tests/test_voice_parity.py."""
+
+    def setUp(self):
+        _REPLIES[:] = []
+        _PLATFORM_MODEL.reset()
+        self._env = os.environ.pop("CALL_ENGINE", None)
+        self._patched = []
+
+    def tearDown(self):
+        os.environ.pop("CALL_ENGINE", None)
+        if self._env is not None:
+            os.environ["CALL_ENGINE"] = self._env
+        for obj, name, value in reversed(self._patched):
+            setattr(obj, name, value)
+
+    def _patch(self, obj, name, value):
+        self._patched.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def _call(self, **over):
+        payload = _new_call(**over)
+        return payload["call_id"], Relay(payload["call_id"], "conn-" + payload["call_id"])
+
+    @staticmethod
+    def _turn_record(call_id, seq):
+        return json.loads(_FAKE_S3._store[BUCKET]["calls/%s/turns/%04d.json" % (call_id, seq)])
+
+    @staticmethod
+    def _alias(n=0):
+        from rudi_platform.privacy.deid import placeholder
+
+        return placeholder("Person_" + "ABCDEFGH"[n])
+
+    # --------------------------------------------------------------------- which engine
+    def test_calls_stay_on_legacy_by_default(self):
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call()
+        r.setup()
+        self.assertEqual(calllog.load(call_id)["engine"], "legacy")
+        self.assertEqual(_PLATFORM_MODEL.payloads, [])
+
+    def test_a_call_can_ask_for_the_platform(self):
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        self.assertEqual(calllog.load(call_id)["engine"], "platform")
+        self.assertEqual(len(_PLATFORM_MODEL.payloads), 1)
+
+    def test_the_service_default_moves_every_new_call(self):
+        os.environ["CALL_ENGINE"] = "platform"
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call()
+        r.setup()
+        self.assertEqual(calllog.load(call_id)["engine"], "platform")
+
+    def test_a_call_that_names_legacy_keeps_it_whatever_the_default(self):
+        os.environ["CALL_ENGINE"] = "platform"
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call(engine="legacy")
+        r.setup()
+        self.assertEqual(calllog.load(call_id)["engine"], "legacy")
+
+    def test_the_engine_is_fixed_for_the_whole_call(self):
+        """Flipping the switch (or deploying) mid-call must not hand the conversation over."""
+        _REPLIES[:] = [("Hello.", {}), ("Tell me more.", {})]
+        call_id, r = self._call()
+        r.setup()
+        os.environ["CALL_ENGINE"] = "platform"
+        r.prompt("I want to walk more")
+        self.assertEqual(self._turn_record(call_id, 1)["engine"], "legacy")
+        self.assertEqual(_PLATFORM_MODEL.payloads, [])
+
+    def test_an_unknown_engine_name_means_the_default(self):
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call(engine="quantum")
+        r.setup()
+        self.assertEqual(calllog.load(call_id)["engine"], "legacy")
+
+    # -------------------------------------------------------------------- a whole call
+    def test_a_whole_call_on_the_platform(self):
+        name = self._alias(0)            # the model only ever sees Filip as an alias
+        _REPLIES[:] = [
+            (f"Hi {name}?", {}),
+            ("I'm Rudi, an AI assistant. Twenty minutes of walking, right?",
+             {"goal_status": "accepted", "goal": "walk 20 minutes", "goal_domain": "fitness"}),
+            (f"Lovely, {name}. Talk soon, goodbye.", {"commitment_made": True}),
+        ]
+        call_id, r = self._call(engine="platform")
+        r.connect()
+        r.setup()
+        r.prompt("Hello, I want to walk more")
+        r.prompt("Yes, I'll do it tomorrow")
+
+        m = calllog.load(call_id)
+        self.assertEqual(m["engine"], "platform")
+        self.assertEqual(m["outcome"]["goal"], "walk 20 minutes")
+        self.assertEqual(m["outcome"]["goal_domain"], "fitness")
+        self.assertEqual(m["state"]["phase"], "concluded")
+        self.assertEqual(m["end_reason"], "engine-ended")
+        self.assertEqual(m["totals"]["turns"], 2)
+        self.assertEqual(_spoken(), ["Hi Filip?",
+                                     "I'm Rudi, an AI assistant. Twenty minutes of walking, right?",
+                                     "Lovely, Filip. Talk soon, goodbye."])
+        kinds = [f["type"] for f in _SENT]
+        self.assertEqual(kinds[-2:], ["text", "end"], "the goodbye is spoken before the hang-up")
+        for seq in (0, 1, 2):
+            self.assertEqual(self._turn_record(call_id, seq)["engine"], "platform")
+        self.assertTrue(m["state"]["disclosed"], "the disclosure state rides on the call state")
+
+    def test_names_are_spoken_but_never_stored_or_sent(self):
+        name = self._alias(0)
+        _REPLIES[:] = [(f"Hi {name}?", {}), (f"Good, {name}.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        r.prompt("I walked with Peter yesterday")
+        self.assertEqual(_spoken(), ["Hi Filip?", "Good, Filip."])
+        stored = json.dumps([calllog.load(call_id)["state"], self._turn_record(call_id, 1)])
+        self.assertNotIn("Filip", stored)
+        self.assertNotIn("Peter", stored)
+        self.assertIn(self._alias(1), self._turn_record(call_id, 1)["transcript"])
+        sent = json.dumps(_PLATFORM_MODEL.payloads)
+        self.assertNotIn("Filip", sent)
+        self.assertNotIn("Peter", sent)
+        r.disconnect()
+        self.assertNotIn("_vault", calllog.load(call_id), "the vault dies with the call")
+
+    def test_identifiers_are_redacted_and_counted(self):
+        _REPLIES[:] = [("Hello.", {}), ("Noted.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        r.prompt("you can mail me at jan.peeters@example.com")
+        record = self._turn_record(call_id, 1)
+        self.assertNotIn("example.com", record["transcript"])
+        self.assertEqual(calllog.load(call_id)["pii"]["redacted"], {"email-address": 1})
+
+    def test_the_call_language_reaches_the_brief(self):
+        _REPLIES[:] = [("Hallo?", {})]
+        _call_id, r = self._call(engine="platform", language="nl-BE")
+        r.setup()
+        system = _PLATFORM_MODEL.payloads[0]["messages"][0]["content"]
+        self.assertIn("Speak in the language with code: nl-BE.", system)
+
+    def test_voicemail_is_still_screened_before_the_model(self):
+        _REPLIES[:] = [("Hello.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        r.prompt("Hi, you have reached the voicemail of this number. Please leave a message "
+                 "after the tone and I will call you back.")
+        self.assertEqual(calllog.load(call_id)["end_reason"], "voicemail")
+        self.assertEqual(len(_PLATFORM_MODEL.payloads), 1, "no model call after the opening")
+
+    # ------------------------------------------------------------------------- failures
+    def test_the_platform_unavailable_means_the_call_runs_on_legacy(self):
+        self._patch(platform_call, "ready", lambda: False)
+        _REPLIES[:] = [("Hello Filip.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        m = calllog.load(call_id)
+        self.assertEqual((m["engine"], m["engine_fallback"]), ("legacy", "platform-unavailable"))
+        self.assertEqual(_spoken(), ["Hello Filip."])
+
+    def test_a_broken_platform_opening_moves_the_call_to_legacy_unheard(self):
+        def boom(*a, **k):
+            raise RuntimeError("a skill broke")
+        self._patch(platform_call, "open_call", boom)
+        _REPLIES[:] = [("Hello Filip.", {})]
+        call_id, r = self._call(engine="platform")
+        r.setup()
+        m = calllog.load(call_id)
+        self.assertEqual((m["engine"], m["engine_fallback"]),
+                         ("legacy", "platform-opening-failed"))
+        self.assertEqual(_spoken(), ["Hello Filip."])
+        self.assertEqual(self._turn_record(call_id, 0)["engine"], "legacy")
+
+    def test_a_model_outage_at_the_opening_ends_with_the_pause_line(self):
+        _PLATFORM_MODEL.fail = 99
+        call_id, r = self._call(engine="platform", language="nl-BE")
+        r.setup()
+        self.assertEqual(_spoken(), [ws.OPERATIONAL_PAUSE["nl"]])
+        self.assertTrue(_ended())
+        self.assertEqual(calllog.load(call_id)["end_reason"], "ai-unavailable")
+
+    def test_one_failed_turn_asks_them_to_repeat_two_end_the_call(self):
+        _REPLIES[:] = [("Hello.", {})]
+        _call_id, r = self._call(engine="platform")
+        r.setup()
+        _PLATFORM_MODEL.fail = 99
+        _SENT.clear()
+        r.prompt("I walked yesterday")
+        self.assertEqual(_spoken(), [ws.LOST_THREAD["en"]])
+        self.assertEqual(_ended(), [])
+        r.prompt("are you still there")
+        self.assertIn(ws.OPERATIONAL_PAUSE["en"], _spoken())
+        self.assertTrue(_ended())
+
+    def test_the_cascade_is_the_live_one_config_then_fallback(self):
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="config/ai_endpoints.json", Body=json.dumps({
+            "endpoints": [
+                {"name": "primary", "kind": "groq", "endpoint": "https://api.groq.com/x",
+                 "model": "openai/gpt-oss-120b", "secret": "s1"},
+                {"name": "off", "endpoint": "https://x.example/y", "model": "m2", "secret": "s2",
+                 "enabled": False},
+                {"name": "llama", "endpoint": "https://x.example/z", "model": "llama", "secret":
+                 "s3"},
+                {"name": "own", "endpoint": "https://x.example/w", "model": "gpt-oss-20b",
+                 "secret": "s4", "params": {"reasoning_effort": "medium"}},
+            ]}).encode("utf-8"))
+        try:
+            default = platform_call._cascade()
+            self._patch(platform_call, "REASONING_EFFORT", "low")
+            cascade = platform_call._cascade()
+            pinned = [e.name for e in platform_call._cascade({"models": ["llama", "own"]})]
+            nothing = [e.name for e in platform_call._cascade({"models": ["no-such"]})]
+            self._patch(platform_call, "SLOW_FOR_CALLS", frozenset({"primary", "llama"}))
+            slow_last = [e.name for e in platform_call._cascade()]
+        finally:
+            del _FAKE_S3._store[BUCKET]["config/ai_endpoints.json"]
+        self.assertEqual([e.name for e in cascade], ["primary", "llama", "own", "groq-fallback"])
+        self.assertEqual(slow_last, ["own", "groq-fallback", "primary", "llama"])
+        # By default a call sends the models exactly what brain.py sends.
+        self.assertEqual({e.name: dict(e.params) for e in default},
+                         {"primary": {}, "llama": {}, "own": {"reasoning_effort": "medium"},
+                          "groq-fallback": {}})
+        params = {e.name: dict(e.params) for e in cascade}
+        # With an effort set, gpt-oss is asked for it; other models, and an endpoint that sets
+        # its own params, are left alone.
+        self.assertEqual(params["primary"], {"reasoning_effort": "low"})
+        self.assertEqual(params["llama"], {})
+        self.assertEqual(params["own"], {"reasoning_effort": "medium"})
+        self.assertEqual(pinned, ["llama", "own"])
+        self.assertEqual(nothing, ["primary", "llama", "own", "groq-fallback"])
+        self.assertEqual([e.name for e in platform_call._cascade()], ["groq-fallback"])
+
+    def test_the_request_matches_legacy_unless_an_effort_is_set(self):
+        _REPLIES[:] = [("Hello.", {}), ("Hello.", {})]
+        _call_id, r = self._call(engine="platform")
+        r.setup()
+        payload = _PLATFORM_MODEL.payloads[0]
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertEqual(payload["max_tokens"], 1024)
+        self._patch(platform_call, "REASONING_EFFORT", "low")
+        _call_id, r = self._call(engine="platform")
+        r.setup()
+        self.assertEqual(_PLATFORM_MODEL.payloads[1]["reasoning_effort"], "low")  # gpt-oss-20b
+
+
+def _stereo_wav(left=0, right=8000, frames=8000):
+    """A dual-channel 16-bit WAV like Twilio's recordings: a square wave of each amplitude."""
+    import array
+    import io
+    import wave
+
+    samples = array.array("h")
+    for i in range(frames):
+        sign = 1 if i % 2 else -1
+        samples.extend((sign * left, sign * right))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(samples.tobytes())
+    return buf.getvalue()
+
+
+class VoiceCheck(unittest.TestCase):
+    """voicecheck.py: a recorded call to the account's OWN number, transcribed and judged. The
+    rule that matters most: nothing else is ever recorded."""
+
+    OWN = "+16600000000"
+
+    def setUp(self):
+        self._saved = [(voicecheck, n, getattr(voicecheck, n))
+                       for n in ("own_numbers", "_twilio", "transcribe")]
+        self._saved += [(dispatcher, "STATUS_URL", dispatcher.STATUS_URL),
+                        (gateway, "generate", gateway.generate)]
+        voicecheck.own_numbers = lambda creds: {self.OWN: {
+            "sid": "PN1", "phone_number": self.OWN, "capabilities": {"voice": True}}}
+        dispatcher.STATUS_URL = "https://status.example/"
+        _REPLIES[:] = []
+
+    def tearDown(self):
+        for obj, name, value in self._saved:
+            setattr(obj, name, value)
+
+    def _check(self, **over):
+        _TWILIO_CALLS.clear()
+        cfg = _config(voice_check=True, **{"to": self.OWN, **over})
+        payload, _ = dispatcher.place_call(cfg, now=MIDDAY)
+        return payload
+
+    def test_a_voice_check_may_only_ring_an_own_number(self):
+        payload = self._check(to="+32470000000")
+        self.assertEqual(payload["skipped"], "voice-check-needs-own-number")
+        self.assertEqual(_TWILIO_CALLS, [], "a person's number is never dialled, let alone "
+                                            "recorded")
+
+    def test_a_voice_check_is_recorded_one_side_per_channel(self):
+        payload = self._check()
+        form = _TWILIO_CALLS[-1][1]
+        self.assertEqual((form["Record"], form["RecordingChannels"]), ("true", "dual"))
+        self.assertEqual(form["RecordingStatusCallback"],
+                         "https://status.example/?call_id=%s&recording=1" % payload["call_id"])
+
+    def test_an_ordinary_call_is_never_recorded(self):
+        _new_call()
+        self.assertNotIn("Record", _TWILIO_CALLS[-1][1])
+
+    def test_the_check_line_answers_silently(self):
+        res = status.handler({"queryStringParameters": {"answer": "voice-check"}}, None)
+        self.assertEqual(res["headers"]["Content-Type"], "text/xml")
+        self.assertIn("<Pause", res["body"])
+        self.assertNotIn("<Say", res["body"])
+        # A leading <Pause> delays picking up instead: the check line would never answer.
+        self.assertNotIn("<Response><Pause", res["body"])
+
+    def test_a_recording_callback_for_an_ordinary_call_stores_nothing(self):
+        payload = _new_call()
+        res = status.handler({"queryStringParameters": {"call_id": payload["call_id"],
+                                                        "recording": "1"},
+                              "body": "RecordingSid=RE" + "a" * 32}, None)
+        self.assertEqual(res["statusCode"], 404)
+        self.assertNotIn("calls/%s/audio/recording.wav" % payload["call_id"],
+                         _FAKE_S3._store[BUCKET])
+
+    def test_a_recording_is_kept_only_if_it_belongs_to_the_call(self):
+        call_id = self._check()["call_id"]
+        manifest = calllog.load(call_id)
+        seen = []
+
+        def twilio(method, url, creds, form=None):
+            seen.append((method, url))
+            if url.endswith(".wav"):
+                return 200, _stereo_wav()
+            if method == "GET":
+                return 200, json.dumps({"call_sid": owner}).encode()
+            return 204, b""
+
+        voicecheck._twilio = twilio
+        creds = {"account_sid": "AC123", "auth_token": "tok"}
+        owner = "CA-someone-else"
+        self.assertFalse(voicecheck.store_recording(
+            manifest, {"RecordingSid": "RE" + "a" * 32}, creds)["ok"])
+        self.assertFalse(voicecheck.store_recording(
+            manifest, {"RecordingSid": "https://evil.example/x"}, creds)["ok"])
+        owner = manifest["telephony"]["call_sid"]
+        self.assertTrue(voicecheck.store_recording(
+            manifest, {"RecordingSid": "RE" + "a" * 32}, creds)["ok"])
+        self.assertIn("calls/%s/audio/recording.wav" % call_id, _FAKE_S3._store[BUCKET])
+        self.assertIn("DELETE", [m for m, _ in seen], "Twilio's copy is deleted")
+        self.assertTrue(all(u.startswith("https://api.ie1.twilio.com/") for _, u in seen))
+
+    def test_the_report_hears_the_speaking_channel_and_judges_it(self):
+        call_id = self._check(language="nl-BE", voice_attrs={
+            "ttsProvider": "ElevenLabs", "voice": "v1", "welcomeGreeting": "Hallo, met Rudi."}
+        )["call_id"]
+        calllog._put_json("calls/%s/turns/0000.json" % call_id,
+                          {"reply": "Dag <| Person_A |>!", "kind": "opening"})
+        _FAKE_S3.put_object(Bucket=BUCKET, Key="calls/%s/audio/recording.wav" % call_id,
+                            Body=_stereo_wav(left=0, right=9000))
+        heard = []
+        voicecheck.transcribe = lambda wav: heard.append(wav) or ("Hallo, met Rudi. Dag Filip!",
+                                                                  "dutch")
+        gateway.generate = lambda messages, json_mode=False, **k: {"model": "fake", "text": (
+            json.dumps({"language_ok": True, "text_ok": True, "accent": "", "notes": "ok"}))}
+        out = voicecheck.report(call_id)
+        self.assertEqual(out["rudi_channel"], 2)
+        self.assertEqual(out["heard_language"], "dutch")
+        self.assertTrue(out["verdict"]["language_ok"])
+        self.assertEqual(out["expected"], "Hallo, met Rudi. Dag Filip!")
+        self.assertEqual(len(heard), 1, "only the speaking channel is transcribed")
+        self.assertIn("calls/%s/audio/rudi.wav" % call_id, _FAKE_S3._store[BUCKET])
+        self.assertIn("calls/%s/voice_check.json" % call_id, _FAKE_S3._store[BUCKET])
+
+    def test_only_a_voice_check_gets_a_report(self):
+        self.assertEqual(voicecheck.report(_new_call()["call_id"])["error"], "not a voice check")
 
 
 if __name__ == "__main__":

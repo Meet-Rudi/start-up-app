@@ -29,6 +29,7 @@ import urllib.error
 import boto3
 
 import calllog
+import voicecheck
 
 _secrets = boto3.client("secretsmanager")
 
@@ -136,6 +137,12 @@ def apply_status(manifest, form):
 
 
 def handler(event, context):
+    query = event.get("queryStringParameters") or {}
+    # The voice-check line answering (voicecheck.py): pick up, stay silent, hang up.
+    if query.get("answer") == "voice-check":
+        return {"statusCode": 200, "headers": {"Content-Type": "text/xml"},
+                "body": voicecheck.ANSWER_TWIML}
+
     form = _form(event)
     call_id = _call_id(event, form)
     if not call_id:
@@ -146,6 +153,20 @@ def handler(event, context):
         # An unknown id writes nothing at all — a guessed callback cannot create a record.
         print("WARN status for unknown call_id=%s" % call_id)
         return _response({"ok": False, "error": "unknown call"}, 404)
+
+    if query.get("recording") == "1":
+        # Only a voice check is ever recorded; any other recording callback stores nothing.
+        if not (manifest.get("config") or {}).get("voice_check"):
+            return _response({"ok": False, "error": "not a voice check"}, 404)
+        try:
+            stored = voicecheck.store_recording(manifest, form, _secret(TWILIO_SECRET) or {})
+        except Exception as e:  # noqa: BLE001 - answer 200 so Twilio does not retry forever
+            print("WARN voice check recording for %s failed: %s" % (call_id, e))
+            stored = {"ok": False, "error": type(e).__name__}
+        if stored.get("ok"):
+            calllog._put_json(calllog._manifest_key(call_id), manifest)
+        print("CALL %s recording %s" % (call_id, "stored" if stored.get("ok") else stored))
+        return _response(stored)
 
     manifest, machine = apply_status(manifest, form)
 

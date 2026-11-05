@@ -2,7 +2,8 @@
 
 A real phone call: Twilio dials the patient, ConversationRelay owns speech in both directions,
 and an API Gateway WebSocket carries JSON text to a per-message Lambda running the **same**
-`learn / goal / commit` brain as the bench and WhatsApp.
+`learn / goal / commit` conversation as the bench and WhatsApp — on `brain.py` or, per call, on
+CM's clone on the platform Turn Engine (see [Two engines](#two-engines)).
 
 No Fargate, no always-on process, no GPU. The socket is held by API Gateway; the call's state
 lives in S3.
@@ -102,6 +103,30 @@ The health record is still written — it stays the place to find out he has sto
 nothing acts on it. The trade is deliberate: if ElevenLabs breaks, Dutch calls go **silent**
 rather than quietly switching voice, and dead air is the failure somebody actually notices.
 
+## Two engines
+
+`ws.py` runs each call on one of two engines (decision #38, [`src/platform_call.py`](src/platform_call.py)):
+
+| Engine | What runs | Where |
+|---|---|---|
+| `legacy` | `brain.py`, as since August | the function's own code |
+| `platform` | CM's clone version 1 on the Turn Engine, held to `brain.py` turn by turn by `packages/rudi_platform/tests/test_voice_parity.py` | layer `meetrudi-tenant-prod-pool-engine`, built from `packages/` by [`build_layer.py`](build_layer.py) |
+
+- **Which one:** the call config's `engine` if it names one, else `CALL_ENGINE` in the template
+  (`platform` since 2026-11-05). Rolling back is `CALL_ENGINE: legacy` in `template.yaml` and
+  `python deploy.py call`.
+- **Fixed per call.** Chosen when the call is answered and stored as `manifest.engine`; every
+  turn record carries it too. A deploy or a flipped switch never moves a call mid-way.
+- **Never the reason a call fails.** If the platform cannot load, or its opening breaks for any
+  reason other than the models, the call runs on legacy (`manifest.engine_fallback` says why).
+- **Same telephony.** Voicemail screening, the lost-thread and pause lines, the ledger and the
+  voice cascade are `ws.py`'s and `relay.py`'s for both engines.
+- **Models.** Both read `config/ai_endpoints.json` every turn and add the Groq fallback. The
+  platform tries the endpoints in `CALL_SLOW_MODELS` last (OVH gpt-oss-120b and Llama overran
+  the 7 s attempt on calls), and can ask gpt-oss for a reasoning effort (`CALL_REASONING_EFFORT`,
+  off: "low" was faster but invented names and tripped the leak guard more on simulated calls).
+  A test call may pin endpoints with `models: [...]` in its config.
+
 ## The join key
 
 `call_id` travels in the TwiML as `<Parameter name="call_id">` and comes back in Twilio's
@@ -191,19 +216,71 @@ sweep can treat real patient calls differently without filtering.
 python -m unittest discover -s services/call/tests -v
 ```
 
-31 tests drive a simulated ConversationRelay client through whole calls — the wire protocol,
+The tests drive a simulated ConversationRelay client through whole calls — the wire protocol,
 every gate, the voicemail fallback, interruptions, a mid-call model failure, and the ordering
-that ensures Rudi's goodbye is spoken *before* the hangup. A real phone call is an expensive,
-slow and irreversible way to find a bug.
+that ensures Rudi's goodbye is spoken *before* the hangup — on both engines. A real phone call
+is an expensive, slow and irreversible way to find a bug.
+
+## A whole call against the deployed stack, without a phone
+
+```cmd
+python services/call/rudi_sim_call.py --engine platform --lang nl --goal SET_NEARTERM_GOAL
+python services/call/rudi_sim_call.py --show <call_id>
+```
+
+[`rudi_sim_call.py`](rudi_sim_call.py) invokes the deployed dispatcher (dry run: nobody is rung)
+and `meetrudi-call-ws` with ConversationRelay's frames and a scripted caller: deployed code and
+layer, S3 prompts, live models and keys, real time budget — everything but speech. Calls are
+marked `simulated` and carry no tester id. `--show` prints any call's transcript, de-identified as
+stored. `--models` pins endpoints, `--override-quiet-hours` simulates at night (audited).
+
+## Voice check: does each voice speak its language?
+
+```cmd
+python services/call/rudi_voice_check.py --setup
+python services/call/rudi_voice_check.py
+python services/call/rudi_voice_check.py --teardown
+```
+
+Twilio speaks on a call and never sends us the audio, so [`rudi_voice_check.py`](rudi_voice_check.py)
+records real calls with nobody on the line ([`src/voicecheck.py`](src/voicecheck.py)):
+
+1. `--setup` points the account's spare Twilio number (not the caller id) at a check line that
+   picks up and stays silent (`meetrudi-call-status?answer=voice-check`).
+2. Each check is an ordinary ConversationRelay call to that number, `voice_check: true`, with
+   Twilio recording on, one side per channel. **The dispatcher records nothing else**: a voice
+   check to any number that is not the account's own is refused.
+3. Rudi says a fixed sample sentence in the call's language (the welcome greeting, in the voice
+   under test), then his opening from the engine.
+4. The status Lambda keeps the WAV (`calls/{id}/audio/recording.wav`) and deletes Twilio's copy.
+5. `voice_check_report`: Whisper transcribes Rudi's channel **without being told the language**
+   and names the language it hears; a model compares it with what Rudi was given →
+   `calls/{id}/voice_check.json`. Rudi's side is saved under `_voice_samples/voice-check/`.
+
+The plan: both production voices, then auditioned ElevenLabs voices in both languages, Google
+Wavenet-C and Amazon Lisa; `--all` adds every auditioned voice. First run (2026-11-05): 11 of 11
+heard in the right language, saying the given text. The judge's accent remark is not evidence (it
+reads a transcript); the language Whisper detects from the audio is.
+
+[`rudi_test_call_platform.py`](rudi_test_call_platform.py) still places one test call to a person
+(`--step N`, `--list-voices`), for a conversation by ear.
 
 ## Known gaps
 
 - **Eligibility unverified.** Business-initiated calling needs a Twilio account in good standing;
   this path is plain PSTN so the WhatsApp 2,000-conversation tier does **not** apply, but the
   Belgian number's regulatory bundle must be approved before it can dial.
+- **Groq's free tier sets the pace.** 8,000 tokens a minute per model; a call turn asks for about
+  2,500 (4,300 in the learn stage, which carries the About-me context), so about three turns a
+  minute stay on Groq and the rest fall to slower providers.
+- **Status callbacks arrive only at the end.** The dispatcher sends `StatusCallbackEvent` as one
+  space-separated value; Twilio rejects that list (warning 21626 on every call) and falls back to
+  `completed` only. Terminal status and `AnsweredBy` still arrive; `ringing`/`answered` never do.
+  Sending the events as separate fields fixes it, but also starts mid-call callbacks the
+  answering-machine hang-up has never seen — change it with a test call.
 - **No retry policy yet.** A no-answer is recorded but nothing reschedules it.
 - **No EventBridge schedule yet.** The dispatcher is invoked manually; wiring a cadence is a
   small addition once the first real calls have been heard.
 - **`gateway.py`, `brain.py` and `calllog.py` are now copied across three services.** That is the
-  repo's per-service convention, but a shared layer is overdue — the Piper build established how
-  to make one.
+  repo's per-service convention; the platform engine layer is the way out, once the default is
+  flipped and `brain.py` retires.

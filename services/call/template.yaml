@@ -66,6 +66,20 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VoiceSocket}/*"
 
+  # ------------------------------------------------------------------ code
+  # The platform Turn Engine and CM's clone (packages/), assembled by build_layer.py. Named for
+  # the tenant plane: it is the engine that serves CM's traffic, and the first platform resource
+  # in this legacy stack (decision #37).
+  EngineLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: meetrudi-tenant-prod-pool-engine
+      Description: Platform Turn Engine + CM clone (rudi_platform, rudi_skills, rudi_tenants).
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
   # ------------------------------------------------------------------ functions
   WsLogGroup:
     Type: AWS::Logs::LogGroup
@@ -87,10 +101,21 @@ Resources:
       Timeout: 25
       MemorySize: 512
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Layers:
+        - !Ref EngineLayer
       Environment:
         Variables:
           DATA_BUCKET: !ImportValue meetrudi-DataBucketName
           CALL_PREFIX: calls
+          # Which engine a call runs on unless its config names one (platform_call.py):
+          # legacy = brain.py, platform = CM's clone on the Turn Engine. Platform since
+          # 2026-11-05 (decision #38); `legacy` here + `python deploy.py call` rolls back.
+          CALL_ENGINE: platform
+          # Platform engine only. Tried last on a call: too slow for its 7 s attempt (measured
+          # 2026-11-04). Reasoning effort "" = provider default, as brain.py; "low" is faster
+          # but measured worse (platform_call.py).
+          CALL_SLOW_MODELS: ovh-gpt-oss-120b,ovh-llama-3.3-70b
+          CALL_REASONING_EFFORT: ""
           ENDPOINTS_CONFIG_KEY: config/ai_endpoints.json
           GROQ_ENDPOINT: https://api.groq.com/openai/v1/chat/completions
           GROQ_MODEL: openai/gpt-oss-120b
@@ -99,7 +124,7 @@ Resources:
           # is left of the 25s above is Rudi's room to speak rather than be killed mid-wait.
           AI_ATTEMPT_TIMEOUT_S: "7"
           AI_TURN_BUDGET_S: "18"
-          AI_MAX_OUTPUT_TOKENS: "250"
+          AI_MAX_OUTPUT_TOKENS: "1024"   # thinking included (gpt-oss); see gateway.py
           WS_MANAGEMENT_ENDPOINT: !Sub "https://${VoiceSocket}.execute-api.${AWS::Region}.amazonaws.com/live"
 
   DispatcherLogGroup:

@@ -31,6 +31,7 @@ import boto3
 import brain
 import calllog
 import relay
+import voicecheck
 
 _secrets = boto3.client("secretsmanager")
 
@@ -250,6 +251,23 @@ def caller_ids(numbers=None, call_delay=0, creds=None):
     return out
 
 
+def phone_numbers(creds=None):
+    """The account's own numbers and what answers a call to them. Read-only."""
+    creds = creds or _secret(TWILIO_SECRET) or {}
+    if not creds.get("account_sid"):
+        return {"ok": False, "error": "twilio credentials not configured"}
+    listed = _twilio_request(
+        "https://api.%s.twilio.com/2010-04-01/Accounts/%s/IncomingPhoneNumbers.json?PageSize=50"
+        % (TWILIO_REGION, creds["account_sid"]), creds)
+    return {"ok": True, "from_number": creds.get("from_number"), "numbers": [
+        {"sid": n.get("sid"), "phone_number": n.get("phone_number"),
+         "friendly_name": n.get("friendly_name"), "voice_url": n.get("voice_url"),
+         "voice_application_sid": n.get("voice_application_sid"),
+         "voice_receive_mode": n.get("voice_receive_mode"),
+         "capabilities": n.get("capabilities")}
+        for n in (listed.get("incoming_phone_numbers") or [])]}
+
+
 def _hints(config):
     """Words Deepgram is most likely to mangle — the same seed the bench gives Whisper."""
     return ", ".join([b for b in (config.get("user_name"), config.get("topic")) if b])[:1000]
@@ -320,6 +338,16 @@ def place_call(config, dry_run=False, now=None):
         form["StatusCallback"] = "%s?call_id=%s" % (STATUS_URL, call_id)
         form["StatusCallbackEvent"] = "initiated ringing answered completed"
 
+    if config.get("voice_check"):
+        # A voice check is RECORDED (voicecheck.py), so it may only ring one of the account's own
+        # Twilio numbers: a person is never recorded, whatever the config says.
+        if not (STATUS_URL and voicecheck.is_own_number(config.get("to"), creds)):
+            manifest.setdefault("telephony", {})["error"] = "voice-check-needs-own-number"
+            calllog.finish(manifest, "voice-check-refused")
+            return {"ok": False, "skipped": "voice-check-needs-own-number"}, 200
+        form.update(voicecheck.record_params(STATUS_URL, call_id))
+        print("AUDIT: voice check %s, recorded, to an own number" % call_id)
+
     created = _twilio_post("Calls.json", form, creds)
     manifest["telephony"].update({"call_sid": created.get("sid"),
                                   "dialed_at": calllog.iso(),
@@ -351,6 +379,29 @@ def handler(event, context):
         # One-off account administration: which countries this account may dial at all.
         if params.get("action") == "verify_caller_id":
             return _response(caller_ids(params.get("numbers"), params.get("call_delay", 0)))
+
+        if params.get("action") == "numbers":
+            return _response(phone_numbers())
+
+        # Voice checks (voicecheck.py): point an own number at the silent check line (or clear
+        # it), and transcribe + judge a finished check.
+        if params.get("action") == "voice_check_line":
+            creds = _secret(TWILIO_SECRET) or {}
+            if not (creds.get("account_sid") and STATUS_URL):
+                return _response({"ok": False, "error": "twilio or status url not configured"},
+                                 503)
+            return _response(voicecheck.set_check_line(
+                creds, "%s?answer=voice-check" % STATUS_URL,
+                enable=params.get("enable", True) is not False,
+                number=str(params.get("number") or "")))
+        if params.get("action") == "voice_check_report":
+            return _response(voicecheck.report(str(params.get("call_id") or "")))
+        if params.get("action") == "call_debug":
+            return _response(voicecheck.call_debug(str(params.get("call_sid") or ""),
+                                                   _secret(TWILIO_SECRET) or {}))
+        if params.get("action") == "line_debug":
+            return _response(voicecheck.line_debug(str(params.get("number") or ""),
+                                                   _secret(TWILIO_SECRET) or {}))
 
         if params.get("action") == "geo":
             codes = [str(c).upper()[:2] for c in (params.get("countries") or [])][:25]

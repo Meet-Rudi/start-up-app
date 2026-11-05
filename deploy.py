@@ -123,6 +123,8 @@ COMPONENTS = {
         "stack": "meetrudi-call",
         "template": "services/call/template.yaml",
         "build": True,   # Plan A: Twilio ConversationRelay + API GW WebSocket, no Fargate
+        # The platform Turn Engine + CM clone as a layer (packages/ copied, checked to load).
+        "prebuild": "services/call/build_layer.py",
     },
     "voice-bench": {
         "stack": "meetrudi-voice-bench",

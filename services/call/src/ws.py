@@ -9,8 +9,9 @@ a per-message Lambda viable at all and why no long-running process is needed.
     $default     setup | prompt | interrupt | dtmf | error
     $disconnect  finalise the record
 
-The conversation itself is brain.py, unchanged from the bench and from WhatsApp: the same
-learn/goal/commit machine, the same guardrail file leading the same system prompt. This service
+The conversation itself runs on one of two engines, picked when the call is answered and kept
+until it ends (platform_call.py): brain.py, the learn/goal/commit machine shared with the bench
+and WhatsApp, or the same conversation as CM's clone on the platform Turn Engine. This service
 adds telephony, not intelligence.
 """
 
@@ -25,9 +26,15 @@ import calllog
 import deid
 import relay
 import gateway
+import platform_call
 
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 WS_ENDPOINT = os.environ.get("WS_MANAGEMENT_ENDPOINT", "")
+
+# Once the platform is the default, load it while the container starts (about a second) rather
+# than on the first answered call, where the same second is dead air.
+if platform_call.default_engine() == platform_call.PLATFORM:
+    platform_call.ready()
 
 # Recoverable: one turn failed but the call is fine. Rudi asks them to repeat and carries on.
 # One per language for the same reason as the pause line below: an English sentence dropped into
@@ -136,17 +143,21 @@ def _vault_for(manifest):
     return deid.AliasVault.from_dict((manifest.get("_vault") or None))
 
 
+def _count_pii(manifest, found):
+    if found:
+        counts = manifest.setdefault("pii", {}).setdefault("redacted", {})
+        for label, n in found.items():
+            counts[label] = counts.get(label, 0) + n
+        print("PII: redacted %s on %s" % (sorted(found), manifest["call_id"]))
+
+
 def _scrub_inbound(manifest, text, locale="en"):
     """Everything the patient said, cleaned before it is stored OR sent to a model."""
     clean, found = deid.redact(text or "")
     vault = _vault_for(manifest)
     masked = vault.mask(clean, _detector, locale)
     manifest["_vault"] = vault.to_dict()
-    if found:
-        counts = manifest.setdefault("pii", {}).setdefault("redacted", {})
-        for label, n in found.items():
-            counts[label] = counts.get(label, 0) + n
-        print("PII: redacted %s on %s" % (sorted(found), manifest["call_id"]))
+    _count_pii(manifest, found)
     return masked
 
 
@@ -235,16 +246,24 @@ def _on_setup(connection_id, message):
         print("CALL %s spoke the fallback line and hung up" % manifest["call_id"])
         return _ok()
 
+    # The engine is fixed here for the whole call, so a deploy or a flipped switch mid-call never
+    # hands the conversation to the other engine halfway through.
+    engine = platform_call.choose(config)
+    if engine == platform_call.PLATFORM and not platform_call.ready():
+        engine = platform_call.LEGACY
+        manifest["engine_fallback"] = "platform-unavailable"
+    manifest["engine"] = engine
+
     started = time.time()
     try:
-        reply, state, info = brain.open_call(_model_config(manifest, config))
+        spoken, reply, state, info = _open(manifest, config)
     except gateway.AIError as e:
         return _abandon(connection_id, manifest, config, e,
                         "rate-limited" if isinstance(e, gateway.AllRateLimited)
                         else "ai-unavailable")
 
     manifest["state"] = state
-    if _send(connection_id, relay.say(_restore_outbound(manifest, reply))):
+    if _send(connection_id, relay.say(spoken)):
         vkey = (manifest.get("telephony") or {}).get("voice_key")
         if vkey and calllog.voice_health().get(vkey, {}).get("ok") is not True:
             calllog.mark_voice(vkey, True)
@@ -252,9 +271,30 @@ def _on_setup(connection_id, message):
     calllog.record_turn(manifest, 0, {
         "at": calllog.iso(), "kind": "opening", "transcript": None, "reply": reply,
         "signals": {}, "phase": state["phase"], "state": state, "model": info.get("model"),
+        "engine": manifest["engine"],
         "timings": {"llm_ms": int((time.time() - started) * 1000)},
     })
     return _ok()
+
+
+def _open(manifest, config):
+    """The opening on this call's engine. Returns (spoken, stored, state, info).
+
+    A platform opening that breaks for any reason other than the models moves the call to
+    legacy before anyone has heard a word: better the old engine than a silent line.
+    """
+    if manifest.get("engine") == platform_call.PLATFORM:
+        try:
+            return platform_call.open_call(manifest, config)
+        except gateway.AIError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            print("ERROR: platform opening failed, call moves to legacy: %s: %s"
+                  % (type(e).__name__, e))
+            manifest["engine"] = platform_call.LEGACY
+            manifest["engine_fallback"] = "platform-opening-failed"
+    reply, state, info = brain.open_call(_model_config(manifest, config))
+    return _restore_outbound(manifest, reply), reply, state, info
 
 
 def _on_prompt(connection_id, message, manifest):
@@ -265,9 +305,14 @@ def _on_prompt(connection_id, message, manifest):
         return _ok()
 
     config = manifest.get("config") or {}
+    on_platform = manifest.get("engine") == platform_call.PLATFORM
     # Scrubbed BEFORE it is stored, logged, or sent to the model — there is no path where the
     # raw utterance is persisted first and cleaned afterwards.
-    transcript = _scrub_inbound(manifest, raw, config.get("language", "en"))
+    if on_platform:
+        transcript, found = platform_call.scrub(manifest, raw, config.get("language", "en"))
+        _count_pii(manifest, found)
+    else:
+        transcript = _scrub_inbound(manifest, raw, config.get("language", "en"))
     state = manifest.get("state") or brain.new_state(config)
     seq = int(manifest.get("totals", {}).get("turns", 0)) + 1
 
@@ -278,7 +323,7 @@ def _on_prompt(connection_id, message, manifest):
         calllog.record_turn(manifest, seq, {
             "at": calllog.iso(), "kind": "voicemail", "transcript": transcript, "reply": None,
             "signals": {}, "phase": state.get("phase"), "state": state, "model": None,
-            "timings": {},
+            "engine": manifest.get("engine") or platform_call.LEGACY, "timings": {},
         })
         _send(connection_id, relay.hang_up("voicemail"))
         _forget_vault(manifest)
@@ -290,8 +335,13 @@ def _on_prompt(connection_id, message, manifest):
 
     elapsed = _elapsed_s(manifest)
     try:
-        reply, state, info = brain.turn(state, transcript, _model_config(manifest, config),
-                                        elapsed_s=elapsed)
+        if on_platform:
+            spoken, reply, state, info = platform_call.turn(manifest, state, transcript, config,
+                                                            elapsed_s=elapsed)
+        else:
+            reply, state, info = brain.turn(state, transcript, _model_config(manifest, config),
+                                            elapsed_s=elapsed)
+            spoken = _restore_outbound(manifest, reply)
     except gateway.AIError as e:
         # One bad turn is not a dead call. Ending the conversation because a single generation
         # stalled costs the patient the rest of their session over something usually momentary.
@@ -307,6 +357,7 @@ def _on_prompt(connection_id, message, manifest):
         calllog.record_turn(manifest, seq, {
             "at": calllog.iso(), "kind": "turn-failed", "transcript": transcript, "reply": None,
             "signals": {}, "phase": state.get("phase"), "state": state, "model": None,
+            "engine": manifest.get("engine") or platform_call.LEGACY,
             "timings": {"llm_ms": int((time.time() - started) * 1000)},
             "error": reason, "elapsed_s": elapsed,
         })
@@ -318,7 +369,7 @@ def _on_prompt(connection_id, message, manifest):
 
     manifest["ai_failures"] = 0          # a good turn clears the slate
     if reply:
-        _send(connection_id, relay.say(_restore_outbound(manifest, reply)))
+        _send(connection_id, relay.say(spoken))
     elif not info.get("ended"):
         # An empty reply that is NOT the end of the call would be heard as silence, which is the
         # one thing a voice call must never do. (At the end it is correct: the goodbye already
@@ -329,7 +380,7 @@ def _on_prompt(connection_id, message, manifest):
     calllog.record_turn(manifest, seq, {
         "at": calllog.iso(), "kind": "turn", "transcript": transcript, "reply": reply,
         "signals": info.get("signals", {}), "phase": state["phase"], "state": state,
-        "model": info.get("model"),
+        "model": info.get("model"), "engine": manifest.get("engine") or platform_call.LEGACY,
         "timings": {"llm_ms": int((time.time() - started) * 1000)},
         "elapsed_s": elapsed,
     })
