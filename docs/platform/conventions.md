@@ -201,6 +201,33 @@ pattern, behind the `MemoryStore` seam:
 - Derived stores (snapshots, vectors, summaries) must be rebuildable from the record and covered
   by erasure.
 
+### Vector memory (decision #39)
+
+S3 history plus the fast-memory statement is the default. A skill adds vector memory only with a
+recorded reason that the default is not enough. Then:
+
+- **Qdrant Cloud** holds the vectors (free cluster; at most **2,048 dimensions**, so pick or
+  truncate the embedding model to fit). Nothing is wired in before the cluster is in an EU region
+  and Qdrant's DPA is signed (Prime Directives 1 and 3).
+- **Every chunk has a metadata record in Postgres**, schema `vectors`: chunk id, tenant identity
+  hash, source, and the fields that filtering and access rights match on. Filtering and access
+  checks run on these records, independently of the vector search.
+- **A Qdrant point carries no content**: its payload holds the tenant identity hash and ids only.
+  Every Qdrant search is also filtered on the tenant hash, so a slip in the metadata step can
+  never return another tenant's chunks.
+- **Ids:** chunk ids follow §1, with a category registered when the first chunk is stored. Qdrant
+  only accepts unsigned integers or UUIDs as point ids, so the point id is a UUIDv5 derived from
+  the chunk id. Re-indexing is idempotent, and erasure can compute the point id from the
+  metadata record.
+- **Erasure and rebuild:** deleting a metadata record deletes its point. The cluster is
+  rebuildable from the record, so losing a free cluster costs a re-index, not data.
+- **Embeddings** go through `ModelGateway.embed()` on pseudonymized text. Skills reach vectors
+  only through `MemoryStore`, never through Qdrant's client.
+- **Keep-alive:** while traffic is low, a scheduled Lambda
+  (`meetrudi-internal-{stage}-qdrant-keepalive`) queries the cluster so the free tier does not
+  decommission it. Removed once daily/weekly traffic keeps the cluster in use.
+- The API key lives in Secrets Manager as `meetrudi/internal/{stage}/qdrant`.
+
 ## 6. Coexistence: CM never breaks
 
 Every step of the migration leaves today's CM service fully working. A new component replaces an

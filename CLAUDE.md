@@ -1,7 +1,7 @@
 # CLAUDE.md — Coding Rules & Conventions for MEET_RUDI
 
 > Machine-loaded each session. The *why/what* lives in [project.md](project.md); this file is
-> the *how*. When product context is needed, read project.md. Last updated: 2026-11-04.
+> the *how*. When product context is needed, read project.md. Last updated: 2026-11-05.
 >
 > **Platform pivot (2026-10-28):** Rudi is becoming a multi-tenant conversational platform. Its
 > design is [docs/platform/blueprint.md](docs/platform/blueprint.md); its binding rules (ids,
@@ -16,8 +16,9 @@
 1. **No PII leaves the AWS EU plane.** The neo-cloud GPU plane and any 3rd-party AI API receive
    only **minimized, pseudonymized** payloads (opaque IDs, never names/contact/free PII).
    *Approved exception (decision #30):* PlanetScale Postgres in eu-central-1 is the platform's
-   system of record, under its DPA and the 2021 SCCs. No other datastore outside AWS without a
-   new recorded decision.
+   system of record, under its DPA and the 2021 SCCs. *Approved in principle (decision #39):*
+   Qdrant Cloud for vectors, wired in only once it is in an EU region under a signed DPA. No
+   other datastore outside AWS without a new recorded decision.
 2. **Not a medical device / no medical advice.** Never produce diagnostic or treatment output.
    Route medical-advice requests and red-flag content through the guardrail layer (§6).
 3. **EU residency only.** Every datastore, queue, bucket, model endpoint, and 3rd-party service
@@ -98,7 +99,10 @@ These are the swap-points the whole architecture depends on. Code against the in
 - **`MemoryStore`** — profile read/write, event append, summary get/set, vector upsert/query.
   **Pluggable per use case** (conventions §5): the legacy S3 store (serves CM until replaced),
   S3 fast-memory snapshots for latency-critical real-time skills, and Postgres (PlanetScale)
-  as the record. The interface must not leak any backend's specifics.
+  as the record. **Vector memory only when a skill needs it** (decision #39, conventions §5):
+  S3 history + the "recent state" record is the default; vectors go to Qdrant with each chunk's
+  metadata (tenant hash, access fields) in PlanetScale. The interface must not leak any
+  backend's specifics.
 - **Platform seams** (blueprint §3): `ChannelAdapter` (generalises `WhatsAppProvider`),
   `RegistryStore`, `ScheduleStore`, `IdentityProvider`, and the skill envelope
   `SkillRequest`/`SkillResult` that every skill — real-time, turn or background — speaks.
@@ -129,7 +133,7 @@ the interface — don't reach around it.
 - **Own orchestration**, framework-light. Keep the per-message pipeline explicit and readable:
   ingest → (ASR/vision) → context assembly → reasoning → **guardrail gate** → send.
 - **Memory injection:** assemble context from **structured profile + cached recent summary +
-  vector recall** — in that priority. Keep prompt payloads minimal (cost + PII discipline).
+  vector recall** (only for skills that use vectors, #39) — in that priority. Keep prompt payloads minimal (cost + PII discipline).
 - **Cost-aware by default:** right-size models, cache aggressively, batch where latency allows
   (we have 10–15s budget). Tag inference calls so per-user cost is observable
   (target ≤ €13/active-user/mo).

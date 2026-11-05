@@ -3,7 +3,7 @@
 > Status: **approved with changes** (review of v0.1 completed 2026-10-28). This file is the
 > source of truth for the platform design; [conventions.md](conventions.md) holds the binding
 > rules (ids, names, run time). Decisions are logged in [project.md](../../project.md) §11,
-> entries #24–#38. Last updated: 2026-11-04.
+> entries #24–#40. Last updated: 2026-11-05.
 
 Rudi becomes a multi-tenant conversational platform. A **clone** is a tenant's configured
 conversational agent: personas, a journey, a mix of versioned skills, channels and a model policy.
@@ -163,7 +163,7 @@ catalogue becomes an index generated from manifests and brief links.
 
 ### 7.1 System of record: PlanetScale Postgres (decision #30)
 
-PlanetScale Postgres in eu-central-1, with pgvector. Chosen over Aurora Serverless v2 (resource
+PlanetScale Postgres in eu-central-1. Chosen over Aurora Serverless v2 (resource
 throttling, Data API query-length and execution limits) and DynamoDB (no relational queries for
 the console, no vectors). **Prime Directive 1 exception:** PlanetScale's DPA states its primary
 processing facilities are in the US; it is accepted under the DPA and the 2021 SCCs and listed as
@@ -178,7 +178,7 @@ development. All SQL stays plain Postgres behind the store interfaces.
 | Memory fields | Postgres `memory`, plus fast snapshots (7.2) |
 | Schedules | Postgres `schedule`, indexed on `due_at`, claimed with `FOR UPDATE SKIP LOCKED` |
 | Usage | Postgres `usage`, monthly partitions |
-| Knowledge vectors | Postgres + pgvector, one partition per library |
+| Vectors (only for skills that need them, decision #39) | Qdrant Cloud; each chunk's metadata in Postgres `vectors` |
 | Documents, transcripts, snapshots, checkpoints | S3 `t/{tenant}/…`, tenant key |
 | Audit | Postgres append-only, exported to S3 |
 
@@ -195,6 +195,14 @@ access pattern, behind `MemoryStore`:
   GET and warm Lambdas cache it with a version check; a voice call reads it once at call start.
 - **Postgres** is the record once live. Snapshots and vectors are derived, rebuildable and covered
   by erasure.
+- **Vector memory, only when a skill needs it** (decision #39). S3 history plus the fast-memory
+  statement is the default for every skill. A skill that shows it is not enough (e.g. guardrails
+  over complex medical procedures) gets vectors in **Qdrant Cloud** (free cluster, at most 2,048
+  dimensions), with each chunk's **metadata record in Postgres** (`vectors` schema). Metadata
+  filtering and access rights run on those records, independently of the vector search; the
+  tenant identity hash is in both stores. A scheduled keep-alive ping stops an unused free
+  cluster from being decommissioned until real traffic does that job. Before first use: an EU
+  region, Qdrant's DPA signed, Qdrant listed as a sub-processor.
 
 ### 7.3 Keys, erasure, retention, migration
 
@@ -270,7 +278,7 @@ replaced only after its successor is live, tested and holds the data. In particu
 | Phase | Scope |
 |---|---|
 | 0 Ground | **Done:** conventions; `rudi_platform` core (ids, naming, skill envelope, 13-minute budget and hand-over); the platform model gateway; de-identification, leak guard, timeline and OCEAN persona with parity tests against the live copies; access model (roles as data); registry, access and audit schema with row-level security (`db/migrations`, syntax-checked, not yet run); i18n catalogue with `{persona}`. **Open:** migration runner, PlanetScale `RegistryStore` and first run on the dev database (USER-TODO #3); quota raise and permissions boundary (USER-TODO #1, #2); move the ask-ai seed, then retire the K4 services (deferred by decision). |
-| 1 Tenant-aware engine | **Done:** skill manifest (`rudi-skill@1`) and composer; `RegistryStore` seam with the in-memory store and contract tests; publishing draft → staging → live with audit; journey engine (`rudi-journey@1`, checked at publish); Baseline, Conversation, Coaching and Voice call packs as 21 real-time skill packages (`packages/rudi_skills`); the Turn Engine running any clone version on WhatsApp and calls (journey variants per channel, per-channel memory and assets); `ConversationStore` seam with the legacy S3 adapter (state round-trips with CM's `ai_state`); CM as tenant #1 on both channels (clone version 1, held to the live engines turn by turn by `test_engine_parity.py` and `test_voice_parity.py`); the arena door (`engine/door.py`, the `meetrudi-engine-turn` contract plus `target: cm/rudi@live` and calls); `engine/voice.py`, the call brain's interface for the voice adapter; CM's live calls on the platform engine (decision #38: layer `meetrudi-tenant-prod-pool-engine`, `CALL_ENGINE: platform` since 2026-11-05, legacy kept as the fallback and rollback; simulated calls and recorded voice checks as the release evidence). **Open:** retire `brain.py` once calls have run on the platform for a while; deploy the door as `meetrudi-tenant-dev-pool-engine` and let the arena pick a target (needs USER-TODO #1); run an arena batch on both doors; CM version 2 (`acceptable-use`, the call disclosure gap, one guidance document). |
+| 1 Tenant-aware engine | **Done:** skill manifest (`rudi-skill@1`) and composer; `RegistryStore` seam with the in-memory store and contract tests; publishing draft → staging → live with audit; journey engine (`rudi-journey@1`, checked at publish); Baseline, Conversation, Coaching and Voice call packs as 21 real-time skill packages (`packages/rudi_skills`); the Turn Engine running any clone version on WhatsApp and calls (journey variants per channel, per-channel memory and assets); `ConversationStore` seam with the legacy S3 adapter (state round-trips with CM's `ai_state`); CM as tenant #1 on both channels (clone version 1, held to the live engines turn by turn by `test_engine_parity.py` and `test_voice_parity.py`); the arena door (`engine/door.py`, the `meetrudi-engine-turn` contract plus `target: cm/rudi@live` and calls); `engine/voice.py`, the call brain's interface for the voice adapter; CM's live calls on the platform engine (decision #38: layer `meetrudi-tenant-prod-pool-engine`, `CALL_ENGINE: platform` since 2026-11-05, legacy kept as the fallback and rollback; simulated calls and recorded voice checks as the release evidence); CM's WhatsApp, tester chat and the arena door on the platform engine (decision #40: `chat_engine.respond`, layer `meetrudi-tenant-prod-pool-engine-whatsapp`, `CHAT_ENGINE: platform`, legacy as the per-message fallback and rollback; the arena door takes `engine` per event). **Open:** retire `brain.py` and `responder.py` once both channels have run on the platform for a while; deploy the door as `meetrudi-tenant-dev-pool-engine` and let the arena pick a target (needs USER-TODO #1); run an arena batch on both doors; CM version 2 (`acceptable-use`, the call disclosure gap, one guidance document). |
 | 2 Channels and basic console | `edge-whatsapp`, `edge-voice` (fast memory; the engine side is done in Phase 1), `edge-api` and widget; scheduler and background skills; **basic console running on CM** (conversations, clone settings, usage, accounts and roles) as the live demo for onboarding; CM cut over to the platform engine. |
 | 3 Full console and tenant #2 | Scope requests with inventory match, knowledge upload, takeover, keys and webhooks, templates, draft → staging → live; tenant #2 from existing skills, no deploy; CM data moves to Postgres when the backend is live. |
 | 4 Minting and reach | The minting path end to end; first turn skill (knowledge retrieval); SMS and e-mail reach-out. |

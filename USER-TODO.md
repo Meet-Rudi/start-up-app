@@ -68,6 +68,9 @@
 
 - **Meta Tech Provider enrolment** (via Twilio's ISV programme) — blocks onboarding a tenant's
   own WhatsApp account.
+- **Qdrant Cloud (decision #39)** — only once a skill needs vector memory. Free cluster in an EU
+  region (AWS eu-central-1 if offered), Qdrant's DPA signed, API key stored in Secrets Manager
+  as `meetrudi/internal/{stage}/qdrant`.
 
 ## Done
 
