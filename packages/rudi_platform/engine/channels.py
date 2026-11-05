@@ -90,6 +90,11 @@ class ChannelProfile:
     opening_cue: str | None = None
     # False: a concluded conversation is over on this channel (a call), not restarted.
     restart_after_conclusion: bool = True
+    # True: a turn's answer without the {reply, signals} envelope fails over to the next model
+    # instead of being used (prose is read as the reply, and internal field names in it trip the
+    # leak guard). On a call the redirect replaced the AI-disclosure turn (2026-11-05). Off on
+    # WhatsApp, where legacy still sends such prose as the reply (decision #36 parity).
+    require_reply: bool = False
 
 
 PROFILES: dict[str, ChannelProfile] = {
@@ -111,6 +116,7 @@ PROFILES: dict[str, ChannelProfile] = {
         store_styled=True,
         opening_cue=VOICE_OPENING_CUE,
         restart_after_conclusion=False,
+        require_reply=True,
     ),
 }
 

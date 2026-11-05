@@ -161,7 +161,23 @@ def _load_endpoints():
         return []
 
 
-def generate(messages, json_mode=False, budget_s=None):
+def has_reply(text):
+    """True when `text` carries the {reply, signals} envelope with a non-empty reply — read the
+    way brain.parse_envelope reads it (the whole text, else its outermost braces)."""
+    text = text or ""
+    try:
+        obj = json.loads(text)
+    except (ValueError, TypeError):
+        start, end = text.find("{"), text.rfind("}")
+        try:
+            obj = json.loads(text[start:end + 1]) if start != -1 and end > start else None
+        except (ValueError, TypeError):
+            obj = None
+    reply = obj.get("reply") if isinstance(obj, dict) else None
+    return isinstance(reply, str) and bool(reply.strip())
+
+
+def generate(messages, json_mode=False, budget_s=None, require_reply=False):
     """Run the provider cascade (config endpoints, then Groq fallback) inside a time budget.
 
     Returns {"text": ..., "model": ...}. Raises AllRateLimited if every attempt was 429, or
@@ -170,6 +186,11 @@ def generate(messages, json_mode=False, budget_s=None):
     The budget is what stops a stall becoming dead air: no attempt may outlast its timeout, and
     the cascade gives up once too little time remains to be worth another try — leaving the
     caller enough of the Lambda's 25s to speak instead of being killed mid-wait.
+
+    `require_reply` (a conversation turn): an answer without the {reply, signals} envelope is
+    unusable too and fails over. OVH's gpt-oss-20b sometimes answers a turn in prose that names
+    internal fields; read as the reply, the leak guard replaced it with its redirect, and on the
+    disclosure turn the caller never heard what Rudi is (2026-11-05).
     """
     cascade = _load_endpoints()
     cascade.append(GROQ_FALLBACK)
@@ -191,6 +212,8 @@ def generate(messages, json_mode=False, budget_s=None):
         attempts += 1
         try:
             text = _registry.call(ep, messages, timeout=timeout, json_mode=json_mode)
+            if require_reply and not has_reply(text):
+                raise AIError("%s answered without the reply envelope" % ep.get("name"))
             return {"text": text, "model": ep.get("name")}
         except RateLimitError as e:
             rate_limited += 1

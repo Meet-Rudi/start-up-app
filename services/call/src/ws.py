@@ -273,6 +273,7 @@ def _on_setup(connection_id, message):
         "signals": {}, "phase": state["phase"], "state": state, "model": info.get("model"),
         "engine": manifest["engine"],
         "timings": {"llm_ms": int((time.time() - started) * 1000)},
+        **({"guard": info["guard"]} if info.get("guard") else {}),
     })
     return _ok()
 
@@ -383,6 +384,7 @@ def _on_prompt(connection_id, message, manifest):
         "model": info.get("model"), "engine": manifest.get("engine") or platform_call.LEGACY,
         "timings": {"llm_ms": int((time.time() - started) * 1000)},
         "elapsed_s": elapsed,
+        **({"guard": info["guard"]} if info.get("guard") else {}),
     })
 
     if info.get("ended"):

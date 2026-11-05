@@ -199,11 +199,18 @@ def _info(outcome, started):
         "leak_blocked": outcome.leak_blocked,
         "engine": PLATFORM,
     }
+    # Why a reply was replaced, and whether the model kept to the {reply, signals} envelope:
+    # labels and key names only, so a blocked turn can be traced to its cause from the record.
+    guard = {k: v for k, v in (("leak", outcome.leak_reason),
+                               ("envelope", outcome.envelope)) if v and v != "json"}
+    if guard:
+        info["guard"] = guard
     tokens = f"{gen.usage.tokens_in}/{gen.usage.tokens_out}" if gen else "0/0"
     ms = int((time.time() - started) * 1000)
     print(f"ENGINE platform stage={outcome.stage_before}->{outcome.stage} "
           f"endpoint={info['model']} tokens={tokens} attempts={gen.attempts if gen else 0} "
-          f"ms={ms} ended={outcome.ended}")
+          f"ms={ms} ended={outcome.ended}"
+          + "".join(f" {k}={v}" for k, v in guard.items()))
     return info
 
 

@@ -126,6 +126,17 @@ rather than quietly switching voice, and dead air is the failure somebody actual
   the 7 s attempt on calls), and can ask gpt-oss for a reasoning effort (`CALL_REASONING_EFFORT`,
   off: "low" was faster but invented names and tripped the leak guard more on simulated calls).
   A test call may pin endpoints with `models: [...]` in its config.
+- **A turn needs the reply envelope.** On both engines, a turn's answer without the
+  `{reply, signals}` JSON fails over to the next model (`gateway.generate(require_reply=True)`;
+  the platform's voice profile sets `require_reply`), logged `failed: no-envelope`. OVH's
+  gpt-oss-20b sometimes answers in prose naming internal fields; read as the reply, the leak
+  guard replaced it with its redirect, on the AI-disclosure turn too (2026-11-05). The opening
+  asks for plain text and is not affected; neither is WhatsApp.
+- **Why a reply was replaced.** On the platform, a turn record whose reply the leak guard
+  replaced carries `guard: {"leak": "marker" | "verbatim", "envelope": …}`. The envelope is
+  `text` when the model answered in prose instead of the `{reply, signals}` JSON, or
+  `json-no-reply:<keys>` when its JSON had no `reply`. Labels and key names only, never content;
+  the same goes into the `ENGINE platform …` log line.
 
 ## The join key
 

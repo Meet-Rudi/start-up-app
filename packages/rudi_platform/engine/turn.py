@@ -91,6 +91,10 @@ class TurnOutcome:
     signals: dict[str, Any] = field(default_factory=dict)
     lang: str | None = None  # the language the model detected this turn
     leak_blocked: bool = False
+    # Diagnostics, safe to log: why a reply gate blocked ("marker", "verbatim") and the model
+    # output's envelope shape (Envelope.shape).
+    leak_reason: str = ""
+    envelope: str = ""
     greeted: bool = False
     new_contact: bool = False
     halt: dict[str, Any] | None = None  # set when an inbound gate stopped the turn
@@ -249,7 +253,8 @@ class _Turn:
         reply = timeline.strip_markers(envelope.reply)
         signals = dict(envelope.signals)
 
-        reply, blocked = self._gate(base, reply, system, signals)
+        reply, reason = self._gate(base, reply, system, signals)
+        blocked = bool(reason)
         if blocked:  # text we refused to send must not move the conversation along
             keep = self.lang_signal and signals.get("lang")
             signals = {"lang": signals["lang"]} if keep else {}
@@ -307,6 +312,8 @@ class _Turn:
             signals=signals,
             lang=detected,
             leak_blocked=blocked,
+            leak_reason=reason,
+            envelope=envelope.shape,
             generation=generation,
             system=system,
             messages=messages,
@@ -361,8 +368,9 @@ class _Turn:
         ]
         stage_skill = self.c.skill(self.journey.stage(start).skill)
         generation = self._generate(messages, stage_skill, json_mode=False)
-        reply = timeline.strip_markers(parse_envelope(generation.text).reply)
-        reply, blocked = self._gate(base, reply, system, {})
+        envelope = parse_envelope(generation.text)
+        reply = timeline.strip_markers(envelope.reply)
+        reply, reason = self._gate(base, reply, system, {})
         styled = self.profile.style(reply)
         new.history = [
             {
@@ -377,7 +385,10 @@ class _Turn:
             state=new,
             vault=vault,
             stage=start,
-            leak_blocked=blocked,
+            leak_blocked=bool(reason),
+            leak_reason=reason,
+            # Plain text is asked for here, so only a JSON answer has a shape worth noting.
+            envelope=envelope.shape if envelope.parsed else "",
             greeted=True,
             new_contact=True,
             generation=generation,
@@ -439,6 +450,7 @@ class _Turn:
             budget_s=self.profile.budget_s,
             attempt_timeout_s=self.profile.attempt_timeout_s,
             max_tokens=self.profile.max_tokens,
+            require_reply=json_mode and self.profile.require_reply,
             tags=UsageTags(
                 tenant=self.c.tenant_id,
                 clone=self.c.clone_id,
@@ -455,11 +467,12 @@ class _Turn:
         reply: str,
         system: str,
         signals: Mapping[str, Any],
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, str]:
+        """(reply to send, why a gate blocked the model's reply or "")."""
         lang = (
             normalize_locale(signals.get("lang")) if self.lang_signal else None
         ) or self.locale
-        blocked = False
+        reason = ""
         for b in self.here:
             if b.has("on_reply"):
                 out = self._call(
@@ -475,8 +488,9 @@ class _Turn:
                     },
                 ).output
                 if out.get("blocked"):
-                    reply, blocked = str(out.get("reply") or ""), True
-        return reply, blocked
+                    reply = str(out.get("reply") or "")
+                    reason = reason or str(out["blocked"])
+        return reply, reason
 
     def _strings(self, lang: str) -> dict[str, str]:
         return {

@@ -79,7 +79,7 @@ import voicecheck  # noqa: E402
 _REPLIES: list = []
 
 
-def _fake_generate(messages, json_mode=False):
+def _fake_generate(messages, json_mode=False, **_):
     if not _REPLIES:
         return {"text": json.dumps({"reply": "Alright.", "signals": {}}), "model": "fake"}
     reply, signals = _REPLIES.pop(0)
@@ -571,7 +571,7 @@ class Clock(unittest.TestCase):
     def test_turns_are_stamped_but_the_provider_never_sees_a_stamp(self):
         seen = {}
 
-        def generate(messages, json_mode=False):
+        def generate(messages, json_mode=False, **_):
             seen["messages"] = messages
             return {"text": json.dumps({"reply": "Alright.", "signals": {}}), "model": "fake"}
 
@@ -628,6 +628,39 @@ class TurnBudget(unittest.TestCase):
         self._answer(content='{"reply": "half a sen', finish="length")
         with self.assertRaises(gateway.AIError):
             _REAL_GENERATE([{"role": "user", "content": "hi"}], json_mode=True)
+
+    def test_a_turn_without_the_reply_envelope_fails_over(self):
+        """Regression (2026-11-05): OVH gpt-oss-20b answered a turn in prose naming internal
+        fields; the leak guard swapped it for its redirect, on the disclosure turn."""
+        seen = []
+
+        def post(url, headers, payload, timeout):
+            seen.append(payload["model"])
+            text = ("Need to greet. goal_status unclear" if len(seen) == 1
+                    else '{"reply": "Hi, I am Rudi.", "signals": {}}')
+            return {"choices": [{"message": {"content": text}, "finish_reason": "stop"}]}
+
+        gateway._registry._post_json = post
+        real_load = gateway._load_endpoints
+        gateway._load_endpoints = lambda: [{"name": "ovh-gpt-oss-20b", "model": "gpt-oss-20b",
+                                            "endpoint": "https://ovh.example/v1",
+                                            "secret": "meetrudi-ovh"}]
+        try:
+            out = _REAL_GENERATE([{"role": "user", "content": "hi"}], json_mode=True,
+                                 require_reply=True)
+        finally:
+            gateway._load_endpoints = real_load
+        self.assertEqual(json.loads(out["text"])["reply"], "Hi, I am Rudi.")
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(gateway.has_reply('Sure: {"reply": "Hi", "signals": {}}'))
+        for unusable in ("prose", '{"response": "Hi"}', '{"reply": "  "}', "", None):
+            self.assertFalse(gateway.has_reply(unusable), unusable)
+
+    def test_without_require_reply_prose_is_still_returned(self):
+        """The voice check's judge and the opening use JSON or prose of their own."""
+        self._answer(content="Need to greet.")
+        self.assertEqual(_REAL_GENERATE([{"role": "user", "content": "hi"}],
+                                        json_mode=True)["text"], "Need to greet.")
 
     def test_truncated_prose_is_still_usable(self):
         self._answer(content="Alright, that sounds", finish="length")
@@ -944,7 +977,7 @@ class Confidentiality(unittest.TestCase):
     def _capture(self):
         seen = []
 
-        def generate(messages, json_mode=False):
+        def generate(messages, json_mode=False, **_):
             seen.append(messages[0]["content"])
             return _fake_generate(messages, json_mode)
         brain.gateway.generate = generate
@@ -981,6 +1014,8 @@ class Confidentiality(unittest.TestCase):
         self.assertTrue(seen, "the opening never reached the model")
         self.assertNotIn("Filip", seen[0], "the real name was sent to the model")
         self.assertTrue(deid.has_placeholder(seen[0]))
+        # Regression (2026-11-05): told only "is named <| Person_A |>", models made a name up.
+        self.assertIn("That is a placeholder, not a name", seen[0])
         spoken = " ".join(_spoken())
         self.assertIn("Filip", spoken, "they still hear their own name")
         self.assertFalse(deid.has_placeholder(spoken), "a placeholder was spoken aloud")

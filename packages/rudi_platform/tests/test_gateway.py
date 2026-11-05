@@ -196,6 +196,33 @@ class Cascade(unittest.TestCase):
         gen = gw.generate(MSGS, [A, B, C], json_mode=True)
         self.assertEqual(gen.endpoint, "c")
 
+    def test_without_the_reply_envelope_an_answer_fails_over_when_required(self):
+        """OVH gpt-oss-20b answered call turns in prose naming internal fields; read as the
+        reply, the leak guard replaced it (2026-11-05). A call requires the envelope."""
+        prose = "We should greet Frederik. goal_status: unclear. Hi Frederik!"
+        gw, _, _, _, _ = gateway({
+            A.url: [ok(prose)],
+            B.url: [ok('{"response": "Hi", "goal_status": "unclear"}')],
+            C.url: [ok('{"reply": "Hi!", "signals": {}}')],
+        })  # fmt: skip
+        gen = gw.generate(MSGS, [A, B, C], json_mode=True, require_reply=True)
+        self.assertEqual((gen.endpoint, gen.attempts), ("c", 3))
+        gw, _, _, _, _ = gateway({A.url: [ok(prose)]})  # not required: used as before
+        self.assertEqual(gw.generate(MSGS, [A], json_mode=True).text, prose)
+        gw, _, _, sleeps, _ = gateway({A.url: [ok(prose)]})
+        with self.assertRaises(AIError) as caught:
+            gw.generate(MSGS, [A], json_mode=True, require_reply=True)
+        self.assertNotIsInstance(caught.exception, AllRateLimited)
+        self.assertEqual(
+            sleeps, []
+        )  # a wrong format is not retried on the same endpoint
+        from rudi_platform.gateway.core import failure_kind
+
+        self.assertEqual(
+            failure_kind(AIError("a answered without the reply envelope")),
+            "no-envelope",
+        )
+
     def test_a_capped_answer_is_fine_outside_json_mode(self):
         gw, _, _, _, _ = gateway({A.url: [ok("a long answer, cut", finish="length")]})
         self.assertEqual(gw.generate(MSGS, [A]).text, "a long answer, cut")
@@ -410,6 +437,15 @@ class Envelope(unittest.TestCase):
         e = parse_envelope('{"reply": "", "signals": ["not", "a", "dict"]}')
         self.assertEqual(e.signals, {})
         self.assertEqual(e.reply, '{"reply": "", "signals": ["not", "a", "dict"]}')
+
+    def test_the_shape_names_keys_never_content(self):
+        self.assertEqual(parse_envelope('{"reply": "Hi", "signals": {}}').shape, "json")
+        self.assertEqual(parse_envelope("Just prose.").shape, "text")
+        e = parse_envelope(
+            '{"response": "Hi Jan", "goal_status": "unclear", "a b!": 1}'
+        )
+        self.assertEqual(e.shape, "json-no-reply:ab,goal_status,response")
+        self.assertNotIn("Jan", e.shape)
 
 
 class Headroom(unittest.TestCase):

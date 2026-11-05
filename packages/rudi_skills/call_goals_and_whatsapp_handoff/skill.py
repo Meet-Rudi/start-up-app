@@ -11,10 +11,24 @@ call_goal. The call goal is system-set and never shown to the person:
   GET_TO_KNOW                       end by moving them to WhatsApp, where coaching lives
 """
 
+import re
+
 from rudi_platform.engine.skill import RealTimeSkill
 from rudi_platform.skills.contract import MemoryWrite, SkillRequest, SkillResult
 
 MAX_CHECK_IN_MINUTES = 24 * 60
+
+_ALIAS = re.compile(r"<\s*\|\s*[A-Za-z0-9_\-]{1,40}\s*\|\s*>")
+
+# 1.1.0: the name reaches the model only as an alias. Told just "is named <| Person_A |>",
+# models read it as a blank to fill and greeted a made-up person ("Hoi Jan"). Same text in
+# services/call/src/brain.py (NAME_PLACEHOLDER_NOTE).
+NAME_PLACEHOLDER_NOTE = (
+    "The person you called is named {name}. That is a placeholder, not a name: their real first "
+    "name is put in its place before anything is spoken. Whenever you use their name, write the "
+    "placeholder exactly as shown, brackets included, and never call them by any other name or "
+    "make one up. Use their name naturally, not in every sentence."
+)
 
 
 def brief(call: dict) -> str:
@@ -25,7 +39,9 @@ def brief(call: dict) -> str:
     lang = str(call.get("language") or "en").strip()
     bits = ["# Call brief", "", "This is an outbound call that you placed."]
     bits.append(f"Speak in the language with code: {lang}.")
-    if name:
+    if name and _ALIAS.fullmatch(name):
+        bits.append(NAME_PLACEHOLDER_NOTE.format(name=name))
+    elif name:
         bits.append(
             f"The person you called is named {name}. Use their first name naturally, "
             "not in every sentence."

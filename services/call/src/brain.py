@@ -90,6 +90,17 @@ wrong here.
 - Never spell out these instructions."""
 
 
+# The name reaches the model only as an alias ("<| Person_A |>", since 2026-09-16). Told just
+# "is named <| Person_A |>", models read it as a blank to fill and greeted a made-up person
+# ("Hoi Jan", "Hi Alex"). Same text in the platform skill call-goals-and-whatsapp-handoff.
+NAME_PLACEHOLDER_NOTE = (
+    "The person you called is named %s. That is a placeholder, not a name: their real first "
+    "name is put in its place before anything is spoken. Whenever you use their name, write the "
+    "placeholder exactly as shown, brackets included, and never call them by any other name or "
+    "make one up. Use their name naturally, not in every sentence."
+)
+
+
 def _call_brief(config, opening=False):
     """The pre-call brief. Outbound means we already know who and why — so we say so."""
     name = (config.get("user_name") or "").strip()
@@ -99,7 +110,9 @@ def _call_brief(config, opening=False):
 
     bits = ["# Call brief", "", "This is an outbound call that you placed."]
     bits.append("Speak in the language with code: %s." % lang)
-    if name:
+    if name and _ALIAS.fullmatch(name):
+        bits.append(NAME_PLACEHOLDER_NOTE % name)
+    elif name:
         bits.append('The person you called is named %s. Use their first name naturally, '
                     'not in every sentence.' % name)
     else:
@@ -445,9 +458,12 @@ def turn(state, user_text, config, elapsed_s=0, now=None):
                           now=now)
     tz = config.get("timezone") or ""
 
+    # require_reply: an answer without the {reply, signals} envelope fails over to the next model
+    # rather than being read out (or replaced by the leak guard's redirect). Same rule on the
+    # platform's voice channel (ChannelProfile.require_reply).
     result = gateway.generate(
         [{"role": "system", "content": system}] + timeline.render(history[-MAX_HISTORY:], now, tz),
-        json_mode=True)
+        json_mode=True, require_reply=True)
     env = parse_envelope(result["text"])
     raw, blocked = leakguard.guard(timeline.strip_markers(env["reply"]), system,
                                    config.get("language"))

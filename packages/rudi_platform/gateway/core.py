@@ -9,7 +9,8 @@ One implementation of what four service copies of gateway.py each did part of:
     before failing over; AllRateLimited when every endpoint tried ended rate-limited.
   - **Time budget** (call copy): with `budget_s`, no attempt outlasts the time left, and the
     cascade stops once less than MIN_ATTEMPT_S remains, leaving the caller time to say something.
-  - **Unusable answers fail over** (call copy): empty content, and JSON cut off by the token cap.
+  - **Unusable answers fail over** (call copy): empty content, JSON cut off by the token cap, and
+    with `require_reply` an answer without the {reply, signals} envelope.
   - **De-identification sandwich** (memory blueprint part C): with a `vault`, every message is
     masked before it leaves and the answer is restored before anyone parses it, so signals come
     back clean. It lives here so no caller can forget it.
@@ -34,6 +35,7 @@ from ..ids import Cat, new_id
 from ..privacy.deid import AliasVault, PersonDetector
 from ..skills.contract import Usage
 from .endpoints import ModelEndpoint
+from .envelope import parse_envelope
 from .secrets import SecretResolver
 from .transport import AIError, AllRateLimited, RateLimitError, Transport
 
@@ -59,6 +61,8 @@ def failure_kind(error: Exception | None) -> str:
         return "no-content"
     if "token cap" in text:
         return "truncated"
+    if "without the reply envelope" in text:
+        return "no-envelope"
     status = _HTTP_STATUS.search(text)
     if status:
         return f"http-{status.group(1)}"
@@ -142,14 +146,16 @@ class ModelGateway:
         locale: str = "en",
         restore_fallback: str = "them",
         tags: UsageTags | None = None,
+        require_reply: bool = False,
     ) -> Generation:
         """Run `cascade` until one endpoint gives a usable answer.
 
         With a `vault`, a `detector` is required: it must know the clone's persona names
         (HeuristicDetector(keep=...)), or the persona's own name in the prompt would be masked.
         `attempt_timeout_s` caps every single attempt (a live call: a stall past it is dead
-        air, so the cascade moves on). Raises AllRateLimited, AIError, or ValueError for a
-        malformed call.
+        air, so the cascade moves on). `require_reply`: an answer without the {reply, signals}
+        envelope (envelope.parse_envelope) is unusable and fails over. Raises AllRateLimited,
+        AIError, or ValueError for a malformed call.
         """
         if not cascade:
             raise ValueError(
@@ -182,6 +188,8 @@ class ModelGateway:
                     raw, tokens_in, tokens_out = self._call(
                         ep, wire, timeout, json_mode, max_tokens
                     )
+                    if require_reply and not parse_envelope(raw).has_reply:
+                        raise AIError(f"{ep.name} answered without the reply envelope")
                 except RateLimitError as e:
                     last = e
                     delay = self._backoff_s * 2**attempt

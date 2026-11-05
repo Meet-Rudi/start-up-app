@@ -10,8 +10,11 @@ happened, because a reply without signals silently stalls a journey (catalogue g
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+_KEY = re.compile(r"[^A-Za-z0-9_]")
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,18 @@ class Envelope:
     reply: str
     signals: dict[str, Any] = field(default_factory=dict)
     parsed: bool = False
+    # The JSON object's top-level key names (sanitised, at most 8) and whether it carried a
+    # usable "reply". Diagnostics only: a model that answers {"response": …} has its whole JSON
+    # used as the reply, which the leak guard then blocks for the signal names in it.
+    keys: tuple[str, ...] = ()
+    has_reply: bool = False
+
+    @property
+    def shape(self) -> str:
+        """json, text, or json-no-reply:<keys> — safe to log, never content."""
+        if not self.parsed:
+            return "text"
+        return "json" if self.has_reply else "json-no-reply:" + ",".join(self.keys)
 
 
 def parse_envelope(text: str) -> Envelope:
@@ -36,8 +51,16 @@ def parse_envelope(text: str) -> Envelope:
                 obj = None
     if not isinstance(obj, dict):
         return Envelope(reply=text)
+    keys = tuple(sorted(_KEY.sub("", str(k))[:24] for k in obj)[:8])
     reply = obj.get("reply")
-    if not isinstance(reply, str) or not reply.strip():
+    has_reply = isinstance(reply, str) and bool(reply.strip())
+    if not has_reply:
         reply = text
     signals = obj.get("signals") if isinstance(obj.get("signals"), dict) else {}
-    return Envelope(reply=reply, signals=dict(signals), parsed=True)
+    return Envelope(
+        reply=str(reply),
+        signals=dict(signals),
+        parsed=True,
+        keys=keys,
+        has_reply=has_reply,
+    )

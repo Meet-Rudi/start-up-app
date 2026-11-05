@@ -41,9 +41,12 @@ from rudi_platform.engine import (
     TurnEngine,
     canonical,
     load_clone,
+    profile,
     voice,
 )
+from rudi_platform.gateway import AIError as PlatformAIError
 from rudi_platform.gateway import ModelEndpoint, ModelGateway, StaticSecrets
+from rudi_platform.gateway.envelope import parse_envelope
 from rudi_platform.memory import to_flat
 from rudi_platform.memory.state import default_for
 from rudi_platform.privacy.deid import AliasVault
@@ -97,6 +100,7 @@ class Script:
     def __init__(self):
         self.text: str | None = None
         self.legacy_sent: list | None = None
+        self.legacy_require_reply: bool | None = None
         self.platform_sent: list | None = None
 
     def take(self) -> str:
@@ -127,9 +131,15 @@ def _load_legacy() -> types.SimpleNamespace:
     class AllRateLimited(AIError):
         pass
 
-    def generate(messages, json_mode=False, budget_s=None):
+    def generate(messages, json_mode=False, budget_s=None, require_reply=False):
         SCRIPT.legacy_sent = [dict(m) for m in messages]
-        return {"text": SCRIPT.take(), "model": "fake-model"}
+        SCRIPT.legacy_require_reply = require_reply
+        text = SCRIPT.take()
+        if (
+            require_reply and not parse_envelope(text).has_reply
+        ):  # as gateway.py's check
+            raise AIError("fake-model answered without the reply envelope")
+        return {"text": text, "model": "fake-model"}
 
     gateway.AIError, gateway.AllRateLimited, gateway.generate = (
         AIError,
@@ -270,6 +280,8 @@ class Call:
         )  # fmt: skip
         self._compare_prompts(where)
         c = self.case
+        if SCRIPT.legacy_sent is not None:  # a turn needs the reply envelope
+            c.assertTrue(SCRIPT.legacy_require_reply, where)
         c.assertEqual(transcript, out.masked_inbound, where)
         c.assertEqual(reply, out.reply_masked, where)
         c.assertEqual(spoken, out.reply, where)
@@ -280,6 +292,27 @@ class Call:
         self._compare_state(state, out.state, where)
         self.live_state, self.state = state, out.state
         return out
+
+    def refuse(self, said: str, model: str, elapsed_s: int, minutes: float):
+        """A model answer both engines refuse: no envelope, so it fails over (here, with one
+        model, the turn fails) and nothing moves."""
+        now = START + datetime.timedelta(minutes=minutes)
+        SCRIPT.text, SCRIPT.legacy_sent, SCRIPT.platform_sent = model, None, None
+        ws = LEGACY.ws
+        transcript = ws._scrub_inbound(
+            self.manifest, said, self.config.get("language", "en")
+        )
+        with self.case.assertRaises(LEGACY.brain.gateway.AIError):
+            LEGACY.brain.turn(
+                self.live_state, transcript, ws._model_config(self.manifest, self.config),
+                elapsed_s=elapsed_s, now=now,
+            )  # fmt: skip
+        with self.case.assertRaises(PlatformAIError):
+            voice.call_turn(
+                self.engine, self.state, said, self.config, self.vault,
+                elapsed_s=elapsed_s, now=now,
+            )  # fmt: skip
+        self._compare_prompts(f"refused: {said!r}")
 
 
 class VoiceParity(unittest.TestCase):
@@ -293,6 +326,14 @@ class VoiceParity(unittest.TestCase):
         })  # fmt: skip
         call.pick_up("Hoi <| Person_A |>!")
         self.assertIn("This is the very first thing they hear", call.system)
+        # A turn needs the reply envelope on both engines (prose fails over, 2026-11-05).
+        self.assertTrue(profile("voice").require_reply)
+        self.assertFalse(profile("whatsapp").require_reply)
+        # The name is an alias, and both engines say so: models used to invent one ("Hoi Jan").
+        self.assertIn(
+            "is named <| Person_A |>. That is a placeholder, not a name", call.system
+        )
+        self.assertIn("never call them by any other name", call.system)
         call.hear("Hallo, met Jan", env("Ik ben Rudi, een AI-assistent. Klopt het?",
                                          goal_status="unclear"), 8, 0.2)  # fmt: skip
         self.assertIn("# You have not yet told them what you are", call.system)
@@ -349,7 +390,7 @@ class VoiceParity(unittest.TestCase):
 
     def test_a_followup_call_that_ends_in_rejections(self):
         """GOAL_FOLLOWUP without start_phase (so goal), a five-minute call, notes with a name,
-        a reply in prose, three rejected goals."""
+        a prose answer both engines refuse, three rejected goals."""
         call = Call(self, {
             "user_name": "Sophie", "topic": "sleep", "language": "fr-BE",
             "timezone": "Europe/Brussels", "call_goal": "GOAL_FOLLOWUP", "max_minutes": 5,
@@ -357,7 +398,10 @@ class VoiceParity(unittest.TestCase):
         })  # fmt: skip
         call.pick_up("Bonjour <| Person_A |> !")
         self.assertEqual(call.state.stage, "goal")
-        call.hear("Oui ?", "Bonjour, je suis Rudi, une IA.", 5, 0.1)  # prose, not JSON
+        # Prose instead of the envelope: both engines refuse it and fail over (2026-11-05);
+        # it used to be spoken as the reply.
+        call.refuse("Oui ?", "Bonjour, je suis Rudi, une IA.", 5, 0.1)
+        call.hear("Oui ?", env("Bonjour, je suis Rudi, une IA."), 5, 0.2)
         for i, goal in enumerate(["changer mon patron", "faire taire mon voisin",
                                   "devenir président"]):  # fmt: skip
             call.hear(

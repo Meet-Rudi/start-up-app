@@ -209,6 +209,23 @@ class Engine(unittest.TestCase):
         with self.assertRaises(EngineError):
             w.engine().turn(in_stage("learn"), "hey", vault=AliasVault(), now=NOW)
 
+    def test_a_blocked_reply_says_why(self):
+        """A model that ignores the envelope has its whole JSON read as the reply; the signal
+        names in it trip the leak guard. The outcome names the reason and the shape."""
+        self.w.transport.replies.append(
+            json.dumps({"response": "Hi!", "goal_status": "unclear"})
+        )
+        o = self.w.engine().turn(in_stage("goal"), "hey", vault=AliasVault(), now=NOW)
+        self.assertTrue(o.leak_blocked)
+        self.assertEqual(o.leak_reason, "marker")
+        self.assertEqual(o.envelope, "json-no-reply:goal_status,response")
+        self.assertIn("keep the focus on you", o.reply)
+        self.w.transport.replies.append(env("Tell me more.", goal_status="unclear"))
+        o = self.w.engine().turn(in_stage("goal"), "hey", vault=AliasVault(), now=NOW)
+        self.assertEqual(
+            (o.leak_blocked, o.leak_reason, o.envelope), (False, "", "json")
+        )
+
     def test_gateway_errors_propagate(self):
         self.w.transport.replies.extend([RateLimitError("429")] * 3)
         from rudi_platform.gateway import AllRateLimited
@@ -502,9 +519,14 @@ class Packages(unittest.TestCase):
         packed = {s for pack in PACKS.values() for s in pack}
         self.assertEqual(built, packed)
 
-    def test_every_skill_is_version_1_and_real_time(self):
+    def test_every_skill_is_major_version_1(self):
+        # CM pins major 1; minors are fixes that reach both engines at once (parity tests).
         for skill in rudi_skills.load_all():
-            self.assertEqual(skill.manifest.version, (1, 0, 0), skill.slug)
+            self.assertEqual(skill.manifest.version[0], 1, skill.slug)
+        brief = {s.slug: s for s in rudi_skills.load_all()}[
+            "call-goals-and-whatsapp-handoff"
+        ]
+        self.assertEqual(brief.manifest.version, (1, 1, 0))  # the name-placeholder note
 
 
 if __name__ == "__main__":
