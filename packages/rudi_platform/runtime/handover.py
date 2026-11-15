@@ -22,10 +22,14 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from ..ids import Cat, new_id, require
+from ..naming import platform_s3_key, tenant_s3_key
 from ..skills.contract import Continuation, SkillRequest, SkillResult
 
 MAX_HOPS = 72
-CHECKPOINT_PREFIX = "runtime/checkpoints"
+CHECKPOINT_FOLDER = "runtime/checkpoints"
+# Keys start with the tenant's folder (decision #41), so a lifecycle rule cannot pick out
+# checkpoints by prefix; it filters on this tag instead.
+CHECKPOINT_TAG = "retention=checkpoint"
 
 
 class CheckpointStore(Protocol):
@@ -89,21 +93,27 @@ def resume_state(
 
 
 class S3CheckpointStore:
-    """Checkpoints as JSON objects under runtime/checkpoints/ in a data bucket.
+    """Checkpoints as JSON objects in a data bucket, inside the owner's folder:
+    tenants/{slug}/runtime/checkpoints/ for a tenant's job, platform/runtime/checkpoints/ for a
+    platform job (tenant_slug=None).
 
-    Give the prefix a short lifecycle expiry (days, not months): a checkpoint is only useful to
-    the next hop.
+    Every checkpoint is tagged retention=checkpoint. Give that tag a short lifecycle expiry (days,
+    not months): a checkpoint is only useful to the next hop. Writing with a tag needs
+    s3:PutObjectTagging next to s3:PutObject.
     """
 
-    def __init__(
-        self, s3_client: Any, bucket: str, prefix: str = CHECKPOINT_PREFIX
-    ) -> None:
+    def __init__(self, s3_client: Any, bucket: str, *, tenant_slug: str | None) -> None:
         self._s3 = s3_client
         self._bucket = bucket
-        self._prefix = prefix.rstrip("/")
+        self._tenant = tenant_slug
+        # A bad slug fails here, not at the first hand-over.
+        self._key(new_id(Cat.CHECKPOINT))
 
     def _key(self, checkpoint_id: str) -> str:
-        return f"{self._prefix}/{require(checkpoint_id, Cat.CHECKPOINT)}.json"
+        name = f"{require(checkpoint_id, Cat.CHECKPOINT)}.json"
+        if self._tenant is None:
+            return platform_s3_key(CHECKPOINT_FOLDER, name)
+        return tenant_s3_key(self._tenant, CHECKPOINT_FOLDER, name)
 
     def put(self, checkpoint_id: str, body: dict[str, Any]) -> None:
         self._s3.put_object(
@@ -111,6 +121,7 @@ class S3CheckpointStore:
             Key=self._key(checkpoint_id),
             Body=json.dumps(body).encode("utf-8"),
             ContentType="application/json",
+            Tagging=CHECKPOINT_TAG,
         )
 
     def get(self, checkpoint_id: str) -> dict[str, Any]:

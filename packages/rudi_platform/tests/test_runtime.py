@@ -208,8 +208,10 @@ class FakeS3:
     def __init__(self):
         self.objects = {}
 
-    def put_object(self, Bucket, Key, Body, ContentType):
+    def put_object(self, Bucket, Key, Body, ContentType, Tagging=""):
         self.objects[(Bucket, Key)] = Body
+        self.tags = getattr(self, "tags", {})
+        self.tags[(Bucket, Key)] = Tagging
 
     def get_object(self, Bucket, Key):
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
@@ -224,21 +226,31 @@ class FakeLambda:
 
 
 class Adapters(unittest.TestCase):
-    def test_s3_checkpoint_store(self):
+    def test_s3_checkpoint_store_writes_inside_the_tenant_folder(self):
         s3 = FakeS3()
-        store = S3CheckpointStore(s3, "meetrudi-tenant-dev-pool-data-949753869755")
+        bucket = "meetrudi-tenant-dev-pool-data-949753869755"
+        store = S3CheckpointStore(s3, bucket, tenant_slug="cm")
         chk = new_id(Cat.CHECKPOINT)
         store.put(chk, {"job": "x", "state": {"n": 1}})
-        self.assertIn(
-            (
-                "meetrudi-tenant-dev-pool-data-949753869755",
-                f"runtime/checkpoints/{chk}.json",
-            ),
-            s3.objects,
-        )
+        key = (bucket, f"tenants/cm/runtime/checkpoints/{chk}.json")
+        self.assertIn(key, s3.objects)
+        self.assertEqual(s3.tags[key], "retention=checkpoint")
         self.assertEqual(store.get(chk)["state"], {"n": 1})
         with self.assertRaises(ValueError):
             store.put("not-an-id", {})
+
+    def test_a_platform_job_checkpoints_under_platform(self):
+        s3 = FakeS3()
+        store = S3CheckpointStore(s3, "b", tenant_slug=None)
+        chk = new_id(Cat.CHECKPOINT)
+        store.put(chk, {"job": "x", "state": {}})
+        self.assertIn(("b", f"platform/runtime/checkpoints/{chk}.json"), s3.objects)
+
+    def test_the_owner_must_be_named_and_valid(self):
+        with self.assertRaises(TypeError):
+            S3CheckpointStore(FakeS3(), "b")  # type: ignore[call-arg]
+        with self.assertRaises(ValueError):
+            S3CheckpointStore(FakeS3(), "b", tenant_slug="CM/../other")
 
     def test_lambda_invoker_is_fire_and_forget(self):
         client = FakeLambda()

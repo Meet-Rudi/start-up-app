@@ -17,6 +17,10 @@ created without a plane.
 
 Builders check AWS name limits up front, so a long cell slug fails here rather than halfway
 through a CloudFormation deploy.
+
+S3 keys keep tenants apart where a person can see it (decision #41): every key that holds a
+tenant's data starts with `tenants/{tenant-slug}/`, in every bucket; objects of no tenant start
+with `platform/`. Build them with tenant_s3_key / platform_s3_key, never by hand.
 """
 
 from __future__ import annotations
@@ -39,6 +43,14 @@ class Plane(str, Enum):
 CELL_RE = re.compile(r"^(?:pool|d-[a-z0-9]{1,10})$")
 COMPONENT_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ACCOUNT_RE = re.compile(r"^\d{12}$")
+# Same shape as registry.tenants.slug in db/migrations.
+TENANT_SLUG_RE = COMPONENT_RE
+# One segment of an S3 key below the owner's folder: ids, file names, `name@channel`.
+KEY_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@=-]*$")
+
+S3_TENANTS = "tenants"
+S3_PLATFORM = "platform"
+S3_KEY_MAX = 1024  # bytes; our keys are ASCII
 
 # AWS name limits, by resource kind.
 LIMITS = {
@@ -153,3 +165,45 @@ def kms_alias(stage: str, tenant_id: str) -> str:
     _check_stage(stage)
     require(tenant_id, Cat.TENANT)
     return f"alias/{PROJECT}-{Plane.TENANT.value}-{stage}-{tenant_id}"
+
+
+def tenant_s3_prefix(tenant_slug: str) -> str:
+    """The folder holding every S3 object of one tenant, in any bucket: tenants/{slug}/.
+
+    The slug, not the ten_ id, so a person browsing a bucket can tell the tenants apart. A
+    tenant's slug never changes (the database refuses it), so its folder never moves.
+    """
+    if not TENANT_SLUG_RE.match(tenant_slug or ""):
+        raise ValueError(
+            f"tenant slug must be lowercase words joined by '-', got {tenant_slug!r}"
+        )
+    return f"{S3_TENANTS}/{tenant_slug}/"
+
+
+def _key_below(folder: str, parts: tuple[str, ...]) -> str:
+    segments = [s for p in parts for s in p.split("/")]
+    if not segments:
+        raise ValueError("an S3 key needs at least one part below its folder")
+    for s in segments:
+        if not KEY_SEGMENT_RE.match(s):
+            raise ValueError(
+                f"S3 key segments are ids or file names without '..' or empty parts, got {s!r}"
+            )
+    key = folder + "/".join(segments)
+    if len(key) > S3_KEY_MAX:
+        raise ValueError(f"S3 key is {len(key)} characters; S3 allows {S3_KEY_MAX}")
+    return key
+
+
+def tenant_s3_key(tenant_slug: str, *parts: str) -> str:
+    """A key inside one tenant's folder, e.g. tenants/cm/runtime/checkpoints/chk_….json.
+
+    Parts may hold '/' (`"runtime/checkpoints"`); no segment may be empty, '.' or '..', so a key
+    can never climb out of the tenant's folder.
+    """
+    return _key_below(tenant_s3_prefix(tenant_slug), parts)
+
+
+def platform_s3_key(*parts: str) -> str:
+    """A key for an object that belongs to no tenant: platform/…."""
+    return _key_below(f"{S3_PLATFORM}/", parts)

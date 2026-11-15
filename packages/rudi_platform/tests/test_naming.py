@@ -24,10 +24,13 @@ from rudi_platform.naming import (
     iam_pattern,
     internal_name,
     kms_alias,
+    platform_s3_key,
     queue_name,
     secret_path,
     skill_function,
     tenant_name,
+    tenant_s3_key,
+    tenant_s3_prefix,
     tenant_secret_path,
 )
 
@@ -111,6 +114,55 @@ class Names(unittest.TestCase):
             kms_alias("prod", new_id(Cat.CLONE))
         with self.assertRaises(ValueError):
             secret_path(Plane.INTERNAL, "prod", "a/b")
+
+
+class S3Keys(unittest.TestCase):
+    """Every key holding a tenant's data sits in tenants/{slug}/ (decision #41)."""
+
+    def test_a_tenant_key_sits_in_the_tenant_folder(self):
+        cnv = new_id(Cat.CONVERSATION)
+        self.assertEqual(tenant_s3_prefix("cm"), "tenants/cm/")
+        self.assertEqual(
+            tenant_s3_key("cm", "conversations", cnv, "snapshot.json"),
+            f"tenants/cm/conversations/{cnv}/snapshot.json",
+        )
+        self.assertEqual(
+            tenant_s3_key("acme-health", "runtime/checkpoints", "x.json"),
+            "tenants/acme-health/runtime/checkpoints/x.json",
+        )
+        self.assertEqual(
+            tenant_s3_key("cm", "assets", "brief@voice.md"),
+            "tenants/cm/assets/brief@voice.md",
+        )
+
+    def test_objects_of_no_tenant_go_under_platform(self):
+        self.assertEqual(
+            platform_s3_key("arena", "results.json"), "platform/arena/results.json"
+        )
+
+    def test_a_key_cannot_leave_its_folder(self):
+        for parts in (
+            ("..", "other", "x.json"),
+            ("a/../../other",),
+            ("/abs",),
+            ("a//b",),
+            ("a/",),
+            (".",),
+            ("",),
+            ("with space",),
+            (),
+        ):
+            with self.subTest(parts=parts), self.assertRaises(ValueError):
+                tenant_s3_key("cm", *parts)
+
+    def test_the_folder_is_a_valid_slug(self):
+        for slug in ("", "CM", "cm/", "../cm", "cm_x", "-cm", new_id(Cat.TENANT)):
+            with self.subTest(slug=slug), self.assertRaises(ValueError):
+                tenant_s3_prefix(slug)
+
+    def test_key_length_is_checked(self):
+        with self.assertRaises(ValueError):
+            tenant_s3_key("cm", "a" * 1020)
 
 
 if __name__ == "__main__":
