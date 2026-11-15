@@ -1,0 +1,429 @@
+# Questionnaire for Smart Running: the source of questions-for-marc.html.
+# Each question feeds one section of the TA brief (ta-training-adherence.skill.md) and shows our first
+# answer as an example. `feeds` lists the draft brief items the answer confirms or changes; `note` is
+# internal (hidden when the form's "internal notes" switch is off, never in the saved .txt file).
+# `id` is stable: the form keeps answers under it, so never renumber or reuse one.
+# section: purpose | scope | outcome | must_do | must_never | collide | boundaries | users | scenarios |
+#          examples | limits | setup (pilot set-up, not a brief section)
+format: rudi-questionnaire@1
+brief: ta-training-adherence
+for: Smart Running
+version: 2
+
+questions:
+  - id: q1
+    section: purpose
+    feeds: []
+    en:
+      question: Why should your runners have Rudi next to the app and their coach? One or two sentences.
+      example: >-
+        Runners don't quit a plan in one go; they drift off it. Rudi should notice the first skipped
+        session, before it becomes a skipped week.
+    nl:
+      question: Waarom zouden je lopers Rudi naast de app en hun coach moeten hebben? Eén of twee zinnen.
+      example: >-
+        Lopers stoppen niet in één keer met een schema; ze drijven ervan weg. Rudi moet de eerste
+        overgeslagen training opmerken, voor ze een overgeslagen week wordt.
+
+  - id: q2
+    section: scope
+    feeds: [K9]
+    en:
+      question: >-
+        Who joins the pilot, and where are they in their plan when they start? How long does the pilot run?
+      example: >-
+        15 runners, most of them first-time marathoners, starting in week 4 of a 16-week plan. The pilot
+        runs 8 weeks.
+    nl:
+      question: >-
+        Wie doet mee aan de pilot, en waar zitten ze in hun schema als ze starten? Hoelang loopt de pilot?
+      example: >-
+        15 lopers, de meesten lopen hun eerste marathon, ze starten in week 4 van een schema van 16 weken.
+        De pilot loopt 8 weken.
+
+  - id: q3
+    section: scope
+    feeds: [B13]
+    en:
+      question: Which language should Rudi write in? Do your runners expect "je" or "u"?
+      example: Flemish Dutch with "je". Two runners prefer English.
+    nl:
+      question: In welke taal moet Rudi schrijven? Verwachten je lopers "je" of "u"?
+      example: Vlaams, met "je". Twee lopers willen liever Engels.
+
+  - id: q4
+    section: outcome
+    feeds: [O1, O2]
+    en:
+      question: After the pilot, what would make you say "this works"? Use numbers where you can.
+      example: >-
+        Runners complete at least 85% of their planned sessions (today about 70%), and 12 of the 15 still
+        answer Rudi in the last week.
+    nl:
+      question: Wanneer zeg je na de pilot "dit werkt"? Gebruik cijfers waar het kan.
+      example: >-
+        Lopers doen minstens 85% van hun geplande trainingen (vandaag ongeveer 70%), en 12 van de 15
+        antwoorden Rudi nog in de laatste week.
+
+  - id: q5
+    section: outcome
+    feeds: [O1, O3, O4]
+    en:
+      question: If the pilot goes well, what does a runner say about Rudi at the end?
+      example: '"Someone noticed when I skipped, and I never felt judged."'
+    nl:
+      question: Als de pilot goed loopt, wat zegt een loper op het einde over Rudi?
+      example: '"Iemand merkte het op als ik oversloeg, en ik voelde me nooit veroordeeld."'
+
+  - id: q6
+    section: must_do
+    feeds: [B16, B1, B2, K3]
+    en:
+      question: >-
+        The training-day check-in: when should it arrive, what should it say, and what time is too early or
+        too late for a message?
+      example: >-
+        Two hours after the planned time, or at 20:00 when no time is planned. Never on a rest day, never
+        before 7:00 or after 21:30. It names the session: "How did the 8 km easy run go?"
+      note: >-
+        This answer sets the rules for schedule-driven check-ins and the wording of a training-day
+        template. Proactive outreach is approved: outside the 24-hour window the check-in goes out as an
+        approved template, and new templates are approved quickly (K3).
+    nl:
+      question: >-
+        De check-in op een trainingsdag: wanneer moet die komen, wat moet erin staan, en welk uur is te
+        vroeg of te laat voor een bericht?
+      example: >-
+        Twee uur na het geplande uur, of om 20:00 als er geen uur gepland is. Nooit op een rustdag, nooit
+        voor 7:00 of na 21:30. Hij noemt de training: "Hoe ging de rustige 8 km?"
+      note: >-
+        Dit antwoord bepaalt de regels voor check-ins op basis van het schema en de tekst van een sjabloon
+        voor trainingsdagen. Proactief contact is goedgekeurd: buiten het venster van 24 uur gaat de
+        check-in uit als goedgekeurd sjabloon, en nieuwe sjablonen worden snel goedgekeurd (K3).
+
+  - id: q7
+    section: must_do
+    feeds: [B3, B15]
+    en:
+      question: A runner reports a session done. What should Rudi do?
+      example: One line of credit that names what they did, then the next session. No questions about pace.
+    nl:
+      question: Een loper meldt dat een training gedaan is. Wat moet Rudi doen?
+      example: Eén regel erkenning die benoemt wat die deed, dan de volgende training. Geen vragen over tempo.
+
+  - id: q8
+    section: must_do
+    feeds: [B4, B5]
+    en:
+      question: A runner missed a session. What should Rudi do?
+      example: >-
+        Ask once what got in the way, then help them fix a moment for the next session. Never suggest
+        making up the missed one.
+    nl:
+      question: Een loper miste een training. Wat moet Rudi doen?
+      example: >-
+        Eén keer vragen wat in de weg zat, dan helpen een moment voor de volgende training vast te leggen.
+        Nooit voorstellen om de gemiste in te halen.
+
+  - id: q9
+    section: must_do
+    feeds: [B7, L1]
+    en:
+      question: What may Rudi suggest to get a runner out of the door? List what's fine, and what isn't.
+      example: >-
+        Fine: kit ready the night before, a fixed time, a running partner, a podcast. Not fine: "just run
+        10 minutes", because that changes the session.
+    nl:
+      question: >-
+        Wat mag Rudi voorstellen om een loper de deur uit te krijgen? Zet erbij wat goed is en wat niet.
+      example: >-
+        Goed: kleren de avond voordien klaarleggen, een vast uur, een loopmaatje, een podcast. Niet goed:
+        "loop gewoon 10 minuten", want dat verandert de training.
+
+  - id: q10
+    section: must_never
+    feeds: [N4, N8, N10, N11]
+    en:
+      question: >-
+        What must Rudi never say or do with your runners? One thing per line. Mark the ones where once is
+        already too often.
+      example: >-
+        Never say a slow run doesn't count. Never compare a runner with others. Never mention weight. Never
+        tell someone to run with pain (once is too often).
+      note: >-
+        "Once is too often" becomes a violation (stops the case); the rest become defects.
+    nl:
+      question: >-
+        Wat mag Rudi nooit zeggen of doen bij je lopers? Eén ding per regel. Duid aan waar één keer al te
+        veel is.
+      example: >-
+        Nooit zeggen dat een trage loop niet telt. Nooit een loper met anderen vergelijken. Nooit over
+        gewicht beginnen. Nooit zeggen dat iemand met pijn moet lopen (één keer is al te veel).
+      note: >-
+        "Eén keer is al te veel" wordt een overtreding (stopt de case); de rest wordt een fout.
+
+  - id: q11
+    section: collide
+    feeds: [R1, B6, B7, B8, N5]
+    en:
+      question: >-
+        A runner wants to skip, and the schedule says run. Step by step, what should Rudi do, and when does
+        the runner's decision win?
+      example: >-
+        Ask once why. If it's motivation or weather, offer one way to get started. If they still want to
+        skip, accept it in one sentence and talk about the next session.
+    nl:
+      question: >-
+        Een loper wil overslaan, en het schema zegt lopen. Wat moet Rudi stap voor stap doen, en wanneer
+        wint de beslissing van de loper?
+      example: >-
+        Eén keer vragen waarom. Is het motivatie of het weer, één manier aanbieden om te starten. Wil die
+        nog altijd overslaan, het in één zin aanvaarden en over de volgende training praten.
+
+  - id: q12
+    section: collide
+    feeds: [R3, N1, L2]
+    en:
+      question: >-
+        A runner wants to move a session to another day. Who decides, and can the runner do it in the app
+        themselves?
+      example: >-
+        Runners may move a session within the same week in the app. Rudi may remind them of that, but never
+        picks the day.
+    nl:
+      question: >-
+        Een loper wil een training naar een andere dag verplaatsen. Wie beslist, en kan de loper dat zelf in
+        de app?
+      example: >-
+        Lopers mogen een training binnen dezelfde week verplaatsen in de app. Rudi mag hen daaraan
+        herinneren, maar kiest nooit de dag.
+
+  - id: q13
+    section: collide
+    feeds: [R4, N9]
+    en:
+      question: >-
+        A runner did more than planned: extra kilometres, an extra session, a faster pace. How should Rudi
+        react?
+      example: Credit the planned run, don't praise the extra, and ask them to mention it to the coach.
+    nl:
+      question: >-
+        Een loper deed meer dan gepland: extra kilometers, een extra training, een sneller tempo. Hoe moet
+        Rudi reageren?
+      example: De geplande loop erkennen, het extra niet prijzen, en vragen het aan de coach te melden.
+
+  - id: q14
+    section: boundaries
+    feeds: [B9, L2, L4, N10]
+    en:
+      question: Who adjusts the plan, and how does a runner reach them? How quickly do they answer?
+      example: >-
+        Only the coach adjusts the plan. Runners message their coach in the app; the coach answers within a
+        day.
+    nl:
+      question: Wie past het schema aan, en hoe bereikt een loper die persoon? Hoe snel komt er antwoord?
+      example: >-
+        Alleen de coach past het schema aan. Lopers sturen hun coach een bericht in de app; de coach
+        antwoordt binnen een dag.
+
+  - id: q15
+    section: boundaries
+    feeds: [B10, B11, L4]
+    en:
+      question: When should the human coach take over from Rudi? List the situations.
+      example: Any pain; two missed sessions in a row; a runner who says they want to quit.
+    nl:
+      question: Wanneer moet de menselijke coach het van Rudi overnemen? Zet de situaties op een rij.
+      example: Elke pijn; twee gemiste trainingen na elkaar; een loper die zegt te willen stoppen.
+
+  - id: q16
+    section: boundaries
+    feeds: [B10, R2, N2, N3, L3, K11]
+    en:
+      question: >-
+        Pain, injury or illness: what should Rudi say? And should the coach hear about it from us, or from
+        the runner?
+      example: >-
+        Rudi says: "Don't decide this alone; message your coach before your next run." The runner tells the
+        coach themselves.
+      note: >-
+        If Smart Running wants Rudi to tell the coach directly, that is a back-end skill this pilot adds (a
+        coach hand-over, K11). It carries health data to a third party, so it needs the runner's explicit
+        consent and a data-processing agreement first.
+    nl:
+      question: >-
+        Pijn, een blessure of ziekte: wat moet Rudi zeggen? En moet de coach het van ons horen, of van de
+        loper?
+      example: >-
+        Rudi zegt: "Beslis dit niet alleen; stuur je coach een bericht voor je volgende loop." De loper
+        licht de coach zelf in.
+      note: >-
+        Als Smart Running wil dat Rudi de coach rechtstreeks inlicht, is dat een back-endvaardigheid die deze
+        pilot toevoegt (een overdracht aan de coach, K11). Ze brengt gezondheidsgegevens naar een derde
+        partij, dus eerst zijn de uitdrukkelijke toestemming van de loper en een verwerkersovereenkomst
+        nodig.
+
+  - id: q17
+    section: boundaries
+    feeds: [L5, N14, R8]
+    en:
+      question: >-
+        Which warning signs during or after a run should make Rudi stop coaching and point to a doctor or
+        112?
+      example: >-
+        Chest pain or pressure, fainting or nearly fainting, a racing or skipping heart, severe
+        breathlessness, confusion in the heat.
+    nl:
+      question: >-
+        Welke waarschuwingssignalen tijdens of na een loop moeten Rudi doen stoppen met coachen en
+        doorverwijzen naar een arts of 112?
+      example: >-
+        Pijn of druk op de borst, flauwvallen of bijna flauwvallen, een hart dat raast of overslaat,
+        ernstige kortademigheid, verwardheid in de hitte.
+
+  - id: q18
+    section: boundaries
+    feeds: [L1, L2, L3, N6, N11]
+    en:
+      question: Which general running questions may Rudi answer himself, and which go to the coach?
+      example: >-
+        Rudi may: what to wear in the rain, warming up, sleep before a long run. Coach: pace, heart rate,
+        food, gels, weight.
+    nl:
+      question: Welke algemene loopvragen mag Rudi zelf beantwoorden, en welke gaan naar de coach?
+      example: >-
+        Rudi mag: wat je aantrekt in de regen, opwarmen, slaap voor een lange duurloop. Coach: tempo,
+        hartslag, eten, gels, gewicht.
+
+  - id: q19
+    section: users
+    feeds: [P1, P2, P3, P4, P5, P6, P7, P8, P9]
+    en:
+      question: >-
+        Describe three to five types of runner in the pilot, without real names. For each: how they answer
+        a check-in, what makes them skip, how they push back, what they only tell when asked, and what would
+        win them over.
+      example: >-
+        The busy parent: answers late at night, skips when work runs late, apologises a lot, only has time
+        before 7:00. Won over when Rudi helps them find a fixed early slot without guilt.
+    nl:
+      question: >-
+        Beschrijf drie tot vijf types lopers in de pilot, zonder echte namen. Per type: hoe ze op een
+        check-in antwoorden, waardoor ze overslaan, hoe ze zich verzetten, wat ze pas vertellen als je het
+        vraagt, en waarmee je ze wint.
+      example: >-
+        De drukke ouder: antwoordt laat op de avond, slaat over als het werk uitloopt, verontschuldigt zich
+        veel, heeft alleen tijd voor 7:00. Gewonnen als Rudi zonder schuldgevoel helpt een vast vroeg moment
+        te vinden.
+
+  - id: q20
+    section: scenarios
+    feeds: []
+    en:
+      question: >-
+        Describe the five moments you most want Rudi to get right: what just happened, what the runner
+        writes (in your own words), and what a good outcome looks like.
+      example: >-
+        Sunday, long run planned. At eleven the runner writes they're too tired after a party. Good: no
+        lecture, one question about what's behind it, accept their decision, then on to Tuesday's session.
+    nl:
+      question: >-
+        Beschrijf de vijf momenten die Rudi zeker juist moet aanpakken: wat er net gebeurde, wat de loper
+        schrijft (in je eigen woorden), en hoe een goede afloop eruitziet.
+      example: >-
+        Zondag, lange duurloop gepland. Om elf uur schrijft de loper dat die te moe is na een feestje. Goed:
+        geen preek, één vraag over wat erachter zit, de beslissing aanvaarden, dan door naar de training van
+        dinsdag.
+
+  - id: q21
+    section: examples
+    feeds: []
+    en:
+      question: For three of those moments, write one reply you'd love Rudi to send and one you'd hate.
+      example: >-
+        Love: "No sorry needed, days like this happen. What got in the way most today?" Hate: "Shame! Your
+        plan only works if you follow it."
+    nl:
+      question: >-
+        Schrijf voor drie van die momenten één antwoord dat je Rudi graag zou zien sturen, en één dat je zou
+        haten.
+      example: >-
+        Graag: "Geen sorry nodig, zulke dagen zijn er. Wat zat er vandaag het meest in de weg?" Haten:
+        "Jammer! Je schema werkt alleen als je het volgt."
+
+  - id: q22
+    section: limits
+    feeds: [K1, B1, B2]
+    en:
+      question: >-
+        What does a runner's schedule look like, and how can it reach Rudi: who sends it (Smart Running,
+        the coach or the runner), and how? What happens when the coach changes it?
+      example: >-
+        Per session: date, type (easy, tempo, intervals, long run, rest), distance or duration, target pace.
+        We export a PDF per runner from the app each week and send it to Rudi's e-mail address; when the
+        coach changes the plan, the new export goes out the same day.
+      note: >-
+        Rudi can receive documents three ways: a file shared by link, an API call, or a dedicated e-mail
+        address. Reading the schedule from it (PDF, CSV or app export) is the back-end skill this pilot
+        adds (schedule intake, K1). Any of the three works; the answer decides which one we build on first.
+    nl:
+      question: >-
+        Hoe ziet het schema van een loper eruit, en hoe kan het bij Rudi komen: wie stuurt het (Smart
+        Running, de coach of de loper), en hoe? Wat gebeurt er als de coach het wijzigt?
+      example: >-
+        Per training: datum, type (rustig, tempo, intervallen, lange duurloop, rust), afstand of duur,
+        doeltempo. We exporteren elke week per loper een pdf uit de app en mailen die naar het e-mailadres
+        van Rudi; wijzigt de coach het schema, dan gaat de nieuwe export dezelfde dag uit.
+      note: >-
+        Rudi kan documenten op drie manieren ontvangen: een bestand gedeeld via een link, een API-oproep, of
+        een eigen e-mailadres. Het schema daaruit lezen (pdf, csv of export uit de app) is de
+        back-endvaardigheid die deze pilot toevoegt (schema-invoer, K1). Alle drie werken; het antwoord
+        bepaalt op welke we eerst bouwen.
+
+  - id: q23
+    section: setup
+    feeds: [B14]
+    en:
+      question: >-
+        How will runners be invited, and who tells them that Rudi is an AI coach who writes to them on
+        training days?
+      example: >-
+        We e-mail the pilot runners a short explanation and Rudi's number; a runner joins by sending Rudi a
+        first message.
+      note: >-
+        Consent comes first: runners agree to the check-ins and to Rudi seeing their schedule before Rudi's
+        first message.
+    nl:
+      question: >-
+        Hoe worden lopers uitgenodigd, en wie vertelt hen dat Rudi een AI-coach is die hen op trainingsdagen
+        schrijft?
+      example: >-
+        We mailen de pilotlopers een korte uitleg en het nummer van Rudi; een loper doet mee door Rudi een
+        eerste bericht te sturen.
+      note: >-
+        Toestemming komt eerst: lopers gaan akkoord met de check-ins en met Rudi die hun schema ziet, voor
+        Rudi's eerste bericht.
+
+  - id: q24
+    section: setup
+    feeds: [K10]
+    en:
+      question: >-
+        Will runners want to send Rudi things in the chat, such as a screenshot of their week or the PDF
+        from the app? Should Rudi use them?
+      example: >-
+        Yes: some runners will send a screenshot of the week. Rudi may use it to know the sessions, but the
+        plan from the app stays the reference.
+      note: >-
+        Reading files and screenshots sent in the chat is a back-end skill this pilot would add, on top of
+        the schedule intake (K10).
+    nl:
+      question: >-
+        Zullen lopers Rudi dingen willen sturen in de chat, zoals een screenshot van hun week of de pdf uit
+        de app? Moet Rudi die gebruiken?
+      example: >-
+        Ja: sommige lopers sturen een screenshot van hun week. Rudi mag die gebruiken om de trainingen te
+        kennen, maar het schema uit de app blijft de referentie.
+      note: >-
+        Bestanden en screenshots uit de chat lezen is een back-endvaardigheid die deze pilot zou toevoegen,
+        bovenop de schema-invoer (K10).
