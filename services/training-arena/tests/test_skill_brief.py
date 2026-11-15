@@ -181,13 +181,13 @@ class FakeBriefClaude:
                 if not m:
                     continue
                 checks = re.search(r"checks: ([A-Z0-9, ]+)", block).group(1).split(", ")
-                out.append(self.case(int(m.group(1)), m.group(2), m.group(3), checks))
+                out.append(self.make_case(int(m.group(1)), m.group(2), m.group(3), checks))
             return json.dumps({"cases": out}), {}
         if "rejected these cases" in prompt:
             out = []
-            for slot, case in re.findall(r"slot (\d+) — the arena's validator says:.*?current case:\n(\{.*?\})(?:\n\n|\n*Criteria|\n*Rules)", prompt, re.S):
+            for slot, case_json in re.findall(r"slot (\d+) — the arena's validator says:.*?current case:\n(\{.*?\})(?:\n\n|\n*Criteria|\n*Rules)", prompt, re.S):
                 first = self.first.get(int(slot), "B1")
-                c = json.loads(case.replace("[X99]", "[%s]" % first))
+                c = json.loads(case_json.replace("[X99]", "[%s]" % first))
                 c["slot"] = int(slot)
                 c["expect"] = ["[%s] Rudi does what the brief asks here." % first]
                 if c.get("success_when"):
@@ -198,7 +198,7 @@ class FakeBriefClaude:
 
     first = {}
 
-    def case(self, slot, mode, lang, checks):
+    def make_case(self, slot, mode, lang, checks):
         self.first[slot] = checks[0]
         cite = "" if slot in self.bare else "[X99] " if slot in self.cite_unknown else "[%s] " % checks[0]
         base = {"slot": slot, "key": "%s-case-%d" % (lang, slot), "title": "Case %d" % slot, "tags": ["t"]}
@@ -266,9 +266,9 @@ class BriefModeTests(unittest.TestCase):
     def test_a_criterion_must_be_a_sentence_with_only_ids_in_brackets(self):
         sp = bspec()
         row = {"slot": 3, "mode": "scripted", "lang": "en", "scenario": "S2", "user": "P2", "persona": "p2-en"}
-        case = {"script": ["Help me eat less bread", {"text": "That won't work", "expect": "B1"}],
+        test_case = {"script": ["Help me eat less bread", {"text": "That won't work", "expect": "B1"}],
                 "expect": ["[doubt-handling][B1] Rudi asks why before the next tip."]}
-        msgs = " | ".join(gen_core.brief_checks(case, row, sp))
+        msgs = " | ".join(gen_core.brief_checks(test_case, row, sp))
         self.assertIn("criterion “B1” is not a sentence", msgs)
         self.assertIn("starts with [doubt-handling], which is not an ID of the brief", msgs)
         good = {"script": ["Help me eat less bread", {"text": "That won't work", "expect": "[B1] Rudi asks what makes them doubt it."}],

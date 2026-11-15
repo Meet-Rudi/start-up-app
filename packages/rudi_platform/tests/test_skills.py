@@ -80,9 +80,9 @@ class Manifests(unittest.TestCase):
             raw("d", data_classes=["biometric"]),
             raw("d", format="rudi-skill@2"),
         ]
-        for case in cases:
-            with self.subTest(case=case), self.assertRaises(ManifestError):
-                parse_manifest(case)
+        for manifest in cases:
+            with self.subTest(manifest=manifest), self.assertRaises(ManifestError):
+                parse_manifest(manifest)
 
     def test_settings_and_sections(self):
         with self.assertRaises(ManifestError):

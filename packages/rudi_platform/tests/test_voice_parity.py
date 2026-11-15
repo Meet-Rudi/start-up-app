@@ -208,8 +208,8 @@ START = datetime.datetime(2026, 11, 3, 16, 0, tzinfo=datetime.UTC)
 class Call:
     """One call, played through the live ws/brain path and the platform side by side."""
 
-    def __init__(self, case: unittest.TestCase, config: dict):
-        self.case, self.config = case, config
+    def __init__(self, test_case: unittest.TestCase, config: dict):
+        self.test_case, self.config = test_case, config
         self.engine = _engine()
         self.schema = self.engine.clone.memory_schema("voice")
         self.manifest = {"call_id": "call_parity", "config": config}
@@ -217,7 +217,7 @@ class Call:
         self.steps = 0
 
     def _compare_prompts(self, where):
-        c = self.case
+        c = self.test_case
         c.assertEqual(SCRIPT.legacy_sent is None, SCRIPT.platform_sent is None, where)
         if SCRIPT.legacy_sent is None:
             return
@@ -231,7 +231,7 @@ class Call:
 
     def _compare_state(self, live: dict, mine, where):
         flat = to_flat(mine, self.schema)
-        c = self.case
+        c = self.test_case
         for key, value in live.items():
             c.assertEqual(value, flat.get(key), f"{where}: state[{key!r}]")
         for key in set(flat) - set(live) - PLATFORM_ONLY:
@@ -251,7 +251,7 @@ class Call:
         spoken = ws._restore_outbound(self.manifest, reply)
         out = voice.open_call(self.engine, self.config, self.vault, now=now)
         self._compare_prompts(where)
-        c = self.case
+        c = self.test_case
         c.assertEqual(reply, out.reply_masked, where)
         c.assertEqual(spoken, out.reply, where)
         c.assertEqual(info["phase"], out.stage, where)
@@ -279,7 +279,7 @@ class Call:
             elapsed_s=elapsed_s, now=now,
         )  # fmt: skip
         self._compare_prompts(where)
-        c = self.case
+        c = self.test_case
         if SCRIPT.legacy_sent is not None:  # a turn needs the reply envelope
             c.assertTrue(SCRIPT.legacy_require_reply, where)
         c.assertEqual(transcript, out.masked_inbound, where)
@@ -302,12 +302,12 @@ class Call:
         transcript = ws._scrub_inbound(
             self.manifest, said, self.config.get("language", "en")
         )
-        with self.case.assertRaises(LEGACY.brain.gateway.AIError):
+        with self.test_case.assertRaises(LEGACY.brain.gateway.AIError):
             LEGACY.brain.turn(
                 self.live_state, transcript, ws._model_config(self.manifest, self.config),
                 elapsed_s=elapsed_s, now=now,
             )  # fmt: skip
-        with self.case.assertRaises(PlatformAIError):
+        with self.test_case.assertRaises(PlatformAIError):
             voice.call_turn(
                 self.engine, self.state, said, self.config, self.vault,
                 elapsed_s=elapsed_s, now=now,

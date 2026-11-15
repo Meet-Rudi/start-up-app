@@ -345,9 +345,9 @@ def brief_write_prompt(spec, rows, personas):
 
 def repair_prompt(spec, failing):
     parts = []
-    for slot, case, messages in failing:
+    for slot, test_case, messages in failing:
         parts.append("slot %d — the arena's validator says:\n%s\ncurrent case:\n%s" % (
-            slot, "\n".join("- " + m for m in messages), json.dumps(case, ensure_ascii=False)))
+            slot, "\n".join("- " + m for m in messages), json.dumps(test_case, ensure_ascii=False)))
     return "\n\n".join([
         context(spec),
         "TASK: the arena's validator rejected these cases. Return each corrected, with the same slot, mode, language and "
@@ -486,36 +486,36 @@ def normalize_brief_case(c, row, spec):
     return out
 
 
-def _criteria(case):
-    texts = list(case.get("expect") or []) if isinstance(case.get("expect"), list) else [case.get("expect") or ""]
-    texts += [m["expect"] for m in case.get("script") or [] if isinstance(m, dict) and m.get("expect")]
-    texts += [case.get(k) or "" for k in ("success_when", "abort_when")]
+def _criteria(test_case):
+    texts = list(test_case.get("expect") or []) if isinstance(test_case.get("expect"), list) else [test_case.get("expect") or ""]
+    texts += [m["expect"] for m in test_case.get("script") or [] if isinstance(m, dict) and m.get("expect")]
+    texts += [test_case.get(k) or "" for k in ("success_when", "abort_when")]
     return [t for t in texts if t]
 
 
-def _cited(case):
-    return set(i for t in _criteria(case) for i in re.findall(r"\[([A-Z]\d{1,3})\]", t))
+def _cited(test_case):
+    return set(i for t in _criteria(test_case) for i in re.findall(r"\[([A-Z]\d{1,3})\]", t))
 
 
 LEAD = re.compile(r"^((?:\s*\[[^\]]*\])*)\s*(.*)$", re.S)
 
 
-def brief_checks(case, row, spec):
+def brief_checks(test_case, row, spec):
     """A brief's case must be judged, and its criteria must cite the brief: the scenario's checks."""
     msgs = []
     if row["mode"] == "scripted":
-        if len(case.get("script") or []) < 2:
+        if len(test_case.get("script") or []) < 2:
             msgs.append("a scripted case needs at least 2 messages in “script”")
-        if not case.get("expect") and not any(isinstance(m, dict) and m.get("expect") for m in case.get("script") or []):
+        if not test_case.get("expect") and not any(isinstance(m, dict) and m.get("expect") for m in test_case.get("script") or []):
             msgs.append("a scripted case needs criteria in “expect”")
     else:
-        if row["mode"] == "hybrid" and not case.get("script"):
+        if row["mode"] == "hybrid" and not test_case.get("script"):
             msgs.append("a hybrid case needs one or two opening messages in “script”")
-        if not case.get("objective"):
+        if not test_case.get("objective"):
             msgs.append("a goal case needs “objective”")
-        if not case.get("success_when"):
+        if not test_case.get("success_when"):
             msgs.append("a goal case needs “success_when”")
-    for t in _criteria(case):
+    for t in _criteria(test_case):
         m = LEAD.match(t.strip())
         tags = [x.strip() for x in re.findall(r"\[([^\]]*)\]", m.group(1))]
         short = t if len(t) <= 60 else t[:57] + "…"
@@ -525,7 +525,7 @@ def brief_checks(case, row, spec):
         if len(m.group(2).split()) < 4:
             msgs.append("criterion “%s” is not a sentence: after its IDs, write what Rudi must do" % short)
     items = spec["brief"]["items"]
-    cited = _cited(case)
+    cited = _cited(test_case)
     unknown = sorted(i for i in cited if i not in items)
     if unknown:
         msgs.append("the criteria cite %s, which %s not in the brief" % (", ".join(unknown), "is" if len(unknown) == 1 else "are"))
@@ -559,20 +559,20 @@ def normalize_case(c, row):
     return out
 
 
-def own_checks(case, row):
+def own_checks(test_case, row):
     """What the format allows but a skill test needs: a judged expectation on every case."""
     msgs = []
     if row["mode"] == "scripted":
-        if len(case.get("script") or []) < 2:
+        if len(test_case.get("script") or []) < 2:
             msgs.append("a scripted case needs 2 to 5 messages in “script”")
-        if not case.get("expect"):
+        if not test_case.get("expect"):
             msgs.append("a scripted case needs “expect”: what Rudi must do for it to pass")
     else:
-        if row["mode"] == "hybrid" and not case.get("script"):
+        if row["mode"] == "hybrid" and not test_case.get("script"):
             msgs.append("a hybrid case needs one or two opening messages in “script”")
-        if not case.get("objective"):
+        if not test_case.get("objective"):
             msgs.append("a goal case needs “objective”")
-        if not case.get("success_when"):
+        if not test_case.get("success_when"):
             msgs.append("a goal case needs “success_when”")
     return msgs
 

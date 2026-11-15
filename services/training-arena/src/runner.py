@@ -737,7 +737,7 @@ class CaseRun:
         err_codes = {}
         for e in cp["errors"]:
             err_codes[e["code"]] = err_codes.get(e["code"], 0) + 1
-        case = {"id": cp["case_id"], "key": spec["key"], "title": spec.get("title") or "", "mode": spec["mode"],
+        case_record = {"id": cp["case_id"], "key": spec["key"], "title": spec.get("title") or "", "mode": spec["mode"],
                 "channel": "chat", "locale": {"requested": spec["locale"], "detected": cp["lang"]},
                 "persona": {"id": persona.get("id"), "display_name": persona.get("display_name")} if persona else {},
                 "rudi": {"engine": "live", "personality": (spec.get("rudi") or {}).get("personality") or "default"},
@@ -758,7 +758,7 @@ class CaseRun:
                "tokens": cp["tokens"], "tags": spec.get("tags") or [], "finished_at": finished,
                "cost_models": cp.get("cost_models") or {},
                "engine": {"release": (cp["engine"] or {}).get("release"), "assets": (cp["engine"] or {}).get("assets") or {}}}
-        return {"case": case, "result": result, "transcript": cp["transcript"], "row": row}
+        return {"case": case_record, "result": result, "transcript": cp["transcript"], "row": row}
 
     def _notify(self, row):
         self.d.notify({"type": "finished", "batch": self.bid, "seq": self.seq, "attempt": self.attempt, "row": row})

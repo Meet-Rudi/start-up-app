@@ -214,8 +214,8 @@ def at(minutes: float) -> datetime.datetime:
 class Conversation:
     """One conversation played through both engines side by side."""
 
-    def __init__(self, case: unittest.TestCase, persona: str = "", tz: str = ""):
-        self.case = case
+    def __init__(self, test_case: unittest.TestCase, persona: str = "", tz: str = ""):
+        self.test_case = test_case
         self.engine, self.schema = _platform()
         self.persona, self.tz = persona, tz
         self.legacy_state: dict = {}
@@ -237,7 +237,7 @@ class Conversation:
             channel="whatsapp", locale=locale, tz=self.tz, now=at(minutes),
             persona_key=self.persona, redacted="[{} removed]",
         )  # fmt: skip
-        c = self.case
+        c = self.test_case
         c.assertIsNone(out.halt, where)
         c.assertEqual(
             (SCRIPT.legacy_sent is None), (SCRIPT.platform_sent is None), where

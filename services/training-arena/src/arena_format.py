@@ -284,11 +284,11 @@ class Validator:
     def _budget(self, header):
         b = self.b
         batch = (header.get("batch") or {}).get("max_cost_eur")
-        case = ((header.get("defaults") or {}).get("limits") or {}).get("max_cost_eur")
+        case_cap = ((header.get("defaults") or {}).get("limits") or {}).get("max_cost_eur")
         return {"batch": float(batch) if _num(batch) else float(b["batch_default"]),
                 "batch_src": "the file" if _num(batch) else "arena default",
-                "case": float(case) if _num(case) else float(b["case_default"]),
-                "case_src": "the file" if _num(case) else "arena default"}
+                "case": float(case_cap) if _num(case_cap) else float(b["case_default"]),
+                "case_src": "the file" if _num(case_cap) else "arena default"}
 
     # -- case -----------------------------------------------------------------------------------
     def _case(self, line, doc, header, seq, seen):

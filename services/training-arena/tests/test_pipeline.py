@@ -160,9 +160,9 @@ class EndToEndTests(unittest.TestCase):
         code, url = w.call("GET", "/batches/%s/files/%s" % (bid, part), token=tok)
         self.assertEqual(code, 200)
         self.assertIn("signed.example", url["url"])
-        code, case = w.call("GET", "/cases/%s-0002" % bid, token=tok)
-        self.assertEqual(case["case"]["outcome"], "completed")
-        self.assertEqual(case["case"]["tx"][0]["f"], "r")
+        code, case_doc = w.call("GET", "/cases/%s-0002" % bid, token=tok)
+        self.assertEqual(case_doc["case"]["outcome"], "completed")
+        self.assertEqual(case_doc["case"]["tx"][0]["f"], "r")
         code, dash = w.call("GET", "/dashboard", token=tok, query={"days": "7"})
         today = dash["daily"][-1]
         self.assertEqual(today["total"], 5)
