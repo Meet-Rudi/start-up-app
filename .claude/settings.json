@@ -21,7 +21,11 @@
       "Bash(python -m py_compile deploy.py)",
       "Bash(python -m py_compile services/call/src/*.py)",
       "Bash(python -m py_compile services/call/src/dispatcher.py)",
-      "Bash(python -m unittest discover -s services/call/tests)"
+      "Bash(python -m unittest discover -s services/call/tests)",
+      "WebFetch(domain:cloud.ionos.com)",
+      "WebFetch(domain:nebius.com)",
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(aws bedrock *)"
     ]
   }
 }
