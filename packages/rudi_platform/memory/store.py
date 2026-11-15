@@ -7,8 +7,9 @@ Implementations:
 
   - InMemoryConversationStore (here): tests and local runs.
   - LegacyS3ConversationStore (legacy_s3.py): CM's `conversations/{uid}/meta.json`, so the
-    platform engine can run CM before Postgres exists.
-  - Postgres: the record, once PlanetScale is live (USER-TODO #3).
+    platform engine can run CM before the platform database is live.
+  - PlanetScale (Vitess): the record, once live (USER-TODO #3), through the tenant guard
+    (rudi_platform.db.TenantBound, decision #47).
 
 Keys are opaque to the engine. For CM's legacy store a key is the legacy `wa_…` pseudonym; on the
 platform it will be the `cnv_` id.

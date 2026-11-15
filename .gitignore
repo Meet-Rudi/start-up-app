@@ -44,6 +44,9 @@ services/tts/layer/
 services/training-arena/layer/
 services/call/layer/
 services/whatsapp/layer/
+services/db-migrate/layer/
+# Migrations prepared for the PlanetScale console (db/console_sql.py): ids minted per file
+db/console/
 services/tts/.voice-cache/
 services/tts/.token
 

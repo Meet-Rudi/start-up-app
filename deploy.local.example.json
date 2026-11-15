@@ -11,8 +11,15 @@
     "rather than half-working.",
     "",
     "No secrets here, ever. The admin password and the call dispatch token live in Secrets",
-    "Manager and are read by the Lambda at runtime; they are never passed as parameters."
+    "Manager and are read by the Lambda at runtime; they are never passed as parameters.",
+    "",
+    "planetscale_*: where the platform database is (PlanetScale Vitess, MySQL 8), for",
+    "`python deploy.py db-migrate`. The database is the PlanetScale database's name. The user",
+    "and password stay in Secrets Manager (meetrudi/planetscale-backbone/...)."
   ],
+  "planetscale_host": "your-database-host.example.com",
+  "planetscale_port": "3306",
+  "planetscale_database": "your-planetscale-database-name",
   "tester_console_origin": "https://meet-rudi.github.io",
   "tester_console_base": "https://meet-rudi.github.io/start-up-app/tester-console",
   "tester_mail_from": "sender@example.eu",

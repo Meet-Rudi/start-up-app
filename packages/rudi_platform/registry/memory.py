@@ -2,9 +2,10 @@
 MEET_RUDI platform — InMemoryRegistryStore.
 
 The registry in a few dictionaries, for tests and local runs. It is not a mock: it enforces the
-same rules as db/migrations/0001 (row-level security as contexts, unique constraints, CHECKs and
-triggers), so code written against it behaves the same on PlanetScale. Where the two could
-differ, the contract tests in tests/test_registry.py decide.
+same rules as db/migrations/0001 (tenant isolation as contexts, unique constraints, CHECKs) and
+the rules the PlanetScale store keeps in code because Vitess has no triggers (fixed tenant slug,
+immutable published versions, append-only audit), so code written against it behaves the same
+on PlanetScale. Where the two could differ, the contract tests in tests/test_registry.py decide.
 """
 
 from __future__ import annotations

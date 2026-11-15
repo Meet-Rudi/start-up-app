@@ -2,16 +2,18 @@
 MEET_RUDI platform — the RegistryStore seam (CLAUDE.md §2).
 
 Everything the console, the router and the publishing flow need from the registry, behind one
-interface. Every call takes a context first, the application-side twin of the database's
-row-level security:
+interface. Every call takes a context first; on PlanetScale it becomes the tenant the store's
+connection is bound to (rudi_platform.db.TenantBound, decision #47):
 
   - TenantContext(ten_…) sees and writes that tenant's rows only. Another tenant's row behaves
     as if it did not exist (NotFound), and writing a row for another tenant is Forbidden.
   - PlatformContext sees everything and is the only context for platform operations: tenants,
-    cells, skill releases, accounts, roles, routing, and approving a clone version for live.
+    cells, skill releases, accounts, roles, routing, and approving a clone version for live. On
+    PlanetScale it still reads a tenant's rows tenant by tenant, with a guard bound to that
+    tenant; routing uses the guard's resolvers.
 
 Two implementations are planned: InMemoryRegistryStore (memory.py, for tests and local runs) and
-a PlanetScale Postgres store once the database exists (USER-TODO #3). tests/test_registry.py is
+a PlanetScale (Vitess) store once the database exists (USER-TODO #3). tests/test_registry.py is
 written as a contract both must pass.
 """
 

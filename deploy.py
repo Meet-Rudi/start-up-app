@@ -11,6 +11,8 @@ Components:
                                           (also seeds prompt/context/config files to S3)
     training-arena -> stack meetrudi-training-arena : the arena's bucket, queues and six functions
                                           (needs `whatsapp` deployed first, for meetrudi-engine-turn)
+    db-migrate -> stack meetrudi-internal-prod-db-migrate : the platform database's migration
+                                          runner (then: python db/migrate.py plan)
 
 Runs `sam build` (where needed) + `sam deploy` with every flag pre-filled. No manual steps.
 Deploy `base` once before `ask-ai`.
@@ -127,6 +129,22 @@ COMPONENTS = {
         "build": True,   # Plan A: Twilio ConversationRelay + API GW WebSocket, no Fargate
         # The platform Turn Engine + CM clone as a layer (packages/ copied, checked to load).
         "prebuild": "services/call/build_layer.py",
+    },
+    # Platform database migrations (decision #42): meetrudi-internal-prod-db-migrate applies
+    # db/migrations to PlanetScale. Its layer carries the runner and a copy of the migrations, so
+    # redeploy after adding one, then run `python db/migrate.py plan`.
+    "db-migrate": {
+        "stack": "meetrudi-internal-prod-db-migrate",
+        "template": "services/db-migrate/template.yaml",
+        "build": True,
+        "prebuild": "services/db-migrate/build_layer.py",
+        "params": {
+            "Release": {"from_git": True},
+            # The secrets hold only user and password; where the database is comes from here.
+            "DbHost": {"from_config": "planetscale_host"},
+            "DbPort": {"from_config": "planetscale_port"},
+            "DbName": {"from_config": "planetscale_database"},
+        },
     },
     "voice-bench": {
         "stack": "meetrudi-voice-bench",
@@ -390,6 +408,12 @@ def main():
         print("     curl -X POST <Dispatch URL> -H \"Content-Type: application/json\" ^")
         print("       -d \"{\\\"token\\\":\\\"<TOKEN>\\\",\\\"dry_run\\\":true,\\\"config\\\":{...}}\"")
         print(">> Calls land in s3://<data-bucket>/calls/<call-id>/ .")
+    elif name == "db-migrate":
+        print("Function    :", _stack_output("meetrudi-internal-prod-db-migrate", "FunctionName"))
+        print(">> Look first, then apply (each one command):")
+        print("     python db/migrate.py check      connect with each PlanetScale secret")
+        print("     python db/migrate.py plan       applied, unfinished, pending, drift")
+        print("     python db/migrate.py apply      apply pending migrations (you, not Claude)")
     elif name == "voice-bench":
         print("Function URL:", _stack_output("meetrudi-voice-bench", "FunctionUrl"))
         print("Data bucket :", _stack_output("meetrudi-base", "DataBucketName"))

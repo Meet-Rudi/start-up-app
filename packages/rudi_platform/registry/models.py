@@ -1,7 +1,9 @@
 """
 MEET_RUDI platform — what the registry stores, as the application sees it.
 
-Mirrors db/migrations/0001 (registry, access, audit schemas). Records are frozen; JSON-like
+Mirrors db/migrations/0001 (registry_*, access_control_*, audit_trail_* tables); field names may
+differ from column names, which are never SQL keywords (`name` here, `display_name` there;
+decision #43), and the PlanetScale store maps them. Records are frozen; JSON-like
 payloads (composition, journey, settings, ocean, decision) are deep-copied in and out of a store,
 so changing a returned record never changes stored data.
 """
@@ -20,13 +22,14 @@ CLONE_STAGES = ("draft", "staging", "live", "retired")
 @dataclass(frozen=True)
 class PlatformContext:
     """Platform work: console administration, the router, jobs. Sees every tenant.
-    In Postgres: SET LOCAL rudi.platform = 'on'."""
+    On PlanetScale: TenantBound.platform for the platform's own rows, a guard bound to each
+    tenant for that tenant's rows (decision #47)."""
 
 
 @dataclass(frozen=True)
 class TenantContext:
     """Work on behalf of one tenant. Sees that tenant only.
-    In Postgres: SET LOCAL rudi.tenant_id = '<ten_…>'."""
+    On PlanetScale: TenantBound(connection, tenant_id) (decision #47)."""
 
     tenant_id: str
 

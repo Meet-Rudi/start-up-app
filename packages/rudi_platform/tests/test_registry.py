@@ -3,7 +3,8 @@ The registry contract — every RegistryStore implementation must pass this file
 
 Runs against InMemoryRegistryStore today. When the PlanetScale store exists, add its factory to
 STORES (behind an environment switch, since it needs a database) and the same tests hold it to
-the same behaviour, including the tenant isolation the database enforces with row-level security.
+the same behaviour, including tenant isolation (on PlanetScale: every statement through the
+tenant guard, decision #47) and the rules Vitess cannot hold in triggers.
 
 What this guards: one tenant seeing or writing another's data, a tenant approving its own clone
 for live, a published version changing underneath running conversations, a skill released
