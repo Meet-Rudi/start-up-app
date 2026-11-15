@@ -1,7 +1,7 @@
 # CLAUDE.md — Coding Rules & Conventions for MEET_RUDI
 
 > Machine-loaded each session. The *why/what* lives in [project.md](project.md); this file is
-> the *how*. When product context is needed, read project.md. Last updated: 2026-11-05.
+> the *how*. When product context is needed, read project.md. Last updated: 2026-11-15.
 >
 > **Platform pivot (2026-10-28):** Rudi is becoming a multi-tenant conversational platform. Its
 > design is [docs/platform/blueprint.md](docs/platform/blueprint.md); its binding rules (ids,
@@ -15,8 +15,9 @@
 
 1. **No PII leaves the AWS EU plane.** The neo-cloud GPU plane and any 3rd-party AI API receive
    only **minimized, pseudonymized** payloads (opaque IDs, never names/contact/free PII).
-   *Approved exception (decision #30):* PlanetScale Postgres in eu-central-1 is the platform's
-   system of record, under its DPA and the 2021 SCCs. *Approved in principle (decision #39):*
+   *Approved exception (decision #30):* PlanetScale in eu-central-1 (Vitess, MySQL 8; decision
+   #46) is the platform's system of record, under its DPA and the 2021 SCCs. *Approved in
+   principle (decision #39):*
    Qdrant Cloud for vectors, wired in only once it is in an EU region under a signed DPA. No
    other datastore outside AWS without a new recorded decision.
 2. **Not a medical device / no medical advice.** Never produce diagnostic or treatment output.
@@ -54,6 +55,62 @@ are registered in `Cat` and in the table in
 [docs/platform/conventions.md](docs/platform/conventions.md) §1 — add a category to both in the
 same change, never rename or reuse one, and never hand-build an id string.
 
+## 0c. Tenant isolation (mandatory)
+
+Tenants are kept apart in a way a person can see, in both stores (decision #41; details in
+[conventions](docs/platform/conventions.md) §2 and §8):
+
+- **S3:** every key that holds a tenant's data sits under the tenant's folder,
+  **`tenants/{tenant-slug}/…`** (e.g. `tenants/cm/…`), in every bucket; objects of no tenant go
+  under `platform/…`. Build keys with `rudi_platform.naming.tenant_s3_key` / `platform_s3_key`,
+  never by hand. A tenant's slug is fixed at creation.
+- **PlanetScale:** every multi-tenant table has its own **`tenant_id` column**, even where a
+  parent row implies the tenant, and every index of it leads with `tenant_id`. A table without
+  one holds no tenant's data and is listed by name in
+  `packages/rudi_platform/tests/test_schema.py` and `rudi_platform.db.tenant_guard`. Vitess has
+  no row-level security: every statement names its tenant instead (§0e, hard rule).
+- Legacy: CM's keys in `meetrudi-ai-data-…` (`conversations/{uid}/…`) keep their layout until
+  CM's store is cut over, then move under `tenants/cm/`.
+
+## 0d. No name is a reserved word (mandatory)
+
+Names we create never overlap a language's keywords or reserved words (decision #43; details in
+[conventions](docs/platform/conventions.md) §7 and §8):
+
+- **SQL:** no schema, table, column, domain, function, parameter, variable, trigger, policy,
+  index, constraint or alias is a word in `rudi_platform.db.keywords` (all PostgreSQL keywords,
+  even unreserved ones like `name`, `key`, `source`, plus the SQL standard's, Oracle's, MySQL's
+  and SQL Server's reserved words). Make the name specific (`display_name`, `role_key`,
+  `occurred_at`); never quote it or add an underscore. `test_schema.py` enforces it.
+- **Python:** no bound name is a soft keyword (`match`, `case`, `type`) or shadows a builtin.
+  **Browser JS:** no top-level name that is a `window` property (`name`, `open`, `status`).
+- Exception: the existing `type` fields that name keys in stored data (CM's WhatsApp `Message`,
+  the skill manifest's `Setting`).
+
+## 0e. Every database statement names its tenant (HARD RULE)
+
+PlanetScale Vitess has no row-level security, so this rule is what keeps tenants apart in the
+database (decision #47; details in [db/README.md](db/README.md) and
+[conventions](docs/platform/conventions.md) §8). It binds **every Lambda, service, script and
+process** that reads or writes PlanetScale, with no exception for internal, platform or "one-off"
+code:
+
+- **A statement on a tenant's rows carries the tenant id as a mandatory condition:**
+  `SELECT`, `UPDATE` and `DELETE` have `tenant_id = %s`, bound to the caller's own tenant, as a
+  top-level `AND` of their `WHERE` (each tenant table of a join or subquery its own
+  `<alias>.tenant_id = %s`); an `INSERT` writes the caller's tenant into `tenant_id`.
+- **A statement without it is not handed over for processing:** it is refused *before* it is
+  sent and never reaches the database. This is enforced in code: every connection to PlanetScale
+  is wrapped in `rudi_platform.db.TenantBound` before any other code may use it, and the guard
+  raises `UnscopedStatement`. Never pass a raw connection or cursor to business logic, never
+  build a "bypass" flag, and never catch `UnscopedStatement` to retry without the condition.
+- **Platform work** names a tenant too: it runs tenant by tenant, and the platform's own rows
+  (`tenant_id` NULL) are reached with `TenantBound.platform` and `tenant_id IS NULL`.
+- **The only exceptions**, each closed and listed in code: tables holding no tenant's data
+  (`NO_TENANT_DATA`), the resolvers that find the tenant of a request arriving without one
+  (`tenant_guard.RESOLVERS`, ids only), and the migration runner, which changes the schema and
+  writes no tenant's rows. Adding to any of these lists is a decision recorded in project.md.
+
 ## 1. Languages, Repo & Layout
 
 - **Python** = AI / messaging / orchestration core. **TypeScript/JS** = front-end & ops UI.
@@ -65,14 +122,16 @@ same change, never rename or reuse one, and never hand-build an id string.
   /infra           # IaC: /infra/sam, /infra/cfn (Fargate+net), /infra/neocloud
   /corpus          # curated guideline corpus + ingestion (RAG source)
   /evals           # offline eval suites & datasets
-  /db              # platform Postgres (PlanetScale) migrations — see db/README.md
+  /db              # platform database (PlanetScale Vitess) migrations — see db/README.md
   /docs            # project.md lives at root; deeper docs here
   ```
 - **Platform core:** `packages/rudi_platform` — ids, naming, skill contract, manifest and
   composer, run budget and hand-over, model gateway, de-identification, leak guard, timeline,
   OCEAN persona, i18n catalogue, access (roles as data), registry store and publishing,
-  journey, conversation memory (incl. CM's legacy S3 adapter), the Turn Engine and the arena
-  door. Real-time skills: `packages/rudi_skills` (one package per skill). Tenants in code:
+  journey, conversation memory (incl. CM's legacy S3 adapter), the Turn Engine, the arena
+  door and the platform database (`db`: connection secret, the tenant guard `TenantBound` that
+  every PlanetScale connection goes through (§0e), and the migration runner, applied with
+  `python db/migrate.py`, see db/README.md). Real-time skills: `packages/rudi_skills` (one package per skill). Tenants in code:
   `packages/rudi_tenants` (`cm.py`). Standard library only. Tests (all three packages):
   `python -m unittest discover -s packages/rudi_platform/tests -v`.
 - **CM parity:** `tests/test_engine_parity.py` (WhatsApp) and `tests/test_voice_parity.py`
@@ -84,6 +143,18 @@ same change, never rename or reuse one, and never hand-build an id string.
   `pytest`. Prefer `pydantic` models at boundaries — but not in Lambda code paths yet (zip
   bundles are built on Windows; see conventions §7). New platform code is ruff-clean.
 - **TypeScript:** strict mode on, ESLint + Prettier, no `any` without a written reason.
+
+### Front-end design (mandatory)
+- **Every front-end follows [docs/design/rudi-brand.md](docs/design/rudi-brand.md)**, the Rudi
+  visual identity (decision #45): consoles, sign-up and consent pages, the Training Arena,
+  widgets, e-mails and mock-ups. Read it before building or changing any page.
+- Link `web/brand/rudi-brand.css` and use its tokens and `r-` components; no new colours, fonts
+  or shapes without updating that file first. Logo, mascot and fonts come from `web/brand/`.
+- Plain HTML and CSS first, JavaScript only where HTML cannot do the job.
+- **No third-party requests from a page:** fonts are self-hosted (never Google Fonts or a CDN),
+  no external icons or analytics unless EU-hosted under a DPA (§0).
+- Existing pages move onto the identity when they are next changed. Example:
+  `web/mockups/clone-request.html`.
 
 ---
 
@@ -98,8 +169,8 @@ These are the swap-points the whole architecture depends on. Code against the in
   workload to **API** or **self-hosted** backends. Callers never know which backend served them.
 - **`MemoryStore`** — profile read/write, event append, summary get/set, vector upsert/query.
   **Pluggable per use case** (conventions §5): the legacy S3 store (serves CM until replaced),
-  S3 fast-memory snapshots for latency-critical real-time skills, and Postgres (PlanetScale)
-  as the record. **Vector memory only when a skill needs it** (decision #39, conventions §5):
+  S3 fast-memory snapshots for latency-critical real-time skills, and PlanetScale (Vitess) as
+  the record, reached only through `TenantBound` (§0e). **Vector memory only when a skill needs it** (decision #39, conventions §5):
   S3 history + the "recent state" record is the default; vectors go to Qdrant with each chunk's
   metadata (tenant hash, access fields) in PlanetScale. The interface must not leak any
   backend's specifics.
@@ -139,7 +210,7 @@ the interface — don't reach around it.
   (target ≤ €13/active-user/mo).
 - **Phased models:** reasoning on API first; embeddings self-hosted next; reasoning self-hosted
   only when utilization justifies it — all via `ModelGateway`, no caller changes.
-- **Source of truth = Postgres** (profile + event log). Vectors/summaries are derived and
+- **Source of truth = PlanetScale** (profile + event log). Vectors/summaries are derived and
   rebuildable; never the canonical record.
 
 ---
@@ -198,6 +269,18 @@ Before any outbound generated message is sent:
   declare `AWS::IAM::Role` resources named `meetrudi-internal-*` / `meetrudi-tenant-*`, each with
   `PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/meetrudi-boundary"`. Managed
   policies, users and the boundary itself stay console-only.
+
+### Platform database DDL (mandatory)
+- **Claude writes migrations; the user applies them.** Claude never changes the PlanetScale
+  schema: no `python db/migrate.py apply`, no direct invoke of the runner Lambda with
+  `confirm`, no SQL console, no PlanetScale deploy request. `apply` refuses to run without an
+  interactive terminal and a typed `APPLY`. The user applies migrations in the PlanetScale
+  console: Claude prepares each one with `python db/console_sql.py <n>` (ids minted, the
+  `meta_migrations` record at the end) and hands over the file. Claude may also deploy the runner
+  and run the read-only `check` and `plan` when the user asks.
+- **Migrations target PlanetScale Vitess (MySQL 8):** no triggers, stored routines, events,
+  views, foreign keys, renames or `AUTO_INCREMENT` (the runner refuses them), and no migration
+  writes a tenant's rows (§0e).
 
 ### Deployment workflow (mandatory)
 - **One-command deploys.** A Python wrapper (`deploy.py`) prepares and ships a component: the

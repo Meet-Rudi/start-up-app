@@ -3,7 +3,7 @@
 > Things Claude cannot do with the `rudi-deployer` profile (console-only IAM, secrets, quotas,
 > vendor accounts). None blocks work today. Each item says **what it blocks**, so it gets done
 > when it starts standing in the way. Claude adds new items here instead of stopping work, and
-> ticks them only after you confirm. Last updated: 2026-11-04.
+> ticks them only after you confirm. Last updated: 2026-11-10.
 
 ## Open
 
@@ -37,22 +37,12 @@
      and attach it to the user `rudi-deployer`.
 - Tell Claude when done; CLAUDE.md §7 then allows template-made platform roles.
 
-### 3. PlanetScale: dev database, DPA, credentials secret
+### 3. PlanetScale: confirm the DPA is signed
 
-- **Blocks:** running the platform schema migrations (`db/migrations/`) against a real database,
-  and every platform component that reads or writes the registry. Writing and unit-testing the
-  schema does not need it.
-- **How:**
-  1. Sign PlanetScale's DPA (with the 2021 SCCs) for the organisation (decision #30).
-  2. Create a **Postgres** database in **AWS eu-central-1 (Frankfurt)**, e.g.
-     `meetrudi-internal-dev`, and a separate role with a password for the platform. That role
-     must **not** be the default admin/superuser and must **not** have `BYPASSRLS`, otherwise
-     tenant isolation is skipped (db/README.md). Claude can give you the exact `CREATE ROLE`
-     statement when you get here.
-  3. Store its connection details in Secrets Manager (the deployer cannot create secrets):
-     Console → Secrets Manager → Store a new secret → *Other type of secret* → Plaintext →
-     `{"host": "...", "port": 5432, "database": "...", "user": "...", "password": "...", "sslmode": "verify-full"}`
-     → name it exactly **`meetrudi/internal/dev/planetscale`** (region eu-central-1).
+- **Blocks:** storing any tenant's data in `meet-rudi-backbone` (Prime Directive §0.1/§0.3).
+- **How:** check that PlanetScale's DPA (with the 2021 SCCs) is signed for the organisation that
+  owns `meet-rudi-backbone` (decision #30). Another project (OrgAI) also uses PlanetScale: make
+  sure it is MEET_RUDI's organisation that is covered.
 
 ### 4. Groq: move off the free tier
 
@@ -68,10 +58,22 @@
 
 - **Meta Tech Provider enrolment** (via Twilio's ISV programme) — blocks onboarding a tenant's
   own WhatsApp account.
+- **PlanetScale secret names (decision #42)** — blocks the first template-made platform role
+  (after #2) that reads the database. `meetrudi-boundary` lets platform roles read only
+  `meetrudi/internal/*` and `meetrudi/tenant/*`, so they cannot read
+  `meetrudi/planetscale-backbone/…` (today's runner uses the legacy role, which can). When it
+  comes up: store copies as `meetrudi/internal/prod/planetscale/primary-write`,
+  `…/primary-read` and `…/replica-read`, or allow the existing path in the boundary.
+- **PlanetScale Admin password for the runner** — blocks only `python db/migrate.py apply`
+  through the runner (migrations go in through the console today). Put an Admin-role password
+  into `meetrudi/planetscale-backbone/primary-main-write` (today a Writer password).
 - **Qdrant Cloud (decision #39)** — only once a skill needs vector memory. Free cluster in an EU
   region (AWS eu-central-1 if offered), Qdrant's DPA signed, API key stored in Secrets Manager
   as `meetrudi/internal/{stage}/qdrant`.
 
 ## Done
 
-_(nothing yet)_
+- **PlanetScale schema (was #3), 2026-11-15.** Migrations 0001–0004 applied in the console on
+  `meet-rudi-backbone` (Vitess, eu-central-1), each with its `meta_migrations` record. Claude's
+  `plan` through the runner: 37 tables, 4 applied, nothing pending or unfinished, no drift.
+  Future migrations: `python db/console_sql.py <n>`, paste from `db/console/`.

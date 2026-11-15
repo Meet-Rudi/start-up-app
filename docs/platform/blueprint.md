@@ -3,7 +3,7 @@
 > Status: **approved with changes** (review of v0.1 completed 2026-10-28). This file is the
 > source of truth for the platform design; [conventions.md](conventions.md) holds the binding
 > rules (ids, names, run time). Decisions are logged in [project.md](../../project.md) §11,
-> entries #24–#40. Last updated: 2026-11-05.
+> entries #24–#44. Last updated: 2026-11-12.
 
 Rudi becomes a multi-tenant conversational platform. A **clone** is a tenant's configured
 conversational agent: personas, a journey, a mix of versioned skills, channels and a model policy.
@@ -17,7 +17,7 @@ skill that does not exist yet; then a new skill is minted.
 | Run time | No Lambda works past **13 minutes**; hand-over starts at 12 (§11). |
 | Behaviour changes | New **skill-minting path** from the console: scope → legal vetting → inventory match % → arena rounds → release → clone (§5.2). |
 | Naming and ids | Two planes, `meetrudi-internal-*` and `meetrudi-tenant-*`; ids are `cat_` + 32 random characters (§6, conventions.md). |
-| Data | **PlanetScale Postgres**, not Aurora (Aurora throttling and Data API limits) (§7). |
+| Data | **PlanetScale Vitess (MySQL 8)**, not Aurora (Aurora throttling and Data API limits) (§7; engine: decision #46). Every statement names its tenant (decision #47). |
 | Access | Roles are data: seed roles, a platform skill tester, super-admin-defined roles, delegated assignment (§8). |
 | Memory and coexistence | Memory is **pluggable** per use case, including S3 **fast-memory snapshots**; CM's legacy S3 store keeps serving until its replacement is live (§7.2, §12). |
 | Roadmap | A **basic console moves into Phase 2**, running on CM as the live demo (§13). |
@@ -152,35 +152,55 @@ catalogue becomes an index generated from manifests and brief links.
   (conventions.md §2).
 - Ids: `{cat}_` + 32 Crockford base32 characters; end-user ids derived from the tenant salt
   (conventions.md §1).
-- Pooled isolation: `tenant_id` on every row with Postgres row-level security; S3 under
-  `t/{tenant}/` with the tenant key; message text and memory values envelope-encrypted with the
-  tenant key (offboarding = key deletion + row deletes); ids only in logs.
+- Pooled isolation, visible to a person reading the data (decision #41): a `tenant_id` column on
+  every row of every multi-tenant table, and every statement on those tables names its tenant,
+  refused before sending otherwise (the tenant guard, decision #47; Vitess has no row-level
+  security); every S3
+  key under the tenant's folder `tenants/{tenant-slug}/` with the tenant key (the slug is fixed
+  at creation); message text and memory values envelope-encrypted with the tenant key
+  (offboarding = key deletion + row deletes + the tenant's folder); ids only in logs.
 - Fairness: rate limits per tenant and clone at the router; spend tracked and alerted per tenant,
   clone and heavy end-user, plus an optional tenant kill switch; reserved concurrency for
   dedicated cells; FIFO groups per end-user.
 
 ## 7. Data
 
-### 7.1 System of record: PlanetScale Postgres (decision #30)
+### 7.1 System of record: PlanetScale Vitess (decisions #30, #46, #47)
 
-PlanetScale Postgres in eu-central-1. Chosen over Aurora Serverless v2 (resource
-throttling, Data API query-length and execution limits) and DynamoDB (no relational queries for
-the console, no vectors). **Prime Directive 1 exception:** PlanetScale's DPA states its primary
-processing facilities are in the US; it is accepted under the DPA and the 2021 SCCs and listed as
-a sub-processor for every tenant. One database per dedicated cell; database branches for
-development. All SQL stays plain Postgres behind the store interfaces.
+PlanetScale in eu-central-1, on the **Vitess (MySQL 8)** engine (decision #46). Chosen over Aurora
+Serverless v2 (resource throttling, Data API query-length and execution limits) and DynamoDB (no
+relational queries for the console, no vectors); Vitess over PlanetScale Postgres for live
+resharding and a connection router built for Lambda bursts. **Prime Directive 1 exception:**
+PlanetScale's DPA states its primary processing facilities are in the US; it is accepted under
+the DPA and the 2021 SCCs and listed as a sub-processor for every tenant. One database per
+dedicated cell; database branches for development. All SQL stays plain MySQL 8 behind the store
+interfaces.
+
+- **Every statement names its tenant (hard rule, decision #47).** Vitess has no row-level
+  security, so every connection goes through `rudi_platform.db.TenantBound`, which refuses before
+  sending any statement on a tenant's rows without `tenant_id = %s` bound to the caller's tenant.
+  Platform work runs tenant by tenant; the resolvers that find a request's tenant are a closed
+  list. CLAUDE.md §0e, conventions §8.
+- **Turns keep transactions short:** read context in one short transaction, call the model with
+  no connection held, write the turn in another. Vitess pools connections, but concurrent work is
+  capped by the transaction pool; SQS and reserved concurrency per cell cap how many turns touch
+  the database at once.
+- No foreign keys, triggers or stored routines: the stores and their contract tests hold the
+  rules (fixed tenant slug, immutable published versions, append-only audit, references to
+  existing rows of the same tenant).
 
 | Data | Store |
 |---|---|
-| Registry (tenants, clones, versions, skills, endpoints, accounts, roles) | Postgres `registry` |
-| Conversation state | Postgres `runtime` |
-| Messages | Postgres (recent, encrypted) + S3 archive |
-| Memory fields | Postgres `memory`, plus fast snapshots (7.2) |
-| Schedules | Postgres `schedule`, indexed on `due_at`, claimed with `FOR UPDATE SKIP LOCKED` |
-| Usage | Postgres `usage`, monthly partitions |
-| Vectors (only for skills that need them, decision #39) | Qdrant Cloud; each chunk's metadata in Postgres `vectors` |
-| Documents, transcripts, snapshots, checkpoints | S3 `t/{tenant}/…`, tenant key |
-| Audit | Postgres append-only, exported to S3 |
+| Registry (tenants, clones, versions, skills, endpoints, accounts, roles) | PlanetScale `registry_*`, `access_control_*` |
+| End-users, handles, consents, conversation state | PlanetScale `runtime_*`; handles and state as ciphertext (decision #42) |
+| Messages | PlanetScale `runtime_messages` (recent, ciphertext) + S3 archive |
+| Memory fields | Inside the conversation state (`runtime_conversations.state_enc`), plus fast snapshots (7.2) |
+| Schedules | PlanetScale `schedule_items`, indexed on `(tenant_id, …, due_at)`, claimed tenant by tenant with `FOR UPDATE SKIP LOCKED` |
+| Usage, budgets | PlanetScale `metering_*`; a plain table until volume calls for archiving or sharding |
+| Alerts, erasures, long jobs | PlanetScale `ops_*` |
+| Vectors (only for skills that need them, decision #39) | Qdrant Cloud; each chunk's metadata in PlanetScale `vectors_*` |
+| Documents, transcripts, snapshots, checkpoints | S3 `tenants/{tenant-slug}/…`, tenant key |
+| Audit | PlanetScale `audit_trail_events`, append-only (by the store), exported to S3 |
 
 ### 7.2 Memory is pluggable
 
@@ -193,12 +213,12 @@ access pattern, behind `MemoryStore`:
 - **Fast memory:** a background skill writes a pre-built statement per conversation (profile,
   recent summary, commitment, key facts) to S3 after each turn. Real-time skills read it with one
   GET and warm Lambdas cache it with a version check; a voice call reads it once at call start.
-- **Postgres** is the record once live. Snapshots and vectors are derived, rebuildable and covered
-  by erasure.
+- **PlanetScale** is the record once live. Snapshots and vectors are derived, rebuildable and
+  covered by erasure.
 - **Vector memory, only when a skill needs it** (decision #39). S3 history plus the fast-memory
   statement is the default for every skill. A skill that shows it is not enough (e.g. guardrails
   over complex medical procedures) gets vectors in **Qdrant Cloud** (free cluster, at most 2,048
-  dimensions), with each chunk's **metadata record in Postgres** (`vectors` schema). Metadata
+  dimensions), with each chunk's **metadata record in PlanetScale** (`vectors_*` tables). Metadata
   filtering and access rights run on those records, independently of the vector search; the
   tenant identity hash is in both stores. A scheduled keep-alive ping stops an unused free
   cluster from being decommissioned until real traffic does that job. Before first use: an EU
@@ -211,8 +231,10 @@ access pattern, behind `MemoryStore`:
 - Erasure API per end-user, cascading over state, memory, messages, vectors, snapshots, S3 and the
   alias vault, with a receipt. Chat-triggered deletion stays off (decision #17).
 - Retention per clone, enforced daily. Offboarding purge later.
-- CM data migrates (re-keyed from the global salt to CM's tenant salt) only once the Postgres
-  backend is live; until then CM runs on the legacy store.
+- CM data migrates (re-keyed from the global salt to CM's tenant salt) only once the PlanetScale
+  backend is live; until then CM runs on the legacy store. Its S3 objects move from the legacy
+  layout (`conversations/{uid}/…` in `meetrudi-ai-data-…`) to `tenants/cm/` in the same
+  migration.
 
 ## 8. Identity and access
 
@@ -277,10 +299,10 @@ replaced only after its successor is live, tested and holds the data. In particu
 
 | Phase | Scope |
 |---|---|
-| 0 Ground | **Done:** conventions; `rudi_platform` core (ids, naming, skill envelope, 13-minute budget and hand-over); the platform model gateway; de-identification, leak guard, timeline and OCEAN persona with parity tests against the live copies; access model (roles as data); registry, access and audit schema with row-level security (`db/migrations`, syntax-checked, not yet run); i18n catalogue with `{persona}`. **Open:** migration runner, PlanetScale `RegistryStore` and first run on the dev database (USER-TODO #3); quota raise and permissions boundary (USER-TODO #1, #2); move the ask-ai seed, then retire the K4 services (deferred by decision). |
+| 0 Ground | **Done:** conventions; `rudi_platform` core (ids, naming, skill envelope, 13-minute budget and hand-over); the platform model gateway; de-identification, leak guard, timeline and OCEAN persona with parity tests against the live copies; access model (roles as data); registry, access-control and audit-trail schema (on Vitess since decision #46, every statement naming its tenant through the tenant guard, #47); i18n catalogue with `{persona}`; the full schema (runtime, schedule, metering, ops; decision #42), no name a SQL keyword (decision #43), and the migration runner `meetrudi-internal-prod-db-migrate` (`python db/migrate.py`). **Open:** first run on the PlanetScale database (needs its host, USER-TODO #3); PlanetScale `RegistryStore`; quota raise and permissions boundary (USER-TODO #1, #2); move the ask-ai seed, then retire the K4 services (deferred by decision). |
 | 1 Tenant-aware engine | **Done:** skill manifest (`rudi-skill@1`) and composer; `RegistryStore` seam with the in-memory store and contract tests; publishing draft → staging → live with audit; journey engine (`rudi-journey@1`, checked at publish); Baseline, Conversation, Coaching and Voice call packs as 21 real-time skill packages (`packages/rudi_skills`); the Turn Engine running any clone version on WhatsApp and calls (journey variants per channel, per-channel memory and assets); `ConversationStore` seam with the legacy S3 adapter (state round-trips with CM's `ai_state`); CM as tenant #1 on both channels (clone version 1, held to the live engines turn by turn by `test_engine_parity.py` and `test_voice_parity.py`); the arena door (`engine/door.py`, the `meetrudi-engine-turn` contract plus `target: cm/rudi@live` and calls); `engine/voice.py`, the call brain's interface for the voice adapter; CM's live calls on the platform engine (decision #38: layer `meetrudi-tenant-prod-pool-engine`, `CALL_ENGINE: platform` since 2026-11-05, legacy kept as the fallback and rollback; simulated calls and recorded voice checks as the release evidence); CM's WhatsApp, tester chat and the arena door on the platform engine (decision #40: `chat_engine.respond`, layer `meetrudi-tenant-prod-pool-engine-whatsapp`, `CHAT_ENGINE: platform`, legacy as the per-message fallback and rollback; the arena door takes `engine` per event). **Open:** retire `brain.py` and `responder.py` once both channels have run on the platform for a while; deploy the door as `meetrudi-tenant-dev-pool-engine` and let the arena pick a target (needs USER-TODO #1); run an arena batch on both doors; CM version 2 (`acceptable-use`, the call disclosure gap, one guidance document). |
 | 2 Channels and basic console | `edge-whatsapp`, `edge-voice` (fast memory; the engine side is done in Phase 1), `edge-api` and widget; scheduler and background skills; **basic console running on CM** (conversations, clone settings, usage, accounts and roles) as the live demo for onboarding; CM cut over to the platform engine. |
-| 3 Full console and tenant #2 | Scope requests with inventory match, knowledge upload, takeover, keys and webhooks, templates, draft → staging → live; tenant #2 from existing skills, no deploy; CM data moves to Postgres when the backend is live. |
+| 3 Full console and tenant #2 | Scope requests with inventory match, knowledge upload, takeover, keys and webhooks, templates, draft → staging → live; tenant #2 from existing skills, no deploy; CM data moves to PlanetScale when the backend is live. |
 | 4 Minting and reach | The minting path end to end; first turn skill (knowledge retrieval); SMS and e-mail reach-out. |
 
 **Demo done when:** a clone is created from existing skills with no deploy; a change goes draft →
