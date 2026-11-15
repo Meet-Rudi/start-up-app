@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request your Rudi · Rudi for organisations</title>
+<meta name="description" content="Design mock-up: an organisation asks for its own Rudi.">
+<link rel="icon" href="../brand/assets/favicon.png" type="image/png">
+<link rel="stylesheet" href="../brand/rudi-brand.css">
+<!--
+  Design mock-up (decision #45): checks docs/design/rudi-brand.md on a real task.
+  No JavaScript: channel details open with :has(), checks use native validation and
+  :user-invalid. The form posts nowhere. In the real console every string comes from the
+  i18n catalogue (CLAUDE.md §3) and the request feeds the registry.
+-->
+<style>
+  .mock-note { background: var(--stone); font-size: 12px; text-align: center; padding: 6px var(--gutter); }
+
+  .hero { padding-block: 40px var(--band-y); }
+  .hero__grid { display: grid; gap: 40px; align-items: center; }
+  .hero__text .r-lead { margin-top: 24px; }
+  .hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-top: 36px; }
+  .hero__art { position: relative; justify-self: center; width: min(100%, 440px); }
+  .hero__art .r-tagline { position: absolute; top: 4%; right: -2%; z-index: 1; }
+  .hero__art .r-nudge { position: absolute; right: -4%; bottom: 4%; max-width: 270px; }
+  .hero__facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 32px;
+    margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--hairline); font-size: 14px; }
+  .hero__facts span { display: inline-flex; align-items: center; gap: 12px; }
+  .hero__facts span::before { content: ""; width: 20px; height: 16px; background: var(--petrol);
+    -webkit-mask: var(--leaf) center / contain no-repeat; mask: var(--leaf) center / contain no-repeat;
+    --leaf: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 44'%3E%3Cpath d='M26 2C32 2 40 8 47 14C53 19 53 24 47 29C40 35 32 41 26 41C20 41 12 35 5 29C-1 24-1 19 5 14C12 8 20 2 26 2Z'/%3E%3C/svg%3E"); }
+  @media (min-width: 900px) { .hero__grid { grid-template-columns: 1.2fr 1fr; } }
+
+  .steps .r-title { margin-bottom: 40px; max-width: 640px; }
+
+  .request__grid { display: grid; gap: 32px; align-items: start; }
+  @media (min-width: 1024px) {
+    .request__grid { grid-template-columns: minmax(0, 1fr) 340px; gap: 40px; }
+    .request__aside { position: sticky; top: 112px; }
+  }
+  .request__intro { margin-bottom: 36px; }
+  .request__intro .r-lead { margin-top: 16px; max-width: 560px; }
+  .request__aside h3 { margin: 4px 0 18px; }
+  .request__aside .r-leaf-list { font-size: 14px; }
+  .request__aside .r-chat { display: grid; gap: 10px; margin-top: 18px; }
+  .request__aside .r-chat .r-bubble { background: var(--wash); color: var(--petrol); }
+  .request__aside .r-chat .r-bubble--user { background: var(--butter); color: var(--petrol); }
+  .row-2 { display: grid; gap: 0 20px; }
+  @media (min-width: 640px) { .row-2 { grid-template-columns: 1fr 1fr; } }
+
+  /* Channel details appear only when that channel is ticked. */
+  .reveal { display: none; margin-top: 16px; padding: 18px 20px; border-left: 3px solid var(--butter);
+    background: var(--ivory); border-radius: 0 var(--radius) var(--radius) 0; }
+  .r-form-section:has(#ch-whatsapp:checked) .reveal--whatsapp,
+  .r-form-section:has(#ch-calls:checked) .reveal--calls,
+  .r-form-section:has(#ch-api:checked) .reveal--api { display: block; }
+  .reveal .r-choices { margin-top: 10px; }
+  .times { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+  .times .r-input { width: auto; }
+
+  .scales { display: grid; gap: 22px; }
+  .submit { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-top: 8px; }
+  .submit p { max-width: 420px; }
+
+  .faq__grid { display: grid; gap: 32px; }
+  @media (min-width: 900px) { .faq__grid { grid-template-columns: 1fr 1.6fr; gap: 64px; } }
+
+  .strip { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
+</style>
+</head>
+<body>
+
+<p class="mock-note">Design mock-up · this form sends nothing</p>
+
+<header class="r-header">
+  <div class="r-container r-header__bar">
+    <a class="r-header__logo" href="#top" aria-label="Rudi, home"><img src="../brand/assets/rudi-logo.png" alt="rudi" width="112" height="37"></a>
+    <nav class="r-header__nav" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#request">Your request</a>
+      <a href="#questions">Questions</a>
+    </nav>
+    <a class="r-pill" href="#top" lang="nl" title="Nederlands">NL</a>
+    <a class="r-btn r-btn--small" href="#request">Start your request <span aria-hidden="true">↗</span></a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ------------------------------------------------------------------------- hero -->
+  <section class="hero">
+    <div class="r-container">
+      <div class="hero__grid">
+        <div class="hero__text">
+          <p class="r-eyebrow r-eyebrow--dot">Rudi for organisations</p>
+          <h1 class="r-display">Your programme.<br>Your people.<br>A Rudi of <span class="r-under">their own.</span></h1>
+          <p class="r-lead">Tell us who you support and what should happen between appointments. We shape a focused pilot with you, and Rudi takes on the everyday follow-through.</p>
+          <div class="hero__actions">
+            <a class="r-btn" href="#request">Start your request</a>
+            <a class="r-link" href="#how">How it works</a>
+          </div>
+        </div>
+        <div class="hero__art">
+          <span class="r-tagline">Your expertise. Everyday follow-through.</span>
+          <div class="r-mascot"><img src="../brand/assets/rudi-mascot.png" alt="" width="720" height="720"></div>
+          <div class="r-nudge">
+            <p class="r-eyebrow">A note from Rudi</p>
+            <p>Tell me about the people you help. I’ll learn the rest as we go.</p>
+          </div>
+        </div>
+      </div>
+      <p class="hero__facts">
+        <span>Built around your approach</span>
+        <span>Hosted in the EU</span>
+        <span>A focused pilot first</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------------------- steps -->
+  <section class="r-band r-band--wash steps" id="how">
+    <div class="r-container">
+      <p class="r-eyebrow">What happens next</p>
+      <h2 class="r-title">Three steps from idea to <span class="r-under">first check-in.</span></h2>
+      <div class="r-cards">
+        <article class="r-card">
+          <span class="r-card__num">01</span>
+          <h3 class="r-card-title">You tell us.</h3>
+          <p>Who you support, what they should keep up between appointments, and where they talk.</p>
+          <span class="r-chip">Who is this Rudi for?</span>
+        </article>
+        <article class="r-card r-card--sage">
+          <span class="r-card__num">02</span>
+          <h3 class="r-card-title">We shape it together.</h3>
+          <p>We agree the pilot: its people, its skills, its tone, and what you want to learn from it.</p>
+          <span class="r-chip">What would a good pilot show?</span>
+        </article>
+        <article class="r-card r-card--apricot">
+          <span class="r-card__num">03</span>
+          <h3 class="r-card-title">Rudi gets to work.</h3>
+          <p>Your Rudi starts checking in. You see how it goes and adjust as you learn.</p>
+          <span class="r-chip">How did the first weeks go?</span>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------------------- request -->
+  <section class="r-band" id="request">
+    <div class="r-container request__grid">
+
+      <form action="#" method="post" enctype="multipart/form-data" aria-labelledby="request-title">
+        <div class="request__intro">
+          <p class="r-eyebrow">Your request</p>
+          <h2 class="r-title" id="request-title">Tell us about <span class="r-under">your people.</span></h2>
+          <p class="r-lead">About ten minutes. Rough answers are fine: we go through everything with you before anything goes live.</p>
+        </div>
+
+        <!-- 01 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">01</span><span class="r-card-title">Your organisation</span></legend>
+          <div class="r-field">
+            <label class="r-label" for="org">Organisation name</label>
+            <input class="r-input" id="org" name="organisation" autocomplete="organization" required>
+            <span class="r-error">Tell us your organisation’s name.</span>
+          </div>
+          <fieldset class="r-field r-choices r-choices--2">
+            <legend class="r-label" style="margin-bottom:8px">What kind of organisation are you?</legend>
+            <label class="r-choice"><input type="radio" name="kind" value="clinic" required><span>Clinic or hospital</span></label>
+            <label class="r-choice"><input type="radio" name="kind" value="practice"><span>Dietitian or lifestyle practice</span></label>
+            <label class="r-choice"><input type="radio" name="kind" value="programme"><span>Training or coaching programme</span></label>
+            <label class="r-choice"><input type="radio" name="kind" value="workplace"><span>Workplace wellbeing</span></label>
+            <label class="r-choice"><input type="radio" name="kind" value="insurer"><span>Health insurer or mutuality</span></label>
+            <label class="r-choice"><input type="radio" name="kind" value="other"><span>Something else</span></label>
+          </fieldset>
+          <div class="row-2">
+            <div class="r-field">
+              <label class="r-label" for="country">Country</label>
+              <p class="r-help" id="country-help">Rudi runs in the EU only.</p>
+              <select class="r-select" id="country" name="country" aria-describedby="country-help" required>
+                <option value="">Choose a country</option>
+                <option>Belgium</option>
+                <option>Netherlands</option>
+                <option>Luxembourg</option>
+                <option>France</option>
+                <option>Germany</option>
+                <option>Another EU country</option>
+              </select>
+              <span class="r-error">Choose a country.</span>
+            </div>
+            <div class="r-field">
+              <label class="r-label" for="site">Website <span class="r-optional">(optional)</span></label>
+              <p class="r-help">So we can read up before we talk.</p>
+              <input class="r-input" id="site" name="website" type="url" placeholder="https://" autocomplete="url">
+              <span class="r-error">Use a full address, starting with https://</span>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- 02 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">02</span><span class="r-card-title">Who we talk to</span></legend>
+          <div class="row-2">
+            <div class="r-field">
+              <label class="r-label" for="name">Your name</label>
+              <input class="r-input" id="name" name="contact_name" autocomplete="name" required>
+              <span class="r-error">Tell us your name.</span>
+            </div>
+            <div class="r-field">
+              <label class="r-label" for="role">Your role</label>
+              <input class="r-input" id="role" name="contact_role" autocomplete="organization-title" placeholder="e.g. programme lead" required>
+              <span class="r-error">Tell us your role.</span>
+            </div>
+            <div class="r-field">
+              <label class="r-label" for="email">Work e-mail</label>
+              <input class="r-input" id="email" name="contact_email" type="email" autocomplete="email" required>
+              <span class="r-error">Use an e-mail address like name@organisation.eu.</span>
+            </div>
+            <div class="r-field">
+              <label class="r-label" for="phone">Phone <span class="r-optional">(optional)</span></label>
+              <input class="r-input" id="phone" name="contact_phone" type="tel" autocomplete="tel">
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- 03 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">03</span><span class="r-card-title">The Rudi you have in mind</span></legend>
+          <div class="r-field">
+            <label class="r-label" for="purpose">What should Rudi help people do?</label>
+            <p class="r-help" id="purpose-help">The plan they get from you, and what tends to slip between appointments. No details about real patients or participants.</p>
+            <textarea class="r-textarea" id="purpose" name="purpose" aria-describedby="purpose-help" minlength="20" required placeholder="e.g. Keep moving after cardiac rehab: short walks, the weekly class, and noticing when energy dips."></textarea>
+            <span class="r-error">A sentence or two is enough (at least 20 characters).</span>
+          </div>
+          <div class="r-field">
+            <label class="r-label" for="audience">Who will talk to Rudi?</label>
+            <input class="r-input" id="audience" name="audience" required placeholder="e.g. adults who finished our 12-week programme">
+            <span class="r-error">Tell us who Rudi is for.</span>
+          </div>
+          <fieldset class="r-field r-choices r-choices--4">
+            <legend class="r-label" style="margin-bottom:8px">How many people in a first pilot?</legend>
+            <label class="r-choice"><input type="radio" name="pilot_size" value="25" required><span>Up to 25</span></label>
+            <label class="r-choice"><input type="radio" name="pilot_size" value="100"><span>25 to 100</span></label>
+            <label class="r-choice"><input type="radio" name="pilot_size" value="500"><span>100 to 500</span></label>
+            <label class="r-choice"><input type="radio" name="pilot_size" value="more"><span>Over 500</span></label>
+          </fieldset>
+          <fieldset class="r-field r-choices r-choices--4">
+            <legend class="r-label" style="margin-bottom:8px">Languages Rudi should speak</legend>
+            <label class="r-choice"><input type="checkbox" name="languages" value="en" checked><span>English</span></label>
+            <label class="r-choice"><input type="checkbox" name="languages" value="nl"><span lang="nl">Nederlands</span></label>
+            <label class="r-choice"><input type="checkbox" name="languages" value="fr"><span lang="fr">Français</span></label>
+            <label class="r-choice"><input type="checkbox" name="languages" value="de"><span lang="de">Deutsch</span></label>
+          </fieldset>
+        </fieldset>
+
+        <!-- 04 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">04</span><span class="r-card-title">Where people reach Rudi</span></legend>
+          <p class="r-help" style="margin:0 0 14px">Choose one or more.</p>
+          <div class="r-choices r-choices--2">
+            <label class="r-choice"><input type="checkbox" id="ch-whatsapp" name="channels" value="whatsapp" checked>
+              <span><strong>WhatsApp</strong><small>Check-ins in the app people already use.</small></span></label>
+            <label class="r-choice"><input type="checkbox" id="ch-calls" name="channels" value="voice">
+              <span><strong>Phone calls</strong><small>A short spoken check-in at a time that suits them.</small></span></label>
+            <label class="r-choice"><input type="checkbox" id="ch-widget" name="channels" value="widget">
+              <span><strong>Chat on your website</strong><small>A Rudi window on your own pages.</small></span></label>
+            <label class="r-choice"><input type="checkbox" id="ch-api" name="channels" value="api">
+              <span><strong>Your own app</strong><small>Through our API, inside your product.</small></span></label>
+          </div>
+          <div class="reveal reveal--whatsapp">
+            <p class="r-label">Whose WhatsApp number?</p>
+            <div class="r-choices r-choices--2">
+              <label class="r-choice"><input type="radio" name="wa_number" value="rudi" checked><span>A Rudi number<small>Ready the soonest.</small></span></label>
+              <label class="r-choice"><input type="radio" name="wa_number" value="own"><span>Our WhatsApp Business account<small>Your name in the chat; takes longer to set up.</small></span></label>
+            </div>
+          </div>
+          <div class="reveal reveal--calls">
+            <p class="r-label">When may Rudi call?</p>
+            <div class="times">
+              <label for="call-from">From</label><input class="r-input" id="call-from" name="call_from" type="time" value="09:00">
+              <label for="call-to">to</label><input class="r-input" id="call-to" name="call_to" type="time" value="20:00">
+            </div>
+            <p class="r-help" style="margin-top:8px">Rudi never calls at night, whatever you choose here.</p>
+          </div>
+          <div class="reveal reveal--api">
+            <p class="r-help">We send API documentation and a test key once the pilot is agreed.</p>
+          </div>
+        </fieldset>
+
+        <!-- 05 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">05</span><span class="r-card-title">What Rudi should do</span></legend>
+          <div class="r-choices r-choices--2">
+            <label class="r-choice"><input type="checkbox" name="skills" value="goal-setting" checked>
+              <span><strong>Set goals together</strong><small>Turns your plan into small, personal goals.</small></span></label>
+            <label class="r-choice"><input type="checkbox" name="skills" value="check-in-follow-up" checked>
+              <span><strong>Check in between appointments</strong><small>Asks how it went and helps pick things up again.</small></span></label>
+            <label class="r-choice"><input type="checkbox" name="skills" value="commitment-securing">
+              <span><strong>Turn intentions into commitments</strong><small>Agrees a concrete next step and a time for it.</small></span></label>
+            <label class="r-choice"><input type="checkbox" name="skills" value="check-in-promise">
+              <span><strong>Keep its promises</strong><small>Comes back exactly when it said it would.</small></span></label>
+            <label class="r-choice"><input type="checkbox" name="skills" value="language-mirroring" checked>
+              <span><strong>Speak each person’s language</strong><small>Answers in the language they write or speak.</small></span></label>
+            <label class="r-choice"><input type="checkbox" name="skills" value="learn-about-rudi" checked>
+              <span><strong>Explain what Rudi is, and isn’t</strong><small>Honest about being an AI, and about its limits.</small></span></label>
+          </div>
+          <div class="r-field" style="margin-top:22px">
+            <label class="r-label" for="missing">Something Rudi can’t do yet? <span class="r-optional">(optional)</span></label>
+            <p class="r-help" id="missing-help">Tell us. Our team reviews every request; a new ability is built and checked by people before any Rudi uses it.</p>
+            <textarea class="r-textarea" id="missing" name="missing_skills" aria-describedby="missing-help" placeholder="e.g. Remind people of their training schedule from our weekly plan."></textarea>
+          </div>
+        </fieldset>
+
+        <!-- 06 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">06</span><span class="r-card-title">Rudi’s personality</span></legend>
+          <div class="r-field">
+            <label class="r-label" for="persona">The name people will see</label>
+            <p class="r-help">Most organisations keep “Rudi”.</p>
+            <input class="r-input" id="persona" name="persona_name" value="Rudi" maxlength="24" required>
+            <span class="r-error">Give your Rudi a name.</span>
+          </div>
+          <div class="scales">
+            <div class="r-scale">
+              <label class="r-label" for="tone-energy">Energy</label>
+              <input id="tone-energy" name="tone_energy" type="range" min="1" max="5" value="3">
+              <span class="r-scale__ends" aria-hidden="true"><span>Calm</span><span>Upbeat</span></span>
+            </div>
+            <div class="r-scale">
+              <label class="r-label" for="tone-direct">Style</label>
+              <input id="tone-direct" name="tone_directness" type="range" min="1" max="5" value="2">
+              <span class="r-scale__ends" aria-hidden="true"><span>Gentle</span><span>Direct</span></span>
+            </div>
+            <div class="r-scale">
+              <label class="r-label" for="tone-structure">Approach</label>
+              <input id="tone-structure" name="tone_structure" type="range" min="1" max="5" value="3">
+              <span class="r-scale__ends" aria-hidden="true"><span>Flexible</span><span>Structured</span></span>
+            </div>
+          </div>
+          <fieldset class="r-field r-choices r-choices--3" style="margin-top:26px">
+            <legend class="r-label" style="margin-bottom:8px">How often should Rudi check in?</legend>
+            <label class="r-choice"><input type="radio" name="cadence" value="weekly"><span>About once a week</span></label>
+            <label class="r-choice"><input type="radio" name="cadence" value="2-3-weekly" checked><span>Two or three times a week</span></label>
+            <label class="r-choice"><input type="radio" name="cadence" value="most-days"><span>Most days</span></label>
+          </fieldset>
+        </fieldset>
+
+        <!-- 07 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">07</span><span class="r-card-title">Your material <span class="r-optional r-small">(optional)</span></span></legend>
+          <div class="r-field">
+            <label class="r-label" for="docs">Programme descriptions, schedules, plans or guidelines</label>
+            <p class="r-help" id="docs-help">PDF, Word, Excel or text. Leave out personal data about patients or participants. Prefer to send it later? We give you a secure link.</p>
+            <input class="r-input" id="docs" name="documents" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" aria-describedby="docs-help">
+          </div>
+        </fieldset>
+
+        <!-- 08 -->
+        <fieldset class="r-form-section">
+          <legend><span class="r-form-section__num">08</span><span class="r-card-title">Before you send</span></legend>
+          <label class="r-check"><input type="checkbox" name="dpa" required>
+            <span>We will sign a data processing agreement with Rudi. All data stays in the EU.</span></label>
+          <label class="r-check"><input type="checkbox" name="scope" required>
+            <span>We understand Rudi supports follow-through. He doesn’t diagnose, prescribe or replace professional care.</span></label>
+          <label class="r-check"><input type="checkbox" name="updates">
+            <span>Keep me posted about Rudi for organisations. <span class="r-muted">(optional)</span></span></label>
+          <div class="submit">
+            <button class="r-btn" type="submit">Send our request</button>
+            <p class="r-small r-muted">We get back to you to shape a focused pilot. Sending this commits you to nothing.</p>
+          </div>
+        </fieldset>
+      </form>
+
+      <aside class="request__aside" aria-label="Privacy and what to expect">
+        <div class="r-panel r-panel--dark">
+          <p class="r-eyebrow" style="color:var(--butter)">Privacy &amp; trust</p>
+          <h3 class="r-small-title">Personal support. Privacy built in.</h3>
+          <ul class="r-leaf-list">
+            <li>Rudi’s AI runs on EU-hosted infrastructure.</li>
+            <li>Your organisation’s data is kept apart from every other organisation’s.</li>
+            <li>A data processing agreement before anyone talks to Rudi.</li>
+            <li>No medical advice: Rudi points people back to you.</li>
+          </ul>
+        </div>
+        <div class="r-panel" style="margin-top:20px">
+          <p class="r-eyebrow">What a check-in sounds like</p>
+          <div class="r-chat">
+            <p class="r-bubble">You planned a walk after lunch. How did it go?</p>
+            <p class="r-bubble r-bubble--user">Didn’t happen. Meetings ran over.</p>
+            <p class="r-bubble">That happens. Would ten minutes before dinner work today?</p>
+          </div>
+          <p class="r-small r-muted" style="margin-top:12px;font-size:11px">Illustrative conversation · not a live chat</p>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------------- FAQ -->
+  <section class="r-band r-band--wash" id="questions">
+    <div class="r-container faq__grid">
+      <div>
+        <p class="r-eyebrow">Good questions</p>
+        <h2 class="r-title">Before you <span class="r-under">ask.</span></h2>
+      </div>
+      <div class="r-faq">
+        <details>
+          <summary>Does Rudi give medical advice?</summary>
+          <p>No. Rudi helps people follow the plan they got from you. Questions about diagnosis, medication or treatment go back to you or their clinician.</p>
+        </details>
+        <details>
+          <summary>Where is the data kept?</summary>
+          <p>In the EU, under a data processing agreement with your organisation. Your organisation’s data is kept apart from every other organisation’s.</p>
+        </details>
+        <details>
+          <summary>Can Rudi use our own WhatsApp number?</summary>
+          <p>Yes. It takes a little longer to set up than a Rudi number, so many pilots start on a Rudi number.</p>
+        </details>
+        <details>
+          <summary>What does a pilot cost?</summary>
+          <p>We agree it with you when we shape the pilot, based on the number of people and channels.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------------------- strip -->
+  <section class="r-band r-band--petrol r-band--strip">
+    <div class="r-container strip">
+      <p>Want to see Rudi first?</p>
+      <a class="r-link r-link--on-dark" href="https://meetrudi.eu/en/demo">See Rudi in action <span aria-hidden="true">↗</span></a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="r-footer">
+  <div class="r-container r-footer__bar">
+    <div>
+      <img src="../brand/assets/rudi-logo.png" alt="rudi" width="80" height="27">
+      <p>AI support for everyday follow-through.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://meetrudi.eu/en/about">About</a>
+      <a href="https://meetrudi.eu/en/organisations">For organisations</a>
+      <a href="https://meetrudi.eu/en/privacy">Privacy policy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
