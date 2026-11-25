@@ -25,13 +25,15 @@ SKIP = shutil.ignore_patterns(
     "tests", "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache"
 )
 
-# Imports the handler as Lambda would (layer + src, a stub S3 client) and checks the
-# questionnaire, in a fresh interpreter so nothing from this one leaks in.
+# Imports the handler as Lambda would (layer + src, stub AWS clients; Lambda provides boto3 and
+# botocore) and checks the questionnaire, in a fresh interpreter so nothing from this one leaks in.
 _PROBE = """
 import os, sys, types
 sys.path[:0] = [{target!r}, {src!r}]
 stub = types.ModuleType("boto3"); stub.client = lambda *a, **k: None
 sys.modules["boto3"] = stub
+config = types.ModuleType("botocore.config"); config.Config = lambda **k: None
+sys.modules["botocore"] = types.ModuleType("botocore"); sys.modules["botocore.config"] = config
 os.environ["DATA_BUCKET"] = "probe"
 import handler
 print(handler.Q["questionnaire"], handler.Q["form_version"], len(handler.Q["steps"]), "steps")

@@ -369,6 +369,58 @@ def steps_summary(q: dict, answers: dict) -> list[dict]:
     ]
 
 
+# ------------------------------------------------------------------- answers, as people read them
+NO_ANSWER = "—"
+
+
+def display_value(f: dict, value: Any) -> str:
+    """One stored answer in words: option labels, not their codes."""
+    if value is None or value == "" or value == []:
+        return NO_ANSWER
+    kind = f["type"]
+    labels = {o["value"]: o["label"] for o in f.get("options") or []}
+    if kind in ("select", "radio"):
+        return labels.get(value, str(value))
+    if kind == "checkbox":
+        return ", ".join(labels.get(v, v) for v in value)
+    if kind == "scale":
+        return f"{value} of {f['max']} ({f['ends'][0]} to {f['ends'][1]})"
+    if kind == "time_window":
+        return f"{value['from']} to {value['to']}"
+    if kind == "agree":
+        return "Agreed" if value is True else NO_ANSWER
+    if kind == "check":
+        return "Yes" if value else "No"
+    return str(value)
+
+
+def answer_table(q: dict, answers: dict, steps: tuple[str, ...] = ()) -> list[dict]:
+    """Each applicable step (or only `steps`) with the label and answer of every field that was
+    shown, in questionnaire order. An unanswered optional question reads NO_ANSWER."""
+    out: list[dict] = []
+    shown: dict = {}
+    for number, step in enumerate(applicable_steps(q, answers), start=1):
+        mine = answers.get(step["key"]) or {}
+        rows = []
+        for f in value_fields(step):
+            if not met(f.get("show_if"), shown):
+                continue
+            value = mine.get(f["key"])
+            if value is not None:
+                shown[f["key"]] = value
+            rows.append({"label": f["label"], "value": display_value(f, value)})
+        if not steps or step["key"] in steps:
+            out.append(
+                {
+                    "key": step["key"],
+                    "number": number,
+                    "title": step["title"],
+                    "rows": rows,
+                }
+            )
+    return out
+
+
 # --------------------------------------------------------------------- what the browser gets
 def _resolve(f: dict, values: dict, in_step: set[str]) -> dict | None:
     """The field as the browser gets it: a condition on earlier steps is settled here."""

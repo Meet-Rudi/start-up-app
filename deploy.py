@@ -127,6 +127,11 @@ COMPONENTS = {
             "Release": {"from_git": True},
             # The site that hosts the form, e.g. https://meetrudi.eu ("*" when unset).
             "AllowOrigin": {"from_config": "prospect_form_origin"},
+            # Who hears of new and sent requests (SES); no mail while unset.
+            "MailFrom": {"from_config": "prospect_mail_from"},
+            "MailFromName": {"from_config": "prospect_mail_from_name"},
+            "NotifyTo": {"from_config": "prospect_notify_to"},
+            "NotifyCc": {"from_config": "prospect_notify_cc"},
         },
     },
     "tts": {

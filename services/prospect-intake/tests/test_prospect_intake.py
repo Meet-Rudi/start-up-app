@@ -57,13 +57,38 @@ class FakeS3:
         return json.loads(self.objects[key])
 
 
-S3 = FakeS3()
+class FakeSES:
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.fail = False
+
+    def send_email(self, **kw):
+        if self.fail:
+            raise _S3Error("MessageRejected")
+        self.sent.append(kw)
+        return {"MessageId": f"msg-{len(self.sent)}"}
+
+
+S3, SES = FakeS3(), FakeSES()
 _boto3 = types.ModuleType("boto3")
-_boto3.client = lambda *a, **k: S3
+_boto3.client = lambda name, *a, **k: SES if name == "ses" else S3
 sys.modules["boto3"] = _boto3
-os.environ["DATA_BUCKET"] = "meetrudi-ai-data-test"
+_config = types.ModuleType("botocore.config")
+_config.Config = lambda **k: None
+sys.modules["botocore"] = types.ModuleType("botocore")
+sys.modules["botocore.config"] = _config
+os.environ.update(
+    {
+        "DATA_BUCKET": "meetrudi-ai-data-test",
+        "MAIL_FROM": "sender@example.org",
+        "MAIL_FROM_NAME": "Rudi request form",
+        "NOTIFY_TO": "team@example.org",
+        "NOTIFY_CC": "copy@example.org",
+    }
+)
 
 import handler
+import notify
 import questionnaire as qn
 from rudi_platform.ids import Cat, is_id
 from rudi_platform.naming import internal_name
@@ -142,6 +167,8 @@ class Base(unittest.TestCase):
     def setUp(self):
         S3.objects.clear()
         S3.deny_delete = False
+        SES.sent.clear()
+        SES.fail = False
 
     def started(self):
         status, body = start()
@@ -453,6 +480,100 @@ class Completing(Base):
         self.assertEqual(S3.record(handler.complete_key(pid))["state"], "complete")
         _status, body = call({"action": "resume", "id": pid, "token": token})
         self.assertEqual(body, {"complete": True})
+
+
+class Notifications(Base):
+    def test_a_new_prospect_mails_the_team_its_contact_step(self):
+        pid, _, _ = self.started()
+        self.assertEqual(len(SES.sent), 1)
+        mail = SES.sent[0]
+        self.assertEqual(mail["Source"], "Rudi request form <sender@example.org>")
+        self.assertEqual(
+            mail["Destination"],
+            {"ToAddresses": ["team@example.org"], "CcAddresses": ["copy@example.org"]},
+        )
+        self.assertEqual(
+            mail["Message"]["Subject"]["Data"],
+            "New prospect started configuration - Alex Example | alex@example.org",
+        )
+        body = mail["Message"]["Body"]["Html"]["Data"]
+        for shown in (
+            "Example Health Lab",
+            "Programme lead",
+            "+32 470 00 00 00",
+            "Belgium",
+            "Agreed",
+            pid,
+            handler.partial_key(pid),
+        ):
+            self.assertIn(shown, body)
+        self.assertNotIn("What should Rudi help people do?", body)  # first page only
+        self.assertIn(
+            "Work e-mail: alex@example.org", mail["Message"]["Body"]["Text"]["Data"]
+        )
+
+    def test_bots_drafts_and_middle_steps_send_no_mail(self):
+        call(
+            {"action": "start", "answers": CONTACT, "elapsed_ms": 30_000, "hp": "spam"}
+        )
+        self.assertEqual(SES.sent, [])
+        pid, token, _ = self.started()
+        self.save(
+            pid, token, "programme", {"purpose": "Half done, for now."}, draft=True
+        )
+        self.save(pid, token, "programme", STEPS["programme"])
+        self.assertEqual(len(SES.sent), 1)
+
+    def test_a_sent_request_mails_every_answer_in_one_table(self):
+        pid, _, _ = self.walk()
+        self.assertEqual(len(SES.sent), 2)
+        mail = SES.sent[1]
+        self.assertEqual(
+            mail["Message"]["Subject"]["Data"],
+            "New Rudi clone REQUEST COMPLETE - Alex Example | alex@example.org",
+        )
+        self.assertEqual(mail["Destination"]["CcAddresses"], ["copy@example.org"])
+        body = mail["Message"]["Body"]["Html"]["Data"]
+        for step in handler.Q["steps"]:
+            self.assertIn(step["title"], body)
+        for shown in (
+            "Clinic or hospital",
+            "English, Nederlands",
+            "A Rudi number",
+            "Read conversations, Take over a conversation",
+            "A safety concern, Someone has gone quiet",
+            "3 of 5 (Calm to Upbeat)",
+            "Azure OpenAI",
+            handler.complete_key(pid),
+        ):
+            self.assertIn(shown, body)
+        # Questions that were never shown stay out; open optional ones read "—".
+        self.assertNotIn("When may Rudi call?", body)
+        self.assertNotIn("Which messages need approval first?", body)
+        text = mail["Message"]["Body"]["Text"]["Data"]
+        self.assertIn("Something Rudi can’t do yet?: —", text)
+
+    def test_answers_cannot_inject_markup_into_the_mail(self):
+        start(organisation="<b>Lab</b> & Co", contact_name="Alex <script>")
+        body = SES.sent[0]["Message"]["Body"]["Html"]["Data"]
+        self.assertIn("&lt;b&gt;Lab&lt;/b&gt; &amp; Co", body)
+        self.assertNotIn("<b>Lab</b>", body)
+        self.assertNotIn("<script>", body)
+
+    def test_a_failed_mail_never_fails_the_save(self):
+        SES.fail = True
+        pid, _, body = self.walk()
+        self.assertTrue(body["complete"])
+        self.assertEqual(S3.record(handler.complete_key(pid))["state"], "complete")
+
+    def test_no_recipient_means_no_mail(self):
+        saved = notify.NOTIFY_TO
+        notify.NOTIFY_TO = []
+        try:
+            status, _ = start()
+        finally:
+            notify.NOTIFY_TO = saved
+        self.assertEqual((status, SES.sent), (201, []))
 
 
 class Http(Base):

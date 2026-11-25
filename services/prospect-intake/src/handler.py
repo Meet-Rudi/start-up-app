@@ -23,6 +23,9 @@ The last step's full save moves the request from partial/ to complete/. Each rec
 `state` too, and a follow-up job skips a partial whose complete twin exists (rules for that job:
 web/adoption-request/README.md).
 
+The team hears of each request by e-mail (notify.py, SES): once its contact step is saved
+("started") and once it is sent ("complete"), both after the record is stored, never failing it.
+
 The token is returned once and kept by the browser; the record holds only its SHA-256. Logs carry
 the request id and step, never contact details (CLAUDE.md §5). Abuse guards for a public endpoint:
 body size cap, a honeypot, a minimum fill time on the first step, strict validation against the
@@ -40,6 +43,7 @@ import os
 import secrets
 
 import boto3
+import notify
 import questionnaire as qn
 from rudi_platform.ids import Cat, is_id, new_id
 from rudi_platform.naming import platform_s3_key
@@ -264,6 +268,7 @@ def act_start(payload: dict) -> tuple[int, dict]:
     _log(
         "prospect.started", prospect=prospect_id, percent=record["progress"]["percent"]
     )
+    _notify("started", notify.started_mail, record, partial_key(prospect_id))
 
     steps = qn.applicable_steps(Q, record["answers"])
     return 201, {
@@ -272,6 +277,22 @@ def act_start(payload: dict) -> tuple[int, dict]:
         **_status(record),
         "next": _view(record, steps[1]) if len(steps) > 1 else None,
     }
+
+
+def _notify(kind: str, build, record: dict, key: str) -> None:
+    """Tell the team by e-mail (notify.py), after the record is safely stored. Never raises:
+    the person's save has succeeded whatever happens to the mail."""
+    try:
+        mail = build(Q, record, key)
+    except Exception as e:  # noqa: BLE001
+        _log(
+            "prospect.notify_failed",
+            prospect=record["id"],
+            kind=kind,
+            code=type(e).__name__,
+        )
+        return
+    notify.send(kind, record["id"], mail)
 
 
 def _complete(record: dict) -> None:
@@ -316,6 +337,7 @@ def act_save(payload: dict) -> tuple[int, dict]:
             _refresh(record, "complete", step["key"])
             _complete(record)
             _log("prospect.completed", prospect=prospect_id)
+            _notify("complete", notify.complete_mail, record, complete_key(prospect_id))
             return 200, {**_status(record), "complete": True, "next": None}
         _put(partial_key(prospect_id), record)
         _log("prospect.incomplete", prospect=prospect_id, step=open_step)

@@ -84,6 +84,25 @@ Both the folder and the file name say the state, and each record repeats it in `
 }
 ```
 
+## E-mail notifications
+
+The endpoint tells the team by e-mail (SES, eu-central-1; `services/prospect-intake/src/notify.py`),
+To `prospect_notify_to` with `prospect_notify_cc` in copy, from `prospect_mail_from`:
+
+| When | Subject | Body |
+|---|---|---|
+| A request's first step is saved (contact details and the contact agreement) | `New prospect started configuration - <name> \| <e-mail>` | The first step's answers, the request id and where it is stored |
+| The request is sent | `New Rudi clone REQUEST COMPLETE - <name> \| <e-mail>` | Every step's answers in one table (option labels, "—" for an open optional question), the request id, times and where it is stored |
+
+- Bots (honeypot, too fast), drafts and the steps in between send nothing.
+- Sent after the record is stored, and best-effort: a refused or slow mail is logged
+  (`prospect.notify_failed`) and never fails the person's save. The S3 record is the reference.
+- The addresses live in `deploy.local.json` (git-ignored), never in source. The sender must be
+  the SES identity `meetrudi-lambda-runner` may send as (`support@meetrudi.eu`, its
+  `ses:FromAddress` condition); another sender is refused by SES.
+- These mails carry the prospect's name, contact details and answers to our own mailboxes, by
+  design (decision #48); keep that mailbox provider EU-hosted under a DPA (CLAUDE.md §0.3).
+
 ## Putting it on the website
 
 - Upload `rudi-adoption-request.html` as it is, at any URL (e.g. `/en/request`). It carries its
@@ -112,7 +131,8 @@ misread. Tests: `python -m unittest discover -s services/prospect-intake/tests -
 The endpoint is public. It caps the body at 32 KB, drops submissions with the honeypot filled
 or a first step completed in under 1.5 s (answering as if they succeeded), validates every answer
 against the questionnaire, and refuses any step beyond the saved ones or a request without its
-token. Not yet: rate limiting or a CAPTCHA (add Cloudflare Turnstile or AWS WAF if spam
+token. Since every started request mails the team, a script posting fake starts would also fill
+that inbox. Not yet: rate limiting or a CAPTCHA (add Cloudflare Turnstile or AWS WAF if spam
 appears), and a reserved-concurrency cap, which needs the Lambda quota raise (USER-TODO #1)
 first. Until then a flood on this endpoint shares the account's 10 concurrent runs with CM's
 live services, as the consent intake does today.
