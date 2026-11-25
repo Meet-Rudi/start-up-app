@@ -206,3 +206,18 @@ its code can never write the live data bucket or read live Rudi's keys.
    Separate keys only separate quota when they come from separate accounts: Groq limits per
    **organisation**, OVH per **project**. `meetrudi-engine-turn` reads the two `rudi-*` keys
    through the existing `meetrudi-lambda-runner` grant on `meetrudi*` — no change to that role.
+
+## 9. Adoption request intake — remove a draft once it is sent (optional)
+
+`meetrudi-internal-prod-prospect-intake` (the website's request form) saves every step to
+`platform/prospects/partial/prs_….partial.json` and, when the request is sent, writes
+`platform/prospects/complete/prs_….complete.json`. To remove the partial at that moment it needs
+`s3:DeleteObject`, which `meetrudi-lambda-runner` does not have.
+
+Console → IAM → Roles → `meetrudi-lambda-runner` → its inline policy → Edit → add the statement in
+[`meetrudi-lambda-runner.prospects-add.json`](meetrudi-lambda-runner.prospects-add.json)
+(delete only below `platform/prospects/partial/` in `meetrudi-ai-data-949753869755`).
+
+Without it nothing breaks: the function overwrites the partial with the sent request
+(`"state": "complete"`), so a follow-up job that reads the state, or checks for the complete
+twin, never chases a request that was sent. It only leaves the extra file behind.

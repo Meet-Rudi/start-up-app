@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProspectDraftsRemovedOnceSent",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::meetrudi-ai-data-949753869755/platform/prospects/partial/*"
+    }
+  ]
+}

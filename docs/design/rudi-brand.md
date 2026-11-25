@@ -126,6 +126,7 @@ ivory footer. One petrol band and one butter band per page at most.
 | Tagline pill | Paper pill with a 1px apricot outline, slightly rotated, 12px, 0.08em tracking |
 | FAQ | `<details>` rows separated by petrol-15% hairlines, a `+` on the right, 18px question text |
 | Privacy points | Line icon in butter on petrol, small Manrope title, muted text below |
+| Icon badge | `.r-icon-badge`: a section's line icon in petrol on a 48px butter circle (40px on phones), left of the section's number and title; inline SVG, decorative (`aria-hidden`) |
 | Dark panel | A rounded-3xl (24px) outline panel inside a petrol band, items split by hairlines |
 
 **Forms** (the site has none; these extend the system):
@@ -138,6 +139,12 @@ ivory footer. One petrol band and one butter band per page at most.
 - Errors: `--danger` border plus a written message; never colour alone. Validate after the
   user has interacted (`:user-invalid`), not on page load.
 - Group long forms in numbered sections (`01`, `02`, …) with an eyebrow and a Manrope title.
+- **Forms in steps** (one section per screen, saved after each): a progress bar
+  (`.r-progress`, petrol on a stone track) always with words beside it ("Step 3 of 8 · 25%
+  saved"), and a step list (`.r-steps`) where saved steps carry a petrol tick and can be
+  revisited, the current step a butter mark, and later steps are muted. The primary button
+  says what happens ("Save and continue"); going back and "finish later" are text links.
+  Example: `web/adoption-request/`.
 
 ## 7. Imagery and icons
 

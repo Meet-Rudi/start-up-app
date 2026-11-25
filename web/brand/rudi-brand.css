@@ -773,3 +773,121 @@ input[type="range"] {
   font-size: 13px;
   color: var(--ink-muted);
 }
+
+/* --------------------------------------------------------------------- icon badge */
+/* A section's line icon (Lucide style, inline SVG, stroke 2) in petrol on a butter circle. */
+.r-icon-badge {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--butter);
+  color: var(--petrol);
+}
+.r-icon-badge svg {
+  width: 22px;
+  height: 22px;
+}
+@media (max-width: 479px) {
+  .r-icon-badge {
+    width: 40px;
+    height: 40px;
+  }
+  .r-icon-badge svg {
+    width: 19px;
+    height: 19px;
+  }
+}
+
+/* -------------------------------------------------------------- multi-step progress */
+/* A form in steps shows how far along it is: a petrol bar on a stone track, with the words
+   (step and percentage) beside it, never the bar alone. */
+.r-progress {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--stone);
+  overflow: hidden;
+}
+.r-progress__bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--petrol);
+  transition: width 0.4s ease;
+}
+/* The list of steps: saved (petrol tick), current (butter mark), still to come (muted). */
+.r-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.r-steps li + li {
+  border-top: 1px solid var(--hairline);
+}
+.r-steps__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: 400 14px/1.4 var(--font-body);
+  text-align: left;
+}
+button.r-steps__item {
+  cursor: pointer;
+}
+button.r-steps__item:hover .r-steps__label {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.r-steps__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--field-border);
+  border-radius: 50%;
+  background: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+}
+.r-steps__item.is-done .r-steps__mark {
+  border-color: var(--petrol);
+  background: var(--petrol);
+  color: var(--ivory);
+  font-size: 0;
+}
+.r-steps__item.is-done .r-steps__mark::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: var(--icon-check) center / contain no-repeat;
+  mask: var(--icon-check) center / contain no-repeat;
+  --icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}
+.r-steps__item[aria-current="step"] {
+  font-weight: 600;
+}
+.r-steps__item[aria-current="step"] .r-steps__mark {
+  border-color: var(--petrol);
+  background: var(--butter);
+  color: var(--petrol);
+}
+.r-steps__item.is-todo {
+  color: var(--ink-muted);
+}
+.r-steps__state {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}

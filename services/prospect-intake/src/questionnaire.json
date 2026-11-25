@@ -1,0 +1,344 @@
+{
+  "questionnaire": "rudi-adoption-request@1",
+  "form_version": "2026-11-25",
+  "languages": ["en"],
+  "steps": [
+    {
+      "key": "contact",
+      "icon": "id-card",
+      "title": "About you",
+      "intro": "Who should we talk to? We save your answers after every step, so you can stop and pick up where you left off.",
+      "fields": [
+        {"key": "organisation", "type": "text", "label": "Organisation name", "required": true,
+         "max_len": 120, "autocomplete": "organization", "error": "Tell us your organisation’s name."},
+        {"key": "contact_name", "type": "text", "label": "Your name", "required": true, "half": true,
+         "max_len": 120, "autocomplete": "name", "error": "Tell us your name."},
+        {"key": "contact_role", "type": "text", "label": "Your role", "required": true, "half": true,
+         "max_len": 120, "autocomplete": "organization-title", "placeholder": "e.g. programme lead",
+         "error": "Tell us your role."},
+        {"key": "contact_email", "type": "email", "label": "Work e-mail", "required": true, "half": true,
+         "max_len": 200, "autocomplete": "email",
+         "error": "Use an e-mail address like name@organisation.eu."},
+        {"key": "contact_phone", "type": "tel", "label": "Phone", "half": true, "max_len": 30,
+         "autocomplete": "tel", "error": "Use digits, spaces and a leading + only."},
+        {"key": "country", "type": "select", "label": "Country", "required": true,
+         "help": "Rudi runs in the EU only.", "placeholder": "Choose a country",
+         "error": "Choose a country.",
+         "options": [
+           {"value": "at", "label": "Austria"}, {"value": "be", "label": "Belgium"},
+           {"value": "bg", "label": "Bulgaria"}, {"value": "hr", "label": "Croatia"},
+           {"value": "cy", "label": "Cyprus"}, {"value": "cz", "label": "Czechia"},
+           {"value": "dk", "label": "Denmark"}, {"value": "ee", "label": "Estonia"},
+           {"value": "fi", "label": "Finland"}, {"value": "fr", "label": "France"},
+           {"value": "de", "label": "Germany"}, {"value": "gr", "label": "Greece"},
+           {"value": "hu", "label": "Hungary"}, {"value": "ie", "label": "Ireland"},
+           {"value": "it", "label": "Italy"}, {"value": "lv", "label": "Latvia"},
+           {"value": "lt", "label": "Lithuania"}, {"value": "lu", "label": "Luxembourg"},
+           {"value": "mt", "label": "Malta"}, {"value": "nl", "label": "Netherlands"},
+           {"value": "pl", "label": "Poland"}, {"value": "pt", "label": "Portugal"},
+           {"value": "ro", "label": "Romania"}, {"value": "sk", "label": "Slovakia"},
+           {"value": "si", "label": "Slovenia"}, {"value": "es", "label": "Spain"},
+           {"value": "se", "label": "Sweden"}, {"value": "other", "label": "Another country"}
+         ]},
+        {"key": "contact_agreement", "type": "agree", "required": true,
+         "label": "I agree to be contacted by the Rudi team if any crucial input is missing before my Rudi clone goes live.",
+         "link": {"label": "How we handle your details", "href": "https://meetrudi.eu/en/privacy"},
+         "error": "Please tick this, so we can get back to you about your request."}
+      ]
+    },
+    {
+      "key": "programme",
+      "icon": "users",
+      "title": "Your programme",
+      "intro": "Who you support, and what should happen between appointments.",
+      "fields": [
+        {"key": "organisation_kind", "type": "radio", "label": "What kind of organisation are you?",
+         "required": true, "cols": 2, "error": "Choose the closest match.",
+         "options": [
+           {"value": "clinic", "label": "Clinic or hospital"},
+           {"value": "practice", "label": "Dietitian or lifestyle practice"},
+           {"value": "programme", "label": "Training or coaching programme"},
+           {"value": "workplace", "label": "Workplace wellbeing"},
+           {"value": "insurer", "label": "Health insurer or mutuality"},
+           {"value": "other", "label": "Something else"}
+         ]},
+        {"key": "website", "type": "url", "label": "Website", "help": "So we can read up before we talk.",
+         "placeholder": "https://", "max_len": 200, "autocomplete": "url",
+         "error": "Use a full address, starting with https://"},
+        {"key": "purpose", "type": "textarea", "label": "What should Rudi help people do?", "required": true,
+         "min_len": 20, "max_len": 2000,
+         "help": "The plan they get from you, and what tends to slip between appointments. No details about real patients or participants.",
+         "placeholder": "e.g. Keep moving after cardiac rehab: short walks, the weekly class, and noticing when energy dips.",
+         "error": "A sentence or two is enough (at least 20 characters)."},
+        {"key": "audience", "type": "text", "label": "Who will talk to Rudi?", "required": true,
+         "max_len": 200, "placeholder": "e.g. adults who finished our 12-week programme",
+         "error": "Tell us who Rudi is for."},
+        {"key": "pilot_size", "type": "radio", "label": "How many people in a first pilot?", "required": true,
+         "cols": 4, "error": "Choose a rough size.",
+         "options": [
+           {"value": "25", "label": "Up to 25"}, {"value": "100", "label": "25 to 100"},
+           {"value": "500", "label": "100 to 500"}, {"value": "more", "label": "Over 500"}
+         ]},
+        {"key": "languages", "type": "checkbox", "label": "Languages Rudi should speak", "cols": 4,
+         "min_items": 1, "default": ["en"], "error": "Choose at least one language.",
+         "options": [
+           {"value": "en", "label": "English"}, {"value": "nl", "label": "Nederlands"},
+           {"value": "fr", "label": "Français"}, {"value": "de", "label": "Deutsch"},
+           {"value": "other", "label": "Another language"}
+         ]},
+        {"key": "languages_other", "type": "text", "label": "Which other languages?", "max_len": 200,
+         "show_if": {"field": "languages", "has": "other"}},
+        {"key": "start_when", "type": "radio", "label": "When would you like to start?", "cols": 4,
+         "options": [
+           {"value": "asap", "label": "As soon as possible"},
+           {"value": "quarter", "label": "Within three months"},
+           {"value": "later", "label": "Later on"},
+           {"value": "exploring", "label": "Just exploring"}
+         ]}
+      ]
+    },
+    {
+      "key": "channels",
+      "icon": "message-circle-more",
+      "title": "Where people reach Rudi",
+      "intro": "Choose one or more. You can add channels later.",
+      "fields": [
+        {"key": "channels", "type": "checkbox", "label": "Channels", "cols": 2, "min_items": 1,
+         "default": ["whatsapp"], "error": "Choose at least one channel.",
+         "options": [
+           {"value": "whatsapp", "label": "WhatsApp", "hint": "Check-ins in the app people already use."},
+           {"value": "voice", "label": "Phone calls", "hint": "A short spoken check-in at a time that suits them."},
+           {"value": "widget", "label": "Chat on your website", "hint": "A Rudi window on your own pages."},
+           {"value": "api", "label": "Your own app", "hint": "Through our API, inside your product."}
+         ]},
+        {"key": "wa_number", "type": "radio", "label": "Whose WhatsApp number?", "cols": 2, "required": true,
+         "default": "rudi", "show_if": {"field": "channels", "has": "whatsapp"},
+         "options": [
+           {"value": "rudi", "label": "A Rudi number", "hint": "Ready the soonest."},
+           {"value": "own", "label": "Our WhatsApp Business account", "hint": "Your name in the chat; takes longer to set up."}
+         ]},
+        {"key": "call_window", "type": "time_window", "label": "When may Rudi call?",
+         "from_label": "From", "to_label": "to", "default": {"from": "09:00", "to": "20:00"},
+         "help": "Rudi never calls at night, whatever you choose here.",
+         "error": "The end time must be later than the start time.",
+         "show_if": {"field": "channels", "has": "voice"}},
+        {"key": "api_note", "type": "note",
+         "label": "We send API documentation and a test key once the pilot is agreed.",
+         "show_if": {"field": "channels", "has": "api"}}
+      ]
+    },
+    {
+      "key": "skills",
+      "icon": "list-checks",
+      "title": "What Rudi does",
+      "intro": "Pick what your Rudi should be good at. Each one is a tested skill.",
+      "fields": [
+        {"key": "skills", "type": "checkbox", "label": "Skills", "cols": 2, "min_items": 1,
+         "default": ["goal-setting", "check-in-follow-up", "language-mirroring", "learn-about-rudi"],
+         "error": "Choose at least one.",
+         "options": [
+           {"value": "goal-setting", "label": "Set goals together", "hint": "Turns your plan into small, personal goals."},
+           {"value": "check-in-follow-up", "label": "Check in between appointments", "hint": "Asks how it went and helps pick things up again."},
+           {"value": "commitment-securing", "label": "Turn intentions into commitments", "hint": "Agrees a concrete next step and a time for it."},
+           {"value": "check-in-promise", "label": "Keep his promises", "hint": "Comes back exactly when he said he would."},
+           {"value": "language-mirroring", "label": "Speak each person’s language", "hint": "Answers in the language they write or speak."},
+           {"value": "learn-about-rudi", "label": "Explain what Rudi is, and isn’t", "hint": "Honest about being an AI, and about his limits."}
+         ]},
+        {"key": "missing_skills", "type": "textarea", "label": "Something Rudi can’t do yet?", "max_len": 2000,
+         "help": "Tell us. Our team reviews every request; a new ability is built and checked by people before any Rudi uses it.",
+         "placeholder": "e.g. Remind people of their training schedule from our weekly plan."}
+      ]
+    },
+    {
+      "key": "persona",
+      "icon": "smile",
+      "title": "Rudi’s personality",
+      "intro": "How your Rudi sounds. You can fine-tune this together with us later.",
+      "fields": [
+        {"key": "persona_name", "type": "text", "label": "The name people will see", "required": true,
+         "max_len": 24, "default": "Rudi", "help": "Most organisations keep “Rudi”.",
+         "error": "Give your Rudi a name."},
+        {"key": "tone_energy", "type": "scale", "label": "Energy", "min": 1, "max": 5, "default": 3,
+         "ends": ["Calm", "Upbeat"]},
+        {"key": "tone_directness", "type": "scale", "label": "Style", "min": 1, "max": 5, "default": 2,
+         "ends": ["Gentle", "Direct"]},
+        {"key": "tone_structure", "type": "scale", "label": "Approach", "min": 1, "max": 5, "default": 3,
+         "ends": ["Flexible", "Structured"]},
+        {"key": "cadence", "type": "radio", "label": "How often should Rudi check in?", "required": true,
+         "cols": 3, "default": "2-3-weekly",
+         "options": [
+           {"value": "weekly", "label": "About once a week"},
+           {"value": "2-3-weekly", "label": "Two or three times a week"},
+           {"value": "most-days", "label": "Most days"}
+         ]}
+      ]
+    },
+    {
+      "key": "oversight",
+      "icon": "sliders-horizontal",
+      "title": "Staying in control",
+      "intro": "Your team gets a cockpit: one place to follow your Rudi, step in and change course. How closely do you want to be involved?",
+      "fields": [
+        {"key": "involvement", "type": "radio", "label": "How involved should your team be?", "required": true,
+         "cols": 3, "error": "Choose the closest match.",
+         "options": [
+           {"value": "light", "label": "Rudi runs, we keep an eye", "hint": "Summaries and alerts. We look in when something needs us."},
+           {"value": "active", "label": "We follow along and step in", "hint": "We read conversations when we want and can take over a chat."},
+           {"value": "approve", "label": "We approve before Rudi sends", "hint": "A person on our team checks some messages first."}
+         ]},
+        {"key": "approve_scope", "type": "radio", "label": "Which messages need approval first?", "cols": 2,
+         "required": true, "error": "Choose which messages to approve.",
+         "help": "Approval slows replies down: people wait until someone on your team is available.",
+         "show_if": {"field": "involvement", "is": "approve"},
+         "options": [
+           {"value": "first", "label": "The first message to each person"},
+           {"value": "proactive", "label": "Check-ins Rudi starts himself"},
+           {"value": "sensitive", "label": "Replies on sensitive topics"},
+           {"value": "all", "label": "Every message"}
+         ]},
+        {"key": "step_in", "type": "checkbox", "label": "What should your team be able to do?", "cols": 2,
+         "help": "Choose all you might need. We switch on only what your pilot uses.",
+         "options": [
+           {"value": "read_conversations", "label": "Read conversations", "hint": "With a clear notice to your people that your team can see the chat."},
+           {"value": "take_over", "label": "Take over a conversation", "hint": "Write to someone yourself; Rudi waits until you hand back."},
+           {"value": "correct_reply", "label": "Correct or overrule Rudi", "hint": "Flag a reply, send a correction and teach Rudi for next time."},
+           {"value": "pause_person", "label": "Pause Rudi for one person", "hint": "For a holiday, a hospital stay or on request."},
+           {"value": "message_people", "label": "Send a message through Rudi", "hint": "To one person or a group, in their Rudi chat."},
+           {"value": "tune_settings", "label": "Change settings yourself", "hint": "Tone, check-in rhythm and quiet hours."}
+         ]},
+        {"key": "coverage", "type": "radio", "label": "When can someone on your team step in?", "required": true,
+         "cols": 2, "error": "Choose the closest match.",
+         "options": [
+           {"value": "office", "label": "Office hours, on working days"},
+           {"value": "extended", "label": "Extended hours", "hint": "Including some evenings or weekends."},
+           {"value": "always", "label": "Around the clock"},
+           {"value": "none", "label": "Unfortunately, we have no capacity to stand by", "hint": "Rudi keeps alerts for when someone is back."}
+         ]},
+        {"key": "alerts", "type": "checkbox", "label": "When should Rudi alert your team?", "cols": 2,
+         "help": "When health or safety is at stake, Rudi always points people to their clinician or emergency services, and tells you.",
+         "default": ["safety"],
+         "options": [
+           {"value": "safety", "label": "A safety concern", "hint": "Always on.", "locked": true},
+           {"value": "asks_person", "label": "Someone asks for a person"},
+           {"value": "medical_question", "label": "Someone asks a medical question", "hint": "Rudi doesn’t answer it; he points them back to you."},
+           {"value": "quiet", "label": "Someone has gone quiet", "hint": "No reply for a while."},
+           {"value": "unhappy", "label": "Someone is unhappy with Rudi"},
+           {"value": "weekly", "label": "A weekly summary"}
+         ]},
+        {"key": "alert_route", "type": "checkbox", "label": "How should alerts reach you?", "cols": 4,
+         "default": ["cockpit", "email"],
+         "options": [
+           {"value": "cockpit", "label": "In the cockpit"},
+           {"value": "email", "label": "E-mail"},
+           {"value": "chat_tool", "label": "Teams or Slack"},
+           {"value": "webhook", "label": "Our own system"}
+         ]}
+      ]
+    },
+    {
+      "key": "insights",
+      "icon": "gauge",
+      "title": "What you see",
+      "intro": "What would show you that your Rudi works, and for whom?",
+      "fields": [
+        {"key": "dashboards", "type": "checkbox", "label": "What should the cockpit show?", "cols": 2,
+         "help": "Numbers are counted across people. Themes never show one person’s words.",
+         "options": [
+           {"value": "engagement", "label": "Who is active", "hint": "People reached, replies and drop-off."},
+           {"value": "checkins", "label": "Check-ins", "hint": "Sent, answered and followed up."},
+           {"value": "goals", "label": "Goals and follow-through", "hint": "Goals set and kept, week by week."},
+           {"value": "attention", "label": "Who needs attention", "hint": "People who went quiet or slipped."},
+           {"value": "topics", "label": "What people talk about", "hint": "Themes across all conversations."},
+           {"value": "satisfaction", "label": "How people rate Rudi", "hint": "Short feedback after check-ins."},
+           {"value": "safety", "label": "Safety events", "hint": "Alerts and how they were handled."},
+           {"value": "usage", "label": "Usage and costs", "hint": "Conversations, minutes and spend."}
+         ]},
+        {"key": "reporting", "type": "checkbox", "label": "How do you want the numbers?", "cols": 3,
+         "default": ["cockpit"],
+         "options": [
+           {"value": "cockpit", "label": "In the cockpit"},
+           {"value": "monthly_report", "label": "A monthly report by e-mail"},
+           {"value": "export", "label": "Exports for our own tools", "hint": "CSV or API."}
+         ]},
+        {"key": "team_size", "type": "radio", "label": "How many people on your team will use the cockpit?",
+         "required": true, "cols": 4, "error": "Choose a rough number.",
+         "options": [
+           {"value": "1", "label": "Just me"}, {"value": "2-5", "label": "2 to 5"},
+           {"value": "6-20", "label": "6 to 20"}, {"value": "more", "label": "More than 20"}
+         ]},
+        {"key": "team_roles", "type": "checkbox", "label": "Who are they?", "cols": 2,
+         "options": [
+           {"value": "lead", "label": "Programme lead", "hint": "Settings and reports."},
+           {"value": "staff", "label": "Coaches or care staff", "hint": "Follow people and step in."},
+           {"value": "data", "label": "Data or quality team", "hint": "Reports and exports."},
+           {"value": "it", "label": "IT", "hint": "Connections and access."}
+         ]},
+        {"key": "cockpit_wishes", "type": "textarea", "label": "Anything else you’d want to see or control?",
+         "max_len": 2000}
+      ]
+    },
+    {
+      "key": "send",
+      "icon": "send",
+      "title": "Set-up, and send",
+      "intro": "Nearly there. A few last details, then your request is on its way.",
+      "fields": [
+        {"key": "material", "type": "radio", "label": "Do you have material Rudi should learn from?", "cols": 3,
+         "help": "Programme descriptions, schedules, plans or guidelines. We send you a secure upload link after this request. Leave out personal data about patients or participants.",
+         "options": [
+           {"value": "yes", "label": "Yes, we have material"},
+           {"value": "later", "label": "Not yet"},
+           {"value": "no", "label": "No"}
+         ]},
+        {"key": "bring_your_own", "type": "group", "label": "Bringing your own AI or tools?",
+         "summary": "Optional. Most organisations don’t.",
+         "help": "By default Rudi supplies and runs everything: the AI models, their use and the hosting in the EU. There is nothing to arrange on your side. If you already have something you’d like to use, tell us here.",
+         "fields": [
+           {"key": "ai_supply", "type": "radio", "label": "The AI behind your Rudi", "cols": 2, "default": "rudi",
+            "options": [
+              {"value": "rudi", "label": "Rudi supplies it", "hint": "Included. Nothing to arrange."},
+              {"value": "own", "label": "We’d like to use our own subscription", "hint": "Our own account or key with an AI provider."}
+            ]},
+           {"key": "ai_providers", "type": "checkbox", "label": "Which provider?", "cols": 3,
+            "show_if": {"field": "ai_supply", "is": "own"},
+            "options": [
+              {"value": "azure_openai", "label": "Azure OpenAI"},
+              {"value": "openai", "label": "OpenAI"},
+              {"value": "anthropic", "label": "Anthropic"},
+              {"value": "google", "label": "Google"},
+              {"value": "mistral", "label": "Mistral"},
+              {"value": "other", "label": "Another one"}
+            ]},
+           {"key": "ai_eu_hosted", "type": "radio", "label": "Is it hosted in the EU, under a data processing agreement?",
+            "cols": 3, "show_if": {"field": "ai_supply", "is": "own"},
+            "help": "Rudi only uses AI services that keep data in the EU. We check yours with you.",
+            "options": [
+              {"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"}, {"value": "unsure", "label": "Not sure"}
+            ]},
+           {"key": "own_services", "type": "checkbox", "label": "Anything else Rudi should work with?", "cols": 2,
+            "options": [
+              {"value": "whatsapp_account", "label": "Our WhatsApp Business or Twilio account"},
+              {"value": "client_system", "label": "Our client or patient system"},
+              {"value": "team_sign_in", "label": "Our team’s sign-in (SSO)"},
+              {"value": "reporting_tool", "label": "Our reporting or BI tool"}
+            ]},
+           {"key": "end_user_login", "type": "radio", "label": "Should Rudi trust your own sign-in for your app or website?",
+            "cols": 3, "show_if": {"any": [{"field": "channels", "has": "api"}, {"field": "channels", "has": "widget"}]},
+            "help": "Then people talk to Rudi without signing in twice.",
+            "options": [
+              {"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"}, {"value": "unsure", "label": "Not sure"}
+            ]},
+           {"key": "own_services_note", "type": "textarea", "label": "Tell us more", "max_len": 2000,
+            "placeholder": "e.g. We have an Azure OpenAI contract in West Europe and use Microsoft Teams."}
+         ]},
+        {"key": "dpa", "type": "agree", "required": true,
+         "label": "We will sign a data processing agreement with Rudi. All data stays in the EU.",
+         "error": "Please confirm to send your request."},
+        {"key": "scope", "type": "agree", "required": true,
+         "label": "We understand Rudi supports follow-through. He doesn’t diagnose, prescribe or replace professional care.",
+         "error": "Please confirm to send your request."},
+        {"key": "updates", "type": "check", "label": "Keep me posted about Rudi for organisations."}
+      ]
+    }
+  ]
+}

@@ -13,6 +13,8 @@ Components:
                                           (needs `whatsapp` deployed first, for meetrudi-engine-turn)
     db-migrate -> stack meetrudi-internal-prod-db-migrate : the platform database's migration
                                           runner (then: python db/migrate.py plan)
+    prospect-intake -> stack meetrudi-internal-prod-prospect-intake : the adoption request
+                                          form's endpoint; rebuilds web/adoption-request's page
 
 Runs `sam build` (where needed) + `sam deploy` with every flag pre-filled. No manual steps.
 Deploy `base` once before `ask-ai`.
@@ -113,6 +115,19 @@ COMPONENTS = {
         "stack": "meetrudi-registration",
         "template": "services/registration/template.yaml",
         "build": True,   # consent intake endpoint (CM pilot form)
+    },
+    # The adoption request form's endpoint (web/adoption-request). After the deploy, the
+    # self-contained page is rebuilt with this endpoint's URL in it.
+    "prospect-intake": {
+        "stack": "meetrudi-internal-prod-prospect-intake",
+        "template": "services/prospect-intake/template.yaml",
+        "build": True,
+        "prebuild": "services/prospect-intake/build_layer.py",
+        "params": {
+            "Release": {"from_git": True},
+            # The site that hosts the form, e.g. https://meetrudi.eu ("*" when unset).
+            "AllowOrigin": {"from_config": "prospect_form_origin"},
+        },
     },
     "tts": {
         "stack": "meetrudi-tts",
@@ -434,6 +449,15 @@ def main():
         print("     secrets meetrudi/arena/rudi-groq, meetrudi/arena/rudi-ovh   (Rudi's turns fail without them)")
         print("     secret meetrudi/arena/sim-ovh      (tester/judge fallback after the Groq free tier)")
         print(">> Lambda concurrency: the account allows 10 in total; request 1000 (docs/training-arena.md §7.3).")
+    elif name == "prospect-intake":
+        url = _stack_output(comp["stack"], "IntakeUrl")
+        print("Intake URL  :", url)
+        print("Records     : s3://%s/platform/prospects/{partial,complete}/"
+              % _stack_output("meetrudi-base", "DataBucketName"))
+        if url:
+            _run([sys.executable, "web/adoption-request/build.py", "--api", url])
+        print(">> Optional, console-only: infra/iam/meetrudi-lambda-runner.prospects-add.json lets")
+        print("   the function delete a partial once the request is sent (USER-TODO #5).")
     elif name == "registration":
         url = _stack_output("meetrudi-registration", "ConsentIntakeUrl")
         print("Consent intake URL:", url)

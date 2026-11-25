@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MEET_RUDI adoption request intake: the public Function URL behind the request form on the
+  company website (web/adoption-request). Saves every step of an organisation's request to the
+  EU data bucket under platform/prospects/partial/, and moves it to platform/prospects/complete/
+  when it is sent. Uses the console-made meetrudi-lambda-runner role; no IAM resources here
+  (the platform boundary does not exist yet, infra/iam/README.md §0).
+
+Parameters:
+  AllowOrigin:
+    Type: String
+    Default: "*"
+    Description: >
+      CORS origin of the page that hosts the form. "*" while it is tested from a local file;
+      set prospect_form_origin in deploy.local.json (e.g. https://meetrudi.eu) for production.
+  Release:
+    Type: String
+    Default: ""
+    Description: Git commit of this deploy, logged with every event.
+
+Resources:
+
+  # packages/rudi_platform (ids and S3 key builders), assembled by build_layer.py.
+  DepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: meetrudi-internal-prod-prospect-intake-deps
+      Description: The platform core (ids, naming) for the adoption request intake.
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  IntakeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/meetrudi-internal-prod-prospect-intake
+      RetentionInDays: 30
+
+  IntakeFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: IntakeLogGroup
+    Properties:
+      FunctionName: meetrudi-internal-prod-prospect-intake
+      Description: Public adoption request form endpoint (open, start, save, load, resume).
+      Runtime: python3.12
+      Handler: handler.handler
+      CodeUri: src/
+      Timeout: 10
+      MemorySize: 256
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/meetrudi-lambda-runner"
+      Layers:
+        - !Ref DepsLayer
+      Environment:
+        Variables:
+          DATA_BUCKET: !ImportValue meetrudi-DataBucketName
+          RELEASE: !Ref Release
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref AllowOrigin]
+          AllowMethods: ["POST"]   # preflight (OPTIONS) is handled by the Function URL
+          AllowHeaders: ["content-type"]
+          MaxAge: 600
+      Tags:
+        env: prod
+        service: prospect-intake
+        cost-center: platform
+
+Outputs:
+  IntakeUrl:
+    Description: The form's endpoint; build.py writes it into the self-contained page.
+    Value: !GetAtt IntakeFunctionUrl.FunctionUrl

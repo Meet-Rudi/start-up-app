@@ -3,7 +3,7 @@
 > Things Claude cannot do with the `rudi-deployer` profile (console-only IAM, secrets, quotas,
 > vendor accounts). None blocks work today. Each item says **what it blocks**, so it gets done
 > when it starts standing in the way. Claude adds new items here instead of stopping work, and
-> ticks them only after you confirm. Last updated: 2026-11-10.
+> ticks them only after you confirm. Last updated: 2026-11-24.
 
 ## Open
 
@@ -53,6 +53,15 @@
   Billing → upgrade to the Developer (pay-as-you-go) tier. The arena's price note for
   gpt-oss-120b is USD 0.15 in / 0.60 out per million tokens: about a cent per call. Check that
   Groq's terms and DPA still fit (Prime Directive §0.1, pseudonymized payloads only).
+
+### 5. Let the request form remove a draft once it is sent (optional)
+
+- **Blocks:** nothing. Without it, a sent adoption request leaves its partial file behind in
+  `platform/prospects/partial/`, marked `"state": "complete"` (the follow-up rule skips it).
+- **How:** [infra/iam/README.md](infra/iam/README.md) §9: add the one statement in
+  [`meetrudi-lambda-runner.prospects-add.json`](infra/iam/meetrudi-lambda-runner.prospects-add.json)
+  to the `meetrudi-lambda-runner` inline policy (delete only below
+  `platform/prospects/partial/`).
 
 ## Later (not needed before Phase 2)
 

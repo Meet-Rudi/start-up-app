@@ -37,6 +37,7 @@ Rules:
 
 | Prefix | Category (`Cat.`) | Names |
 |---|---|---|
+| `prs_` | `PROSPECT` | An organisation's request to adopt Rudi, before it is a tenant (the public request form) |
 | `ten_` | `TENANT` | A customer organisation on the platform |
 | `cel_` | `CELL` | One deployed copy of the runtime stacks (pooled or dedicated) |
 | `cln_` | `CLONE` | A tenant's configured conversational agent |
@@ -139,7 +140,9 @@ Tenants are kept apart in a way a person browsing a bucket can read:
 - **Every S3 key that holds a tenant's data starts with `tenants/{tenant-slug}/`**, in every
   bucket, tenant or internal: `tenants/cm/conversations/cnv_…/snapshot.json`. Nothing of a
   tenant's is stored outside its folder. Objects that belong to no tenant start with
-  `platform/`.
+  `platform/`: an adoption request from an organisation that is not a tenant yet is
+  `platform/prospects/partial/prs_….partial.json` until it is sent, then
+  `platform/prospects/complete/prs_….complete.json`.
 - Build keys with `naming.tenant_s3_key(slug, …)` or `naming.platform_s3_key(…)`, never by hand.
   They refuse empty, `.` and `..` segments, so a key cannot climb out of its folder.
 - The folder is the tenant's **slug** (`registry.tenants.slug`, e.g. `cm`), not its `ten_` id,

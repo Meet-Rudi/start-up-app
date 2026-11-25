@@ -42,6 +42,7 @@ class Cat(str, Enum):
     """Id categories. The value is the prefix; the member name is what code uses."""
 
     # Tenancy and registry
+    PROSPECT = "prs"
     TENANT = "ten"
     CELL = "cel"
     CLONE = "cln"
@@ -95,6 +96,7 @@ class Cat(str, Enum):
 
 
 DESCRIPTIONS: dict[Cat, str] = {
+    Cat.PROSPECT: "An organisation's request to adopt Rudi, before it is a tenant",
     Cat.TENANT: "A customer organisation on the platform",
     Cat.CELL: "One deployed copy of the runtime stacks (pooled or dedicated)",
     Cat.CLONE: "A tenant's configured conversational agent",
